@@ -10,7 +10,7 @@ authors = [
 license = "BSD-3-Clause"
 repository = "https://github.com/cloudflare/boringtun"
 documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
-edition = "2018"
+edition = "2021"
 
 [features]
 default = []
@@ -44,11 +44,17 @@ jni = { version = "0.19.0", optional = true }
 mock_instant = { version = "0.3", optional = true }
 socket2 = { version = "0.4.7", features = ["all"], optional = true }
 thiserror = { version = "1", optional = true }
+tokio = { version = "1.43.0", features = ["full"] }
+eyre = "*" # TODO
+log = "*" # TODO
+typed-builder = "0.20.0"
+tun = { version = "0.7", features = ["async"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.25", default-features = false, features = [
     "time",
     "user",
+	"socket",
 ] }
 
 [dev-dependencies]

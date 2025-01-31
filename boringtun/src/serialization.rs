@@ -1,4 +1,4 @@
-pub(crate) struct KeyBytes(pub [u8; 32]);
+pub struct KeyBytes(pub [u8; 32]);
 
 impl std::str::FromStr for KeyBytes {
     type Err = &'static str;
@@ -29,5 +29,17 @@ impl std::str::FromStr for KeyBytes {
         }
 
         Ok(KeyBytes(internal))
+    }
+}
+
+impl std::fmt::Debug for KeyBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("KeyBytes").field(&..).finish()
+    }
+}
+
+impl From<[u8; 32]> for KeyBytes {
+    fn from(bytes: [u8; 32]) -> Self {
+        KeyBytes(bytes)
     }
 }

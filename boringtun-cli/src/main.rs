@@ -25,7 +25,8 @@ fn check_tun_name(_v: String) -> Result<(), String> {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let matches = Command::new("boringtun")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Vlad Krasnov <vlad@cloudflare.com>")
@@ -75,9 +76,9 @@ fn main() {
                 .long("disable-drop-privileges")
                 .env("WG_SUDO")
                 .help("Do not drop sudo privileges"),
-            Arg::new("disable-connected-udp")
-                .long("disable-connected-udp")
-                .help("Disable connected UDP sockets to each peer"),
+            //Arg::new("disable-connected-udp")
+            //    .long("disable-connected-udp")
+            //    .help("Disable connected UDP sockets to each peer"),
             #[cfg(target_os = "linux")]
             Arg::new("disable-multi-queue")
                 .long("disable-multi-queue")
@@ -131,9 +132,9 @@ fn main() {
             });
 
         match daemonize.start() {
-            Ok(_) => tracing::info!("BoringTun started successfully"),
+            Ok(_) => log::info!("BoringTun started successfully"),
             Err(e) => {
-                tracing::error!(error = ?e);
+                log::error!("error = {e:?}");
                 exit(1);
             }
         }
@@ -147,17 +148,17 @@ fn main() {
     let config = DeviceConfig {
         n_threads,
         #[cfg(target_os = "linux")]
-        uapi_fd,
-        use_connected_socket: !matches.is_present("disable-connected-udp"),
+        api: None, // TODO
+        //use_connected_socket: !matches.is_present("disable-connected-udp"),
         #[cfg(target_os = "linux")]
         use_multi_queue: !matches.is_present("disable-multi-queue"),
     };
 
-    let mut device_handle: DeviceHandle = match DeviceHandle::new(tun_name, config) {
+    let _device_handle: DeviceHandle = match DeviceHandle::new(tun_name, config).await {
         Ok(d) => d,
         Err(e) => {
             // Notify parent that tunnel initialization failed
-            tracing::error!(message = "Failed to initialize tunnel", error=?e);
+            log::error!("Failed to initialize tunnel: {e:?}");
             sock1.send(&[0]).unwrap();
             exit(1);
         }
@@ -165,7 +166,7 @@ fn main() {
 
     if !matches.is_present("disable-drop-privileges") {
         if let Err(e) = drop_privileges() {
-            tracing::error!(message = "Failed to drop privileges", error = ?e);
+            log::error!("Failed to drop privileges: {e:?}");
             sock1.send(&[0]).unwrap();
             exit(1);
         }
@@ -175,7 +176,8 @@ fn main() {
     sock1.send(&[1]).unwrap();
     drop(sock1);
 
-    tracing::info!("BoringTun started successfully");
+    log::info!("BoringTun started successfully");
 
-    device_handle.wait();
+    // TODO: abort somehow
+    tokio::time::sleep(tokio::time::Duration::from_secs(1000)).await;
 }
