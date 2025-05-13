@@ -678,8 +678,13 @@ impl Device {
             }
         });
 
+        let mut buf_count = 0;
         loop {
-            let mut buf = buf_rx.try_recv().unwrap_or_else(|_| datagram_buffer());
+            let mut buf = buf_rx.try_recv().unwrap_or_else(|_| {
+                buf_count += 1;
+                log::info!("buf_count={buf_count}");
+                datagram_buffer()
+            });
 
             // Read packets from the socket.
             let (packet_len, addr) = udp.recv_from(&mut buf[..]).await.map_err(|e| {
