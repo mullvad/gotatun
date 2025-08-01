@@ -26,6 +26,7 @@ impl UdpSend for super::UdpSocket {
     type SendManyBuf = SendmmsgBuf;
 
     async fn send_to(&self, packet: Packet, target: SocketAddr) -> io::Result<()> {
+        log::debug!("send_to {target}");
         tokio::net::UdpSocket::send_to(&self.inner, &packet, target).await?;
         Ok(())
     }
@@ -43,6 +44,7 @@ impl UdpSend for super::UdpSocket {
         buf.targets.clear();
         packets
             .iter()
+            .inspect(|(_, target)| log::debug!("send_many_to {target}"))
             .map(|(_packet, target)| Some(SockaddrStorage::from(*target)))
             .for_each(|target| buf.targets.push(target));
 

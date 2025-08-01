@@ -219,6 +219,9 @@ impl UdpTransportFactory for UdpSocketFactory {
             udp_v6.set_fwmark(mark)?;
         }
 
+        log::debug!("bound to {}", udp_v4.local_addr().unwrap());
+        log::debug!("bound to {}", udp_v6.local_addr().unwrap());
+
         Ok(((udp_v4.clone(), udp_v4), (udp_v6.clone(), udp_v6)))
     }
 }

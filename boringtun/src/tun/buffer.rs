@@ -73,6 +73,7 @@ impl<I: IpRecv> BufferedIpRecv<I> {
                     Ok(packets) => {
                         for packet in packets {
                             if tx.send(packet).await.is_err() {
+                                log::error!("wot");
                                 return;
                             }
                         }
@@ -101,6 +102,7 @@ impl<I: IpRecv> IpRecv for BufferedIpRecv<I> {
         _pool: &mut PacketBufPool,
     ) -> io::Result<impl Iterator<Item = Packet<Ip>> + 'a> {
         let max_n = self.rx.capacity();
+        debug_assert_ne!(max_n, 0);
         let n = self.rx.recv_many(&mut self.rx_packet_buf, max_n).await;
         if n == 0 {
             // Channel is closed
