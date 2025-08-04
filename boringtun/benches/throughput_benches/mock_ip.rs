@@ -10,13 +10,20 @@ use zerocopy::{FromBytes, IntoBytes};
 /// An [IpSend] that will only allow a packet to be sent if [MockIpSend::wait_for] is called.
 #[derive(Clone)]
 pub struct MockIpSend {
-    pub received: Arc<Semaphore>,
-    pub allow_receive: Arc<Semaphore>,
+    /// Number of packets that has been sent on this [IpSend].
+    pub packets_sent: Arc<Semaphore>,
 }
 
 /// An [IpRecv] that always returns the same packet.
+#[derive(Clone)]
 pub struct MockIpRecv {
-    pub mock_packet: Packet<Ipv4<Udp<[u8]>>>,
+    /// This controls how many packets are received.
+    ///
+    /// Calling [MockIpRecv::recv] will decrement this semaphore.
+    /// Calling [MockIpRecv::add_packets] will increment it.
+    pub receive_packets: Arc<Semaphore>,
+
+    mock_packet: Arc<Packet<Ipv4<Udp<[u8]>>>>,
 }
 
 /// An [IpRecv] that does nothing.
@@ -28,8 +35,7 @@ pub struct NullIpRecv {}
 
 impl IpSend for MockIpSend {
     async fn send(&self, packet: Packet<Ip>) -> io::Result<()> {
-        self.allow_receive.acquire().await.unwrap().forget();
-        self.received.add_permits(1);
+        self.packets_sent.add_permits(1);
 
         let _ = packet;
 
@@ -42,14 +48,14 @@ impl IpRecv for MockIpRecv {
         &'a mut self,
         pool: &mut PacketBufPool,
     ) -> io::Result<impl Iterator<Item = Packet<Ip>> + Send + 'a> {
+        self.receive_packets.acquire().await.unwrap().forget();
+
         let mut packet = pool.get();
         let mock_packet_bytes = self.mock_packet.deref().as_bytes();
         packet.truncate(mock_packet_bytes.len());
         packet.copy_from_slice(mock_packet_bytes);
 
         let packet = packet.try_into_ip().unwrap();
-
-        //log::debug!("mock_ip_recv");
 
         Ok(iter::once(packet))
     }
@@ -74,14 +80,13 @@ impl IpRecv for NullIpRecv {
 impl MockIpSend {
     pub fn new() -> Self {
         Self {
-            received: Arc::new(Semaphore::new(0)),
-            allow_receive: Arc::new(Semaphore::new(0)),
+            packets_sent: Arc::new(Semaphore::new(0)),
         }
     }
+
     /// Wait until `count` packets have been sent.
     pub async fn wait_for(&mut self, count: usize) {
-        self.allow_receive.add_permits(count);
-        self.received
+        self.packets_sent
             .acquire_many(count as u32)
             .await
             .unwrap()
@@ -90,10 +95,11 @@ impl MockIpSend {
 }
 
 impl MockIpRecv {
-    pub fn new() -> Self {
-        let payload = *b"hello there!";
-        let udp_len = (UdpHeader::LEN + payload.len()) as u16;
-        let packet = Ipv4 {
+    pub fn new(payload_len: usize) -> Self {
+        let payload = b"Hello there! General Kenobi, you are a bold one. ";
+
+        let udp_len = (UdpHeader::LEN + payload_len) as u16;
+        let headers = Ipv4 {
             header: Ipv4Header::new_for_length(
                 Ipv4Addr::new(1, 2, 3, 4),
                 Ipv4Addr::new(4, 3, 2, 1),
@@ -107,14 +113,32 @@ impl MockIpRecv {
                     length: udp_len.into(),
                     checksum: 0.into(), // not relevant for benchmarking
                 },
-                payload,
+                payload: (),
             },
         };
 
-        let packet = Ipv4::<Udp<[u8]>>::ref_from_bytes(packet.as_bytes()).unwrap();
+        let mut packet = headers.as_bytes().to_vec();
+        packet.extend(
+            iter::repeat(payload.into_iter())
+                .flatten()
+                .take(payload_len),
+        );
 
-        let mock_packet = Packet::copy_from(packet);
+        let packet = Ipv4::<Udp<[u8]>>::ref_from_bytes(&packet[..]).unwrap();
 
-        Self { mock_packet }
+        let mock_packet = Arc::new(Packet::copy_from(packet));
+
+        Self {
+            mock_packet,
+            receive_packets: Arc::new(Semaphore::new(0)),
+        }
+    }
+
+    /// Trigger `count` number of packets to be received on this [IpRecv].
+    ///
+    /// Think of this as "sending" a packet to a TUN device, the packet will be "received" by
+    /// the wireguard client.
+    pub fn add_packets(&self, count: usize) {
+        self.receive_packets.add_permits(count);
     }
 }
