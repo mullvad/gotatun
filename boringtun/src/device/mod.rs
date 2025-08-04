@@ -747,12 +747,13 @@ impl<T: DeviceTransports> Device<T> {
             Arc::clone(&device.tun_rx)
         };
 
-        let mut buffered_tun_recv =
-            BufferedIpRecv::new(MAX_PACKET_BUFS, PacketBufPool::new(MAX_PACKET_BUFS), tun);
+        //let mut buffered_tun_recv =
+        //    BufferedIpRecv::new(MAX_PACKET_BUFS, PacketBufPool::new(MAX_PACKET_BUFS), tun);
 
         let encapsulate_task = Task::spawn("encapsulate", async move {
+            let mut tun = tun.try_lock().expect("haha");
             loop {
-                let packets = match buffered_tun_recv.recv(&mut packet_pool).await {
+                let packets = match tun.recv(&mut packet_pool).await {
                     Ok(packets) => packets,
                     Err(e) => {
                         log::error!("Unexpected error on tun interface: {:?}", e);
