@@ -3,22 +3,26 @@ use nix::sys::socket::{ControlMessage, MsgFlags, MultiHeaders, SockaddrIn, Socka
 use nix::sys::socket::{setsockopt, sockopt};
 use std::{
     io::{self, IoSlice, IoSliceMut},
-    net::SocketAddr,
-    ops::Deref,
+    net::{IpAddr, SocketAddr},
     os::fd::AsRawFd,
 };
 use tokio::io::Interest;
 
 use crate::{
-    packet::{self, Packet},
+    packet::{Ipv4Header, Packet, Udp},
     udp::{UdpRecv, UdpSend},
 };
 
 use super::UdpTransport;
 
 const MAX_PACKET_RECV_COUNT: usize = 100;
+
 // At most 64 segments can be sent at a time (https://man7.org/linux/man-pages/man7/udp.7.html)
 const MAX_PACKET_SEND_COUNT: usize = 64;
+
+// Maximum length of data passed to `sendmsg` and friends. Exceeding it results in EMSGSIZE.
+const MAX_IPV4_PAYLOAD_LEN: usize = Udp::MAX_PAYLOAD_LEN - Ipv4Header::LEN;
+const MAX_IPV6_PAYLOAD_LEN: usize = Udp::MAX_PAYLOAD_LEN;
 
 #[derive(Default)]
 pub struct SendmmsgBuf {}
@@ -34,52 +38,104 @@ impl UdpSend for super::UdpSocket {
     async fn send_many_to(
         &self,
         _buf: &mut SendmmsgBuf,
-        packets: &mut Vec<(Packet, SocketAddr)>,
+        packets_vec: &mut Vec<(Packet, SocketAddr)>,
     ) -> io::Result<()> {
         let fd = self.inner.as_raw_fd();
 
-        let n = packets.len();
-        debug_assert!(n <= MAX_PACKET_SEND_COUNT);
+        debug_assert!(packets_vec.len() <= MAX_PACKET_SEND_COUNT);
 
-        let mut i = 0;
-        let mut packets_buf = [IoSlice::new(&[]); MAX_PACKET_SEND_COUNT];
-        while let Some((first_packet, first_target)) = packets.get(i) {
-            let segment_size = first_packet.len() as u16;
-            packets_buf[0] = IoSlice::new(&first_packet[..]);
-            i += 1;
-            for ((packet, target), packet_buf) in packets[i..].iter().zip(&mut packets_buf[1..]) {
-                if target != first_target || packet.len() > first_packet.len() {
-                    break;
-                }
-                *packet_buf = IoSlice::new(&packet[..]);
-                i += 1;
-                if packet.len() < first_packet.len() {
-                    break;
-                }
-            }
+        let mut packets = &packets_vec[..];
+        let mut io_slices = [IoSlice::new(&[]); MAX_PACKET_SEND_COUNT];
 
-            // log::info!("Sending {i} packets to {first_target}");
-            self.inner
+        let mut result = Ok(());
+
+        while let Some(gso) = udp_gso_coalesce(packets, &mut io_slices) {
+            packets = &packets[gso.io_slices.len()..];
+
+            // don't throw result immediately, instead try to send all packets before returning.
+            // this may result in some errors getting overwritten.
+            result = self
+                .inner
                 .async_io(Interest::WRITABLE, || {
                     nix::sys::socket::sendmsg(
                         fd,
-                        &packets_buf[..i],
-                        &[ControlMessage::UdpGsoSegments(&segment_size)],
+                        gso.io_slices,
+                        &[ControlMessage::UdpGsoSegments(&gso.segment_len)],
                         MsgFlags::MSG_DONTWAIT,
-                        Some(&SockaddrStorage::from(*first_target)),
+                        Some(&SockaddrStorage::from(gso.addr)),
                     )?;
+
                     Ok(())
                 })
-                .await?;
+                .await
+                .inspect_err(|e| {
+                    if cfg!(debug_assertions) {
+                        log::warn!("sendmsg: {e}");
+                    }
+                });
         }
-        packets.clear();
 
-        Ok(())
+        packets_vec.clear();
+
+        result
     }
 
     fn max_number_of_packets_to_send(&self) -> usize {
         MAX_PACKET_SEND_COUNT
     }
+}
+
+struct GsoCoalesce<'a> {
+    segment_len: u16,
+    addr: SocketAddr,
+    io_slices: &'a [IoSlice<'a>],
+}
+
+/// Coalesce UDP payloads into an array of [IoSlice].
+fn udp_gso_coalesce<'slice, 'packet: 'slice>(
+    packets: &'packet [(Packet, SocketAddr)],
+    io_slices: &'slice mut [IoSlice<'packet>; MAX_PACKET_SEND_COUNT],
+) -> Option<GsoCoalesce<'slice>> {
+    let ((first_packet, first_addr), packets) = packets.split_first()?;
+    let segment_len = first_packet.len();
+
+    io_slices[0] = IoSlice::new(&first_packet[..]);
+
+    let max_total_len = match first_addr.ip() {
+        IpAddr::V4(..) => MAX_IPV4_PAYLOAD_LEN,
+        IpAddr::V6(..) => MAX_IPV6_PAYLOAD_LEN,
+    };
+
+    let mut count = 1;
+    let mut total_len = segment_len;
+    for ((packet, target), io_slice) in packets.iter().zip(&mut io_slices[1..]) {
+        // consume packets as long as they have the same addr and fit in segment_len
+        if target != first_addr || packet.len() > segment_len {
+            break;
+        }
+
+        // don't exceed linux hard length limit
+        if total_len + packet.len() > max_total_len {
+            break;
+        }
+
+        *io_slice = IoSlice::new(&packet[..]);
+        count += 1;
+        total_len += packet.len();
+
+        // if the packet is shorter than segment_len, let it be the last element.
+        if packet.len() < segment_len {
+            break;
+        }
+    }
+
+    let segment_len = u16::try_from(segment_len).expect("UDP payload length is u16");
+
+    Some(GsoCoalesce {
+        segment_len,
+        addr: *first_addr,
+        io_slices: &io_slices[..count],
+    })
 }
 
 pub struct RecvManyBuf {

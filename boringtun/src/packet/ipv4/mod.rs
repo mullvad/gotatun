@@ -5,7 +5,7 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endi
 mod protocol;
 pub use protocol::*;
 
-use super::util::size_must_be;
+use super::util::assert_size;
 
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
@@ -100,8 +100,9 @@ impl Ipv4Header {
     }
 }
 
+const _: () = assert_size::<Ipv4Header>(Ipv4Header::LEN);
 impl Ipv4Header {
-    pub const LEN: usize = size_must_be::<Ipv4Header>(20);
+    pub const LEN: usize = 20;
 
     /// The IP version. Must be `4` for a valid IPv4 header.
     pub const fn version(&self) -> u8 {

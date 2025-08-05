@@ -2,7 +2,7 @@ use bitfield_struct::bitfield;
 use std::{fmt::Debug, net::Ipv6Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
-use super::{IpNextProtocol, util::size_must_be};
+use super::{IpNextProtocol, util::assert_size};
 
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
@@ -34,9 +34,10 @@ pub struct Ipv6VersionTrafficFlow {
     pub version: u8,
 }
 
+const _: () = assert_size::<Ipv6Header>(Ipv6Header::LEN);
 impl Ipv6Header {
     #[allow(dead_code)]
-    pub const LEN: usize = size_must_be::<Ipv6Header>(40);
+    pub const LEN: usize = 40;
 
     pub const fn version(&self) -> u8 {
         self.version_traffic_flow.version()
