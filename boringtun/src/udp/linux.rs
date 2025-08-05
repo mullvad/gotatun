@@ -1,15 +1,16 @@
-use nix::sys::socket::{MsgFlags, MultiHeaders, SockaddrIn, SockaddrStorage};
+use nix::sys::socket::{ControlMessage, MsgFlags, MultiHeaders, SockaddrIn, SockaddrStorage};
 #[cfg(target_os = "linux")]
 use nix::sys::socket::{setsockopt, sockopt};
 use std::{
     io::{self, IoSlice, IoSliceMut},
     net::SocketAddr,
+    ops::Deref,
     os::fd::AsRawFd,
 };
 use tokio::io::Interest;
 
 use crate::{
-    packet::Packet,
+    packet::{self, Packet},
     udp::{UdpRecv, UdpSend},
 };
 
@@ -18,9 +19,7 @@ use super::UdpTransport;
 const MAX_PACKET_COUNT: usize = 100;
 
 #[derive(Default)]
-pub struct SendmmsgBuf {
-    targets: Vec<Option<SockaddrStorage>>,
-}
+pub struct SendmmsgBuf {}
 
 impl UdpSend for super::UdpSocket {
     type SendManyBuf = SendmmsgBuf;
@@ -32,47 +31,45 @@ impl UdpSend for super::UdpSocket {
 
     async fn send_many_to(
         &self,
-        buf: &mut SendmmsgBuf,
+        _buf: &mut SendmmsgBuf,
         packets: &mut Vec<(Packet, SocketAddr)>,
     ) -> io::Result<()> {
+        let fd = self.inner.as_raw_fd();
+
         let n = packets.len();
         debug_assert!(n <= MAX_PACKET_COUNT);
 
-        let fd = self.inner.as_raw_fd();
+        let mut i = 0;
+        let mut packets_buf = [IoSlice::new(&[]); MAX_PACKET_COUNT];
+        while let Some((first_packet, first_target)) = packets.get(i) {
+            let segment_size = first_packet.len() as u16;
+            packets_buf[0] = IoSlice::new(&first_packet[..]);
+            i += 1;
+            for ((packet, target), packet_buf) in packets[i..].iter().zip(&mut packets_buf[1..]) {
+                if target != first_target || packet.len() > first_packet.len() {
+                    break;
+                }
+                *packet_buf = IoSlice::new(&packet[..]);
+                i += 1;
+                if packet.len() < first_packet.len() {
+                    break;
+                }
+            }
 
-        buf.targets.clear();
-        packets
-            .iter()
-            .map(|(_packet, target)| Some(SockaddrStorage::from(*target)))
-            .for_each(|target| buf.targets.push(target));
-
-        // This allocation can't be put in the struct because of lifetimes.
-        // So we allocate it on the stack instead.
-        let mut packets_buf = [[IoSlice::new(&[])]; MAX_PACKET_COUNT];
-        packets
-            .iter()
-            .map(|(packet, _target)| [IoSlice::new(&packet[..])])
-            .enumerate()
-            // packets.len() is no greater than MAX_PACKET_COUNT
-            .for_each(|(i, packet)| packets_buf[i] = packet);
-        let pkts = &packets_buf[..n];
-
-        self.inner
-            .async_io(Interest::WRITABLE, || {
-                let mut multiheaders = MultiHeaders::preallocate(pkts.len(), None);
-                nix::sys::socket::sendmmsg(
-                    fd,
-                    &mut multiheaders,
-                    pkts,
-                    &buf.targets[..],
-                    [],
-                    MsgFlags::MSG_DONTWAIT,
-                )?;
-
-                Ok(())
-            })
-            .await?;
-
+            // log::info!("Sending {i} packets to {first_target}");
+            self.inner
+                .async_io(Interest::WRITABLE, || {
+                    nix::sys::socket::sendmsg(
+                        fd,
+                        &packets_buf[..i],
+                        &[ControlMessage::UdpGsoSegments(&segment_size)],
+                        MsgFlags::MSG_DONTWAIT,
+                        Some(&SockaddrStorage::from(*first_target)),
+                    )?;
+                    Ok(())
+                })
+                .await?;
+        }
         packets.clear();
 
         Ok(())
