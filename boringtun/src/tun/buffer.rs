@@ -52,7 +52,6 @@ impl<I: IpSend> IpSend for BufferedIpSend<I> {
 pub struct BufferedIpRecv<I> {
     rx: mpsc::Receiver<Packet<Ip>>,
     rx_packet_buf: Vec<Packet<Ip>>,
-    _task: Arc<Task>,
     _phantom: std::marker::PhantomData<I>,
 }
 
@@ -62,7 +61,7 @@ impl<I: IpRecv> BufferedIpRecv<I> {
     /// This takes an `Arc<Mutex<I>>` because the inner `I` will be re-used after [Self] is
     /// dropped. We will take the mutex lock when this function is called, and hold onto it for the
     /// lifetime of [Self]. Will panic if the lock is already taken.
-    pub fn new(capacity: usize, mut pool: PacketBufPool, inner: Arc<Mutex<I>>) -> Self {
+    pub fn new(capacity: usize, mut pool: PacketBufPool, inner: Arc<Mutex<I>>) -> (Self, Task) {
         let (tx, rx) = mpsc::channel::<Packet<Ip>>(capacity);
 
         let task = Task::spawn("buffered IP recv", async move {
@@ -86,12 +85,14 @@ impl<I: IpRecv> BufferedIpRecv<I> {
             }
         });
 
-        Self {
-            rx,
-            rx_packet_buf: vec![],
-            _task: Arc::new(task),
-            _phantom: std::marker::PhantomData,
-        }
+        (
+            Self {
+                rx,
+                rx_packet_buf: vec![],
+                _phantom: std::marker::PhantomData,
+            },
+            task,
+        )
     }
 }
 

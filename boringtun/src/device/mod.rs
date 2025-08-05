@@ -164,6 +164,8 @@ pub(crate) struct Connection<T: DeviceTransports> {
 
     /// The task that reads traffic from the TUN device.
     outgoing: Task,
+
+    buffered_tun_recv_task: Task,
 }
 
 impl<T: DeviceTransports> Connection<T> {
@@ -182,10 +184,19 @@ impl<T: DeviceTransports> Connection<T> {
             <T::UdpTransportFactory as UdpTransportFactory>::Recv,
         >(MAX_PACKET_BUFS, udp6_rx);
 
+        let tun = {
+            let device = device.write().await;
+            Arc::clone(&device.tun_rx)
+        };
+
+        let (buffered_tun_recv, buffered_tun_recv_task) =
+            BufferedIpRecv::new(MAX_PACKET_BUFS, PacketBufPool::new(MAX_PACKET_BUFS), tun);
+
         let outgoing = Task::spawn(
             "handle_outgoing",
             Device::handle_outgoing(
                 Arc::downgrade(&device),
+                buffered_tun_recv,
                 buffered_udp_tx_v4.clone(),
                 buffered_udp_tx_v6.clone(),
                 PacketBufPool::new(MAX_PACKET_BUFS),
@@ -227,6 +238,7 @@ impl<T: DeviceTransports> Connection<T> {
             incoming_ipv6,
             timers,
             outgoing,
+            buffered_tun_recv_task,
         })
     }
 }
@@ -731,21 +743,11 @@ impl<T: DeviceTransports> Device<T> {
     /// Read from tunnel device, encapsulate, and write to UDP socket for the corresponding peer
     async fn handle_outgoing(
         device: Weak<RwLock<Self>>,
+        mut buffered_tun_recv: BufferedIpRecv<<T as DeviceTransports>::IpRecv>,
         udp4: BufferedUdpSend,
         udp6: BufferedUdpSend,
         mut packet_pool: PacketBufPool,
     ) {
-        let tun = {
-            let Some(device) = device.upgrade() else {
-                return;
-            };
-            let device = device.write().await;
-            Arc::clone(&device.tun_rx)
-        };
-
-        let mut buffered_tun_recv =
-            BufferedIpRecv::new(MAX_PACKET_BUFS, PacketBufPool::new(MAX_PACKET_BUFS), tun);
-
         loop {
             let packets = match buffered_tun_recv.recv(&mut packet_pool).await {
                 Ok(packets) => packets,
@@ -861,6 +863,7 @@ impl<T: DeviceTransports> Connection<T> {
             incoming_ipv6,
             timers,
             outgoing,
+            buffered_tun_recv_task,
         } = self;
         drop((udp4, udp6));
 
@@ -869,6 +872,7 @@ impl<T: DeviceTransports> Connection<T> {
             incoming_ipv6.stop(),
             timers.stop(),
             outgoing.stop(),
+            buffered_tun_recv_task.stop(),
         );
     }
 }
