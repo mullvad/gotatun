@@ -16,7 +16,9 @@ use crate::{
 
 use super::UdpTransport;
 
-const MAX_PACKET_COUNT: usize = 100;
+const MAX_PACKET_RECV_COUNT: usize = 100;
+// At most 64 segments can be sent at a time (https://man7.org/linux/man-pages/man7/udp.7.html)
+const MAX_PACKET_SEND_COUNT: usize = 64;
 
 #[derive(Default)]
 pub struct SendmmsgBuf {}
@@ -37,10 +39,10 @@ impl UdpSend for super::UdpSocket {
         let fd = self.inner.as_raw_fd();
 
         let n = packets.len();
-        debug_assert!(n <= MAX_PACKET_COUNT);
+        debug_assert!(n <= MAX_PACKET_SEND_COUNT);
 
         let mut i = 0;
-        let mut packets_buf = [IoSlice::new(&[]); MAX_PACKET_COUNT];
+        let mut packets_buf = [IoSlice::new(&[]); MAX_PACKET_SEND_COUNT];
         while let Some((first_packet, first_target)) = packets.get(i) {
             let segment_size = first_packet.len() as u16;
             packets_buf[0] = IoSlice::new(&first_packet[..]);
@@ -76,7 +78,7 @@ impl UdpSend for super::UdpSocket {
     }
 
     fn max_number_of_packets_to_send(&self) -> usize {
-        MAX_PACKET_COUNT
+        MAX_PACKET_SEND_COUNT
     }
 }
 
@@ -92,7 +94,7 @@ unsafe impl Send for RecvManyBuf {}
 impl Default for RecvManyBuf {
     fn default() -> Self {
         Self {
-            headers: MultiHeaders::<SockaddrIn>::preallocate(MAX_PACKET_COUNT, None),
+            headers: MultiHeaders::<SockaddrIn>::preallocate(MAX_PACKET_RECV_COUNT, None),
             lengths: vec![],
         }
     }
@@ -102,7 +104,7 @@ impl UdpRecv for super::UdpSocket {
     type RecvManyBuf = RecvManyBuf;
 
     fn max_number_of_packets_to_recv(&self) -> usize {
-        MAX_PACKET_COUNT
+        MAX_PACKET_RECV_COUNT
     }
 
     async fn recv_from(&mut self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
@@ -124,7 +126,7 @@ impl UdpRecv for super::UdpSocket {
             .async_io(Interest::READABLE, move || {
                 let headers = &mut recv_many_bufs.headers;
 
-                let mut io_slices: [[IoSliceMut; 1]; MAX_PACKET_COUNT] =
+                let mut io_slices: [[IoSliceMut; 1]; MAX_PACKET_RECV_COUNT] =
                     std::array::from_fn(|_| [IoSliceMut::new(&mut [])]);
 
                 let num_packets = bufs.len();
