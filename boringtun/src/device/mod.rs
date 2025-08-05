@@ -755,15 +755,15 @@ impl<T: DeviceTransports> Device<T> {
                 }
             };
 
+            let Some(device) = device.upgrade() else {
+                break;
+            };
+            let peers = &device.read().await.peers_by_ip;
             for packet in packets {
                 // Determine peer to use from the destination address
                 let Some(dst_addr) = packet.destination() else {
                     continue;
                 };
-                let Some(device) = device.upgrade() else {
-                    break;
-                };
-                let peers = &device.read().await.peers_by_ip;
                 let mut peer = match peers.find(dst_addr) {
                     Some(peer) => peer.lock().await,
                     // Drop packet if no peer has allowed IPs for destination
