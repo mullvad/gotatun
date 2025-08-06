@@ -3,7 +3,7 @@ members = ["boringtun", "boringtun-cli"]
 resolver = "2"
 
 [profile.release]
-lto = true        # Enable full link-time optimization.
+lto = false       # Enable full link-time optimization.
 codegen-units = 1 # Use only 1 codegen-unit to enable full optimizations.
 
 # build with optimizations, but keep debug symbols
