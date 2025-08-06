@@ -1,6 +1,9 @@
 //! Generic buffered IP send and receive implementations.
 
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
@@ -12,28 +15,36 @@ use tokio::{
     sync::{Mutex, mpsc},
 };
 
+const NUM_WRITE_TASKS: usize = 2;
+
 #[derive(Clone)]
 pub struct BufferedIpSend<I> {
-    tx: mpsc::Sender<Packet<Ip>>,
-    _task: Arc<Task>,
+    next_task: Arc<AtomicUsize>,
+    tasks: [(mpsc::Sender<Packet<Ip>>, Arc<Task>); NUM_WRITE_TASKS],
     _phantom: std::marker::PhantomData<I>,
 }
 
 impl<I: IpSend> BufferedIpSend<I> {
     pub fn new(capacity: usize, inner: I) -> Self {
-        let (tx, mut rx) = mpsc::channel::<Packet<Ip>>(capacity);
+        let tasks = [(); NUM_WRITE_TASKS].map(|_| {
+            let inner = inner.clone();
 
-        let task = Task::spawn("buffered IP send", async move {
-            while let Some(packet) = rx.recv().await {
-                if let Err(e) = inner.send(packet).await {
-                    log::error!("Error sending IP packet: {e}");
+            let (tx, mut rx) = mpsc::channel::<Packet<Ip>>((capacity / NUM_WRITE_TASKS).max(1));
+
+            let task = Task::spawn("buffered IP send", async move {
+                while let Some(packet) = rx.recv().await {
+                    if let Err(e) = inner.send(packet).await {
+                        log::error!("Error sending IP packet: {e}");
+                    }
                 }
-            }
+            });
+
+            (tx, Arc::new(task))
         });
 
         Self {
-            tx,
-            _task: Arc::new(task),
+            next_task: Arc::new(AtomicUsize::new(0)),
+            tasks,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -41,8 +52,10 @@ impl<I: IpSend> BufferedIpSend<I> {
 
 impl<I: IpSend> IpSend for BufferedIpSend<I> {
     async fn send(&self, packet: Packet<Ip>) -> io::Result<()> {
-        self.tx
-            .send(packet)
+        let i = self.next_task.fetch_add(1, Ordering::Relaxed) % NUM_WRITE_TASKS;
+        let (tx, _) = &self.tasks[i];
+
+        tx.send(packet)
             .await
             .expect("receiver dropped after senders");
         Ok(())
