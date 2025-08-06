@@ -172,22 +172,22 @@ impl UdpSocket {
         // Check for UDP GSO
         #[cfg(any(target_os = "linux", target_os = "android"))]
         let gso = {
-            use std::os::fd::AsRawFd;
-            //use nix::sys::socket::{getsockopt, sockopt};
-            //getsockopt(&inner, sockopt::UdpGsoSegment).is_ok()
-            let mut opt_val: libc::c_int = 0;
-            let mut opt_size = size_of_val(&opt_val) as libc::socklen_t;
-            let result_code = unsafe {
-                libc::getsockopt(
-                    inner.as_raw_fd(),
-                    libc::SOL_UDP,
-                    libc::UDP_SEGMENT,
-                    (&raw mut opt_val).cast::<libc::c_void>(),
-                    &raw mut opt_size,
-                )
-            };
+            use nix::sys::socket::{getsockopt, sockopt};
+            getsockopt(&inner, sockopt::UdpGsoSegment).is_ok()
 
-            result_code == 0
+            //use std::os::fd::AsRawFd;
+            //let mut opt_val: libc::c_int = 0;
+            //let mut opt_size = size_of_val(&opt_val) as libc::socklen_t;
+            //let result_code = unsafe {
+            //    libc::getsockopt(
+            //        inner.as_raw_fd(),
+            //        libc::SOL_UDP,
+            //        103, // UDP_SEGMENT
+            //        (&raw mut opt_val).cast::<libc::c_void>(),
+            //        &raw mut opt_size,
+            //    )
+            //};
+            //result_code == 0
         };
 
         log::debug!("UDP bind {addr} (gso={gso})");

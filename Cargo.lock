@@ -204,7 +204,7 @@ dependencies = [
  "libc",
  "log",
  "mock_instant",
- "nix",
+ "nix 0.30.1 (git+https://github.com/mullvad/nix.git?rev=5e2f927544e0c01bcafdfdb7ae419c2aba3e8384)",
  "parking_lot",
  "pcap-file",
  "pnet_packet",
@@ -959,9 +959,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
-version = "0.2.174"
+version = "0.2.172"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1171693293099992e19cddea4e8b849964e9846f4acee11b3948bcc337be8776"
+checksum = "d750af042f7ef4f724306de029d18836c26c1765a54a6a3f094cbd23a7267ffa"
 
 [[package]]
 name = "libloading"
@@ -1035,6 +1035,17 @@ name = "nix"
 version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
+dependencies = [
+ "bitflags 2.9.1",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
+name = "nix"
+version = "0.30.1"
+source = "git+https://github.com/mullvad/nix.git?rev=5e2f927544e0c01bcafdfdb7ae419c2aba3e8384#5e2f927544e0c01bcafdfdb7ae419c2aba3e8384"
 dependencies = [
  "bitflags 2.9.1",
  "cfg-if",
@@ -1763,7 +1774,7 @@ dependencies = [
  "ipnet",
  "libc",
  "log",
- "nix",
+ "nix 0.30.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror 2.0.12",
  "tokio",
  "tokio-util",
