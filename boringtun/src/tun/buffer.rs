@@ -15,7 +15,7 @@ use tokio::{
     sync::{Mutex, mpsc},
 };
 
-const NUM_WRITE_TASKS: usize = 2;
+const NUM_WRITE_TASKS: usize = 8;
 
 #[derive(Clone)]
 pub struct BufferedIpSend<I> {
