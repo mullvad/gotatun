@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::fd::AsFd;
 use std::{
     future::Future,
     io,
@@ -184,6 +186,13 @@ impl UdpSocket {
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.inner.local_addr()
+    }
+}
+
+#[cfg(unix)]
+impl AsFd for UdpSocket {
+    fn as_fd(&self) -> std::os::unix::prelude::BorrowedFd<'_> {
+        self.inner.as_fd()
     }
 }
 
