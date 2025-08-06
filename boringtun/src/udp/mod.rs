@@ -131,7 +131,11 @@ async fn generic_send_many_to<U: UdpSend + ?Sized>(
 /// Default UDP socket implementation
 #[derive(Clone)]
 pub struct UdpSocket {
+    // Wrap the UdpSocket in an Arc to make it cloneable.
     inner: Arc<tokio::net::UdpSocket>,
+
+    /// Whether the socket supports UDP GSO.
+    gso: bool,
 }
 
 impl UdpSocket {
@@ -152,10 +156,29 @@ impl UdpSocket {
 
         udp_sock.bind(&addr.into())?;
 
+        let addr = udp_sock
+            .local_addr()?
+            .as_socket()
+            .expect("socket domain is IPV4 or IPV6");
+
         let inner = tokio::net::UdpSocket::from_std(udp_sock.into())?;
+
+        // UDP GSO is only supported on Linux
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        let gso = false;
+
+        // Check for UDP GSO
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let gso = {
+            use nix::sys::socket::{getsockopt, sockopt};
+            getsockopt(&inner, sockopt::UdpGsoSegment).is_ok()
+        };
+
+        log::debug!("UDP bind {addr} (gso={gso})");
 
         Ok(Self {
             inner: Arc::new(inner),
+            gso,
         })
     }
 

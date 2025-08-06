@@ -10,7 +10,7 @@ use tokio::io::Interest;
 
 use crate::{
     packet::{Ipv4Header, Packet, Udp},
-    udp::{UdpRecv, UdpSend},
+    udp::{UdpRecv, UdpSend, generic_send_many_to},
 };
 
 use super::UdpTransport;
@@ -40,6 +40,10 @@ impl UdpSend for super::UdpSocket {
         _buf: &mut SendmmsgBuf,
         packets_vec: &mut Vec<(Packet, SocketAddr)>,
     ) -> io::Result<()> {
+        if !self.gso {
+            return generic_send_many_to(self, packets_vec).await;
+        }
+
         let fd = self.inner.as_raw_fd();
 
         debug_assert!(packets_vec.len() <= MAX_PACKET_SEND_COUNT);
