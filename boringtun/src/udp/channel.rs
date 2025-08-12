@@ -3,6 +3,8 @@ use either::Either;
 use pnet_packet::ip::IpNextHeaderProtocols;
 use rand_core::RngCore;
 use std::{
+    collections::{BTreeMap, HashMap},
+    hash::Hash,
     io, iter,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::{Arc, atomic::AtomicU16},
@@ -28,6 +30,7 @@ pub struct TunChannelRx {
     tun_rx: mpsc::Receiver<Packet<Ip>>,
 }
 
+type Ipv4Fragments = HashMap<FragmentId, BTreeMap<u16, Packet<Ipv4>>>;
 
 /// An implementation of [IpSend] using tokio channels.
 ///
@@ -36,8 +39,20 @@ pub struct TunChannelRx {
 pub struct TunChannelTx {
     tun_tx_v4: mpsc::Sender<Packet<Ipv4<Udp>>>,
     tun_tx_v6: mpsc::Sender<Packet<Ipv6<Udp>>>,
+
+    /// A map of fragments, keyed by a tuple of (identification, source IP, destination IP).
+    /// The value is a BTreeMap of fragment offsets to the corresponding fragments.
+    /// The BTreeMap is used to ensure that fragments are kept in order, even if they arrive out of
+    /// order. This is used to efficiently check if all fragments have been received.
+    fragments_v4: Ipv4Fragments,
+    // TODO: Ipv6 fragments?
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct FragmentId {
+    identification: u16,
+    source_ip: Ipv4Addr,
+    destination_ip: Ipv4Addr,
 }
 
 #[derive(Clone)]
@@ -104,16 +119,28 @@ impl IpSend for TunChannelTx {
         };
 
         match ip_packet {
-            Either::Left(ipv4) => match ipv4.try_into_udp() {
-                Ok(udp_packet) => {
-                    self.inner
-                        .tun_tx_v4
-                        .send(udp_packet)
-                        .await
-                        .expect("receiver exists");
+            Either::Left(ipv4) => {
+                match ipv4.try_into_udp() {
+                    Ok(TryIntoUdpResult::UdpFragment(packet)) => {
+                        // Check if the packet is a fragment
+                        if let Some(complete_packet) =
+                            assemble_ipv4_fragment(&mut self.fragments_v4, packet)
+                        {
+                            self.tun_tx_v4
+                                .send(complete_packet)
+                                .await
+                                .expect("receiver exists");
+                        };
+                    }
+                    Ok(TryIntoUdpResult::Udp(complete_packet)) => {
+                        self.tun_tx_v4
+                            .send(complete_packet)
+                            .await
+                            .expect("receiver exists");
+                    }
+                    Err(e) => log::trace!("Invalid UDP packet: {e:?}"),
                 }
-                Err(e) => log::trace!("Invalid UDP packet: {e:?}"),
-            },
+            }
             Either::Right(ipv6) => match ipv6.try_into_udp() {
                 Ok(udp_packet) => {
                     self.tun_tx_v6
