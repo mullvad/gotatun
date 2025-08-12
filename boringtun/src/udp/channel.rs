@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, atomic::AtomicU16},
 };
 use tokio::sync::{Mutex, mpsc};
-use zerocopy::{FromBytes, FromZeros, IntoBytes};
+use zerocopy::{FromBytes, IntoBytes};
 
 use crate::{
     packet::{
@@ -19,6 +19,7 @@ use crate::{
 };
 
 use super::UdpTransportFactoryParams;
+pub use fragmentation::Ipv4Fragments;
 
 /// An implementation of [IpRecv] using tokio channels.
 ///
@@ -28,7 +29,6 @@ pub struct TunChannelRx {
     tun_rx: mpsc::Receiver<Packet<Ip>>,
 }
 
-
 /// An implementation of [IpSend] using tokio channels.
 ///
 /// Enables connecting one [Device](crate::device::Device) directly to another.
@@ -36,8 +36,13 @@ pub struct TunChannelRx {
 pub struct TunChannelTx {
     tun_tx_v4: mpsc::Sender<Packet<Ipv4<Udp>>>,
     tun_tx_v6: mpsc::Sender<Packet<Ipv6<Udp>>>,
-}
 
+    /// A map of fragments, keyed by a tuple of (identification, source IP, destination IP).
+    /// The value is a BTreeMap of fragment offsets to the corresponding fragments.
+    /// The BTreeMap is used to ensure that fragments are kept in order, even if they arrive out of
+    /// order. This is used to efficiently check if all fragments have been received.
+    fragments_v4: Ipv4Fragments,
+    // TODO: Ipv6 fragments?
 }
 
 #[derive(Clone)]
@@ -80,7 +85,7 @@ pub fn get_packet_channels(
         tun_tx_v4,
         tun_tx_v6,
 
-        fragments_v4: HashMap::new(),
+        fragments_v4: Ipv4Fragments::default(),
     };
     let tun_rx = TunChannelRx { tun_rx };
     let udp_channel_factory = PacketChannelUdp {
@@ -104,16 +109,30 @@ impl IpSend for TunChannelTx {
         };
 
         match ip_packet {
-            Either::Left(ipv4) => match ipv4.try_into_udp() {
-                Ok(udp_packet) => {
-                    self.inner
-                        .tun_tx_v4
-                        .send(udp_packet)
-                        .await
-                        .expect("receiver exists");
+            Either::Left(ipv4) => {
+                match ipv4.try_into_udp() {
+                    Ok(TryIntoUdpResult::UdpFragment(ip_fragment)) => {
+                        // Check if the packet is a fragment
+                        if let Some(complete_ipv4) =
+                            self.fragments_v4.assemble_ipv4_fragment(ip_fragment)
+                            && let Ok(TryIntoUdpResult::Udp(udp_packet)) =
+                                complete_ipv4.try_into_udp()
+                        {
+                            self.tun_tx_v4
+                                .send(udp_packet)
+                                .await
+                                .expect("receiver exists");
+                        }
+                    }
+                    Ok(TryIntoUdpResult::Udp(udp_packet)) => {
+                        self.tun_tx_v4
+                            .send(udp_packet)
+                            .await
+                            .expect("receiver exists");
+                    }
+                    Err(e) => log::trace!("Invalid UDP packet: {e:?}"),
                 }
-                Err(e) => log::trace!("Invalid UDP packet: {e:?}"),
-            },
+            }
             Either::Right(ipv6) => match ipv6.try_into_udp() {
                 Ok(udp_packet) => {
                     self.tun_tx_v6
@@ -128,7 +147,6 @@ impl IpSend for TunChannelTx {
         Ok(())
     }
 }
-
 
 impl IpRecv for TunChannelRx {
     async fn recv<'a>(
@@ -364,4 +382,127 @@ async fn create_ipv6_payload(
 
 fn rand_u16() -> u16 {
     u16::try_from(rand_core::OsRng.next_u32().overflowing_shr(16).0).unwrap()
+}
+
+mod fragmentation {
+    use either::Either;
+    use zerocopy::{FromBytes, FromZeros};
+
+    use crate::packet::Udp;
+    use std::{
+        collections::{BTreeMap, HashMap},
+        net::Ipv4Addr,
+    };
+
+    use crate::packet::{Ipv4, Packet};
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    struct FragmentId {
+        identification: u16,
+        source_ip: Ipv4Addr,
+        destination_ip: Ipv4Addr,
+    }
+
+    #[derive(Debug, Default)]
+    pub struct Ipv4Fragments {
+        fragments: HashMap<FragmentId, BTreeMap<u16, Packet<Ipv4>>>,
+    }
+
+    impl Ipv4Fragments {
+        /// Return the number of unique packets that are currently being assembled.
+        pub fn incomplete_packet_count(&self) -> usize {
+            self.fragments.len()
+        }
+
+        pub fn assemble_ipv4_fragment(
+            &mut self,
+            ipv4_packet: Packet<Ipv4>,
+        ) -> Option<Packet<Ipv4>> {
+            let fragment_map = &mut self.fragments;
+            let header = ipv4_packet.header;
+            let fragment_offset = header.fragment_offset();
+            let more_fragments = header.more_fragments();
+            debug_assert!(more_fragments || fragment_offset != 0);
+
+            let id = FragmentId {
+                identification: ipv4_packet.header.identification.get(),
+                source_ip: ipv4_packet.header.source(),
+                destination_ip: ipv4_packet.header.destination(),
+            };
+            if let Some(fragments) = fragment_map.get_mut(&id) {
+                let frag_with_same_offset = fragments.insert(fragment_offset, ipv4_packet);
+                #[cfg(debug_assertions)]
+                if frag_with_same_offset.is_some() {
+                    tracing::trace!(
+                        "Fragment with offset {fragment_offset} already existed for for ID {id:?} and was replaced"
+                    );
+                }
+
+                let (first_frag_offset, _) = fragments.first_key_value().expect("Cannot be empty");
+                let (_, last_frag) = fragments.last_key_value().expect("Cannot be empty");
+
+                // Check that we have the first and last fragment
+                if last_frag.header.more_fragments() || *first_frag_offset != 0 {
+                    return None;
+                }
+
+                // Check if the IP packet can be reassembled.
+                // The fragments must be consecutive, i.e. each fragment must begin where the previous one ended.
+                // Note that fragment offset is given in units of 8 bytes.
+                let fragment_offsets = fragments.keys().cloned();
+                let fragment_ends = fragments
+                    .iter()
+                    .map(|(k, v)| k + (v.payload.len() / 8) as u16);
+                if fragment_offsets
+                    .skip(1)
+                    .eq(fragment_ends.take(fragments.len() - 1))
+                {
+                    let mut packet_fragment = fragment_map.remove(&id).unwrap();
+                    // To avoid allocating a new packet, we will use the first fragment
+                    // and extend it with the payloads of the other fragments.
+                    let (_, first_packet) = packet_fragment.pop_first().unwrap();
+
+                    let mut bytes = first_packet.into_bytes();
+                    for frag in packet_fragment.values() {
+                        bytes.buf_mut().extend_from_slice(&frag.payload);
+                    }
+
+                    let len = bytes.len();
+
+                    // The header of the first packet is updated to reflect that the packet is no
+                    // longer fragmented.
+                    {
+                        let ip = Ipv4::<Udp>::mut_from_bytes(&mut bytes)
+                            .expect("valid IP packet buffer");
+                        ip.header.total_len = (len as u16).into();
+
+                        // This set `more_fragments`, `dont_fragment`, and `fragment_offset` to zero.
+                        ip.header.flags_and_fragment_offset.zero();
+
+                        // We do not need to recompute the checksum, because the checksum is
+                        // only read by the `ExitDevice` and discarded
+                        ip.header.header_checksum.zero();
+                    }
+
+                    // NOTE: We could change the `tun_tx_vx` channels to take a tuple of source ip,
+                    // destination ip, and `Packet<Udp>`, instead of `Packet<Ipv4<Udp>>`, to avoid
+                    // having to reconstruct the IP head and validate the IP packet with
+                    // `try_into_ipvx`
+                    if let Ok(Either::Left(ipv4_packet)) = bytes.try_into_ipvx() {
+                        Some(ipv4_packet)
+                    } else {
+                        log::trace!("Invalid reassembled IPv4 packet, dropping");
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                // Since this was the first fragment, we don't check if the packet
+                // can be reassembled yet.
+                fragment_map.insert(id, BTreeMap::from([(fragment_offset, ipv4_packet)]));
+                None
+            }
+        }
+    }
 }
