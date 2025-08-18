@@ -8,83 +8,92 @@ use std::{
     sync::{Arc, atomic::AtomicU16},
 };
 use tokio::sync::{Mutex, mpsc};
-use zerocopy::{FromBytes, IntoBytes};
+use zerocopy::{FromBytes, FromZeros, IntoBytes};
 
 use crate::{
-    packet::{Ip, IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Packet, PacketBufPool, Udp},
+    packet::{
+        Ip, IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Packet, PacketBufPool, TryIntoUdpResult, Udp,
+    },
     tun::{IpRecv, IpSend},
     udp::{UdpRecv, UdpSend, UdpTransport, UdpTransportFactory},
 };
 
 use super::UdpTransportFactoryParams;
 
-/// An implementation of [IpSend], [IpRecv], and [UdpTransportFactory] using tokio channels.
+/// An implementation of [IpRecv] using tokio channels.
 ///
 /// Enables connecting one [Device](crate::device::Device) directly to another.
 /// Can be used to set up a multi-hop wireguard tunnel.
-#[derive(Clone)]
-pub struct PacketChannel {
-    inner: Arc<PacketChannelInner>,
+pub struct TunChannelRx {
+    tun_rx: mpsc::Receiver<Packet<Ip>>,
 }
 
-#[derive(Clone, Copy, Debug)]
-enum IpVersion {
-    V4,
-    V6,
+
+/// An implementation of [IpSend] using tokio channels.
+///
+/// Enables connecting one [Device](crate::device::Device) directly to another.
+/// Can be used to set up a multi-hop wireguard tunnel.
+pub struct TunChannelTx {
+    tun_tx_v4: mpsc::Sender<Packet<Ipv4<Udp>>>,
+    tun_tx_v6: mpsc::Sender<Packet<Ipv6<Udp>>>,
+}
+
 }
 
 #[derive(Clone)]
-pub struct UdpChannel {
-    ip_version: IpVersion,
+pub struct UdpChannelTx {
+    source_ip_v4: Ipv4Addr,
+    source_ip_v6: Ipv6Addr,
     source_port: u16,
     connection_id: u32,
-    inner: Arc<PacketChannelInner>,
+
+    udp_tx: mpsc::Sender<Packet<Ip>>,
 }
 
-pub struct PacketChannelInner {
+pub struct UdpChannelV4Rx {
+    udp_rx_v4: Arc<Mutex<mpsc::Receiver<Packet<Ipv4<Udp>>>>>,
+}
+
+pub struct UdpChannelV6Rx {
+    udp_rx_v6: Arc<Mutex<mpsc::Receiver<Packet<Ipv6<Udp>>>>>,
+}
+
+pub struct PacketChannelUdp {
     source_ip_v4: Ipv4Addr,
     source_ip_v6: Ipv6Addr,
 
     // FIXME: remove Mutexes
     udp_tx: mpsc::Sender<Packet<Ip>>,
-    tun_rx: Mutex<mpsc::Receiver<Packet<Ip>>>,
-
-    tun_tx_v4: mpsc::Sender<Packet<Ipv4<Udp>>>,
-    udp_rx_v4: Mutex<mpsc::Receiver<Packet<Ipv4<Udp>>>>,
-
-    tun_tx_v6: mpsc::Sender<Packet<Ipv6<Udp>>>,
-    udp_rx_v6: Mutex<mpsc::Receiver<Packet<Ipv6<Udp>>>>,
+    udp_rx_v4: Arc<Mutex<mpsc::Receiver<Packet<Ipv4<Udp>>>>>,
+    udp_rx_v6: Arc<Mutex<mpsc::Receiver<Packet<Ipv6<Udp>>>>>,
 }
 
-impl PacketChannel {
-    pub fn new(capacity: usize, source_ip_v4: Ipv4Addr, source_ip_v6: Ipv6Addr) -> Self {
-        let (udp_tx, tun_rx) = mpsc::channel(capacity);
-        let (tun_tx_v4, udp_rx_v4) = mpsc::channel(capacity);
-        let (tun_tx_v6, udp_rx_v6) = mpsc::channel(capacity);
+pub fn get_packet_channels(
+    capacity: usize,
+    source_ip_v4: Ipv4Addr,
+    source_ip_v6: Ipv6Addr,
+) -> (TunChannelTx, TunChannelRx, PacketChannelUdp) {
+    let (udp_tx, tun_rx) = mpsc::channel(capacity);
+    let (tun_tx_v4, udp_rx_v4) = mpsc::channel(capacity);
+    let (tun_tx_v6, udp_rx_v6) = mpsc::channel(capacity);
+    let tun_tx = TunChannelTx {
+        tun_tx_v4,
+        tun_tx_v6,
 
-        let tun_rx = Mutex::new(tun_rx);
-        let udp_rx_v4 = Mutex::new(udp_rx_v4);
-        let udp_rx_v6 = Mutex::new(udp_rx_v6);
-
-        Self {
-            inner: Arc::new(PacketChannelInner {
-                source_ip_v4,
-                source_ip_v6,
-
-                udp_tx,
-                tun_rx,
-
-                tun_tx_v4,
-                udp_rx_v4,
-
-                tun_tx_v6,
-                udp_rx_v6,
-            }),
-        }
-    }
+        fragments_v4: HashMap::new(),
+    };
+    let tun_rx = TunChannelRx { tun_rx };
+    let udp_channel_factory = PacketChannelUdp {
+        source_ip_v4,
+        source_ip_v6,
+        udp_tx,
+        udp_rx_v4: Arc::new(Mutex::new(udp_rx_v4)),
+        udp_rx_v6: Arc::new(Mutex::new(udp_rx_v6)),
+    };
+    (tun_tx, tun_rx, udp_channel_factory)
 }
 
-impl IpSend for PacketChannel {
+impl IpSend for TunChannelTx {
     async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
         let ip_packet = match packet.try_into_ipvx() {
             Ok(p) => p,
@@ -107,8 +116,7 @@ impl IpSend for PacketChannel {
             },
             Either::Right(ipv6) => match ipv6.try_into_udp() {
                 Ok(udp_packet) => {
-                    self.inner
-                        .tun_tx_v6
+                    self.tun_tx_v6
                         .send(udp_packet)
                         .await
                         .expect("receiver exists");
@@ -121,52 +129,49 @@ impl IpSend for PacketChannel {
     }
 }
 
-impl IpRecv for PacketChannel {
+
+impl IpRecv for TunChannelRx {
     async fn recv<'a>(
         &'a mut self,
         _pool: &mut PacketBufPool,
     ) -> io::Result<impl Iterator<Item = Packet<Ip>> + Send + 'a> {
-        let mut tun_rx = self
-            .inner
-            .tun_rx
-            .try_lock()
-            .expect("multiple concurrent calls to recv");
-        let packet = tun_rx.recv().await.expect("sender exists");
+        let packet = self.tun_rx.recv().await.expect("sender exists");
         Ok(iter::once(packet))
     }
 }
 
-impl UdpTransportFactory for PacketChannel {
-    type Send = Arc<UdpChannel>;
-    type Recv = Arc<UdpChannel>;
+impl UdpTransportFactory for PacketChannelUdp {
+    type Send = UdpChannelTx;
+    type RecvV4 = UdpChannelV4Rx;
+    type RecvV6 = UdpChannelV6Rx;
 
     async fn bind(
         &mut self,
         params: &UdpTransportFactoryParams,
-    ) -> io::Result<((Self::Send, Self::Recv), (Self::Send, Self::Recv))> {
+    ) -> io::Result<((Self::Send, Self::RecvV4), (Self::Send, Self::RecvV6))> {
         let connection_id = rand_core::OsRng.next_u32().max(1);
         let source_port = match params.port {
             0 => rand_u16().max(1),
             p => p,
         };
 
-        let channel_v4 = Arc::new(UdpChannel {
-            ip_version: IpVersion::V4,
+        let channel_tx = UdpChannelTx {
+            source_ip_v4: self.source_ip_v4,
+            source_ip_v6: self.source_ip_v6,
             source_port,
             connection_id,
-            inner: self.inner.clone(),
-        });
+            udp_tx: self.udp_tx.clone(),
+        };
 
-        let channel_v6 = Arc::new(UdpChannel {
-            ip_version: IpVersion::V6,
-            source_port,
-            connection_id,
-            inner: self.inner.clone(),
-        });
-
+        let channel_rx_v4 = UdpChannelV4Rx {
+            udp_rx_v4: self.udp_rx_v4.clone(),
+        };
+        let channel_rx_v6 = UdpChannelV6Rx {
+            udp_rx_v6: self.udp_rx_v6.clone(),
+        };
         Ok((
-            (channel_v4.clone(), channel_v4),
-            (channel_v6.clone(), channel_v6),
+            (channel_tx.clone(), channel_rx_v4),
+            (channel_tx, channel_rx_v6),
         ))
     }
 }
@@ -175,9 +180,9 @@ const UDP_HEADER_LEN: usize = 8;
 const IPV4_HEADER_LEN: usize = 20;
 const IPV6_HEADER_LEN: usize = 40;
 
-impl UdpTransport for Arc<UdpChannel> {}
+impl UdpTransport for UdpChannelTx {}
 
-impl UdpSend for Arc<UdpChannel> {
+impl UdpSend for UdpChannelTx {
     type SendManyBuf = ();
 
     async fn send_to(&self, udp_payload: Packet, destination: SocketAddr) -> io::Result<()> {
@@ -186,11 +191,10 @@ impl UdpSend for Arc<UdpChannel> {
 
         match destination {
             SocketAddr::V4(dest) => {
-                self.inner
-                    .udp_tx
+                self.udp_tx
                     .send(
                         create_ipv4_payload(
-                            self.inner.source_ip_v4,
+                            self.source_ip_v4,
                             self.source_port,
                             *dest.ip(),
                             dest.port(),
@@ -202,11 +206,10 @@ impl UdpSend for Arc<UdpChannel> {
                     .expect("receiver exists");
             }
             SocketAddr::V6(dest) => {
-                self.inner
-                    .udp_tx
+                self.udp_tx
                     .send(
                         create_ipv6_payload(
-                            &self.inner.source_ip_v6,
+                            &self.source_ip_v6,
                             self.source_port,
                             dest.ip(),
                             dest.port(),
@@ -223,54 +226,49 @@ impl UdpSend for Arc<UdpChannel> {
         Ok(())
     }
 }
-
-impl UdpRecv for Arc<UdpChannel> {
+impl UdpRecv for UdpChannelV4Rx {
     type RecvManyBuf = ();
 
     async fn recv_from(&mut self, _pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
-        match self.ip_version {
-            IpVersion::V4 => {
-                let mut udp_rx = self
-                    .inner
-                    .udp_rx_v4
-                    .try_lock()
-                    .expect("multiple concurrent calls to recv_from");
+        let mut udp_rx_v4 = self
+            .udp_rx_v4
+            .try_lock()
+            .expect("multiple concurrent calls to recv_from");
+        let ipv4 = udp_rx_v4.recv().await.expect("sender exists");
 
-                let ipv4 = udp_rx.recv().await.expect("sender exists");
+        let source_addr = ipv4.header.source();
 
-                let source_addr = ipv4.header.source();
+        let udp = ipv4.into_payload();
+        let source_port = udp.header.source_port.get();
 
-                let udp = ipv4.into_payload();
-                let source_port = udp.header.source_port.get();
+        // Packet with IP and UDP headers shed.
+        let inner_packet = udp.into_payload();
+        let socket_addr = SocketAddr::from((source_addr, source_port));
 
-                // Packet with IP and UDP headers shed.
-                let inner_packet = udp.into_payload();
-                let socket_addr = SocketAddr::from((source_addr, source_port));
+        Ok((inner_packet, socket_addr))
+    }
+}
 
-                Ok((inner_packet, socket_addr))
-            }
+impl UdpRecv for UdpChannelV6Rx {
+    type RecvManyBuf = ();
 
-            IpVersion::V6 => {
-                let mut udp_rx = self
-                    .inner
-                    .udp_rx_v6
-                    .try_lock()
-                    .expect("multiple concurrent calls to recv_from");
+    async fn recv_from(&mut self, _pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
+        let mut udp_rx_v6 = self
+            .udp_rx_v6
+            .try_lock()
+            .expect("multiple concurrent calls to recv_from");
+        let ipv6 = udp_rx_v6.recv().await.expect("sender exists");
 
-                let ipv6 = udp_rx.recv().await.expect("sender exists");
+        let source_addr = ipv6.header.source();
 
-                let source_addr = ipv6.header.source();
+        let udp = ipv6.into_payload();
+        let source_port = udp.header.source_port.get();
 
-                let udp = ipv6.into_payload();
-                let source_port = udp.header.source_port.get();
+        // Packet with IP and UDP headers shed.
+        let inner_packet = udp.into_payload();
+        let socket_addr = SocketAddr::from((source_addr, source_port));
 
-                // Packet with IP and UDP headers shed.
-                let inner_packet = udp.into_payload();
-                let socket_addr = SocketAddr::from((source_addr, source_port));
-
-                Ok((inner_packet, socket_addr))
-            }
-        }
+        Ok((inner_packet, socket_addr))
     }
 }
 
