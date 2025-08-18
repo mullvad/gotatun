@@ -367,23 +367,25 @@ where
     }
 }
 
-/*
-// Don't use `derive`, because that would require `Kind` to be `Clone`.
-impl<Kind> Clone for Packet<Kind> {
-    fn clone(&self) -> Self {
-        Self {
-            buf: self.buf.clone(),
-            _kind: PhantomData,
-        }
-    }
-}
- */
-
 impl<Kind: Debug> Debug for Packet<Kind>
 where
     Kind: CheckedPayload + ?Sized,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Packet").field(&self.deref()).finish()
+    }
+}
+
+// This clone implementation is only for tests, as the clone will cause an allocation and will not return the buffer to the pool.
+#[cfg(test)]
+impl<Kind: ?Sized> Clone for Packet<Kind> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: PacketInner {
+                buf: self.inner.buf.clone(),
+                _return_to_pool: None, // Cloning does not return to pool
+            },
+            _kind: PhantomData,
+        }
     }
 }
