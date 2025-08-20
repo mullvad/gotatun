@@ -173,7 +173,7 @@ impl<T: DeviceTransports> Connection<T> {
         let (udp4_tx, udp4_rx, udp6_tx, udp6_rx) = device_guard.open_listen_socket().await?;
         let buffered_ip_rx = BufferedIpRecv::new(
             MAX_PACKET_BUFS,
-            PacketBufPool::new(),
+            PacketBufPool::new(MAX_PACKET_BUFS),
             Arc::clone(&device_guard.tun_rx),
         );
         let buffered_ip_tx = BufferedIpSend::new(MAX_PACKET_BUFS, Arc::clone(&device_guard.tun_tx));
@@ -196,7 +196,7 @@ impl<T: DeviceTransports> Connection<T> {
                 buffered_ip_rx,
                 buffered_udp_tx_v4.clone(),
                 buffered_udp_tx_v6.clone(),
-                PacketBufPool::new(),
+                PacketBufPool::new(MAX_PACKET_BUFS),
             ),
         );
         let timers = Task::spawn(
@@ -215,7 +215,7 @@ impl<T: DeviceTransports> Connection<T> {
                 buffered_ip_tx.clone(),
                 buffered_udp_tx_v4,
                 buffered_udp_rx_v4,
-                PacketBufPool::new(),
+                PacketBufPool::new(MAX_PACKET_BUFS),
             ),
         );
         let incoming_ipv6 = Task::spawn(
@@ -225,7 +225,7 @@ impl<T: DeviceTransports> Connection<T> {
                 buffered_ip_tx,
                 buffered_udp_tx_v6,
                 buffered_udp_rx_v6,
-                PacketBufPool::new(),
+                PacketBufPool::new(MAX_PACKET_BUFS),
             ),
         );
 
