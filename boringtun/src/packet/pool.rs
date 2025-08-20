@@ -7,6 +7,7 @@ use std::{
 use crate::packet::Packet;
 
 /// A pool of packet buffers.
+#[derive(Clone)]
 pub struct PacketBufPool<const N: usize = 4096> {
     queue: Arc<Mutex<VecDeque<BytesMut>>>,
     capacity: usize,
