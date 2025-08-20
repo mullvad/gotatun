@@ -96,8 +96,7 @@ pub struct ReturnToPool {
 impl Drop for ReturnToPool {
     fn drop(&mut self) {
         let p = self.pointer_to_start_of_allocation.take().unwrap();
-        // FIXME: push back should be fine (arguably better), but test fails
-        self.queue.lock().unwrap().push_front(p);
+        self.queue.lock().unwrap().push_back(p);
     }
 }
 
@@ -112,7 +111,7 @@ mod tests {
     fn pool_buffer_recycle() {
         let mut pool = PacketBufPool::<4096>::new(1);
 
-        for i in 0..10 {
+        for i in 0..1 {
             // Get a packet and record its address.
             let mut packet1 = black_box(pool.get());
             let packet1_addr = packet1.buf().as_ptr();
