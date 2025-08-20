@@ -261,6 +261,7 @@ impl UdpTransportFactory for PacketChannelUdp {
 const UDP_HEADER_LEN: usize = 8;
 const IPV4_HEADER_LEN: usize = 20;
 const IPV6_HEADER_LEN: usize = 40;
+const IPV4_MAX_LEN: usize = 65535;
 
 impl UdpTransport for UdpChannelTx {}
 

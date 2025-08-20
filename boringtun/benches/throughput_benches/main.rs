@@ -74,16 +74,16 @@ fn bench_assemble_ipv4_fragment(c: &mut Criterion) {
     let payload = vec![0u8; 4000]; // Large payload to force fragmentation
     let mut fragments = Ipv4Fragments::default();
     let frags = fragment_ipv4_packet(id, src, dst, &payload, mtu);
-    // let mut packet_pool = boringtun::packet::PacketBufPool::<4096>::new(4000);
+    let mut packet_pool = boringtun::packet::PacketBufPool::<4096>::new(4000);
 
     c.bench_function("assemble_ipv4_fragment", |b| {
         b.iter(|| {
             for frag in &frags {
-                // let packet = packet_pool.get();
-                // black_box(
-                //     fragments.assemble_ipv4_fragment(black_box(packet.copy_from_packet(frag))),
-                // );
-                black_box(fragments.assemble_ipv4_fragment(black_box(Packet::copy_from(frag))));
+                let packet = packet_pool.get();
+                black_box(
+                    fragments.assemble_ipv4_fragment(black_box(packet.copy_from_packet(frag))),
+                );
+                // black_box(fragments.assemble_ipv4_fragment(black_box(Packet::copy_from(frag))));
             }
         })
     });
