@@ -6,78 +6,77 @@ use std::{
 
 use crate::packet::Packet;
 
+/// Number of contiguous packets to allocate in one go
+const BLOCK_COUNT: usize = 128;
+
+/// Initial capacity of the VecDeque
+const QUEUE_CAPACITY: usize = 2048;
+
 /// A pool of packet buffers.
 pub struct PacketBufPool<const N: usize = 4096> {
     queue: Arc<Mutex<VecDeque<BytesMut>>>,
-    capacity: usize,
 }
 
 impl<const N: usize> PacketBufPool<N> {
-    /// Create `num_packets` packets, each `N` bytes.
-    pub fn new(capacity: usize) -> Self {
-        let mut queue = VecDeque::with_capacity(capacity);
+    /// Create a pool
+    pub fn new() -> Self {
+        let queue = VecDeque::with_capacity(QUEUE_CAPACITY);
 
-        // pre-allocate contiguous backing buffer
-        let mut backing_buffer = BytesMut::zeroed(N * capacity);
-        for _ in 0..capacity {
+        let mut pool = PacketBufPool {
+            queue: Arc::new(Mutex::new(queue)),
+        };
+
+        pool.preallocate(BLOCK_COUNT);
+
+        pool
+    }
+
+    /// Preallocate `count` items using a contiguous backing buffer
+    fn preallocate(&mut self, count: usize) {
+        let mut backing_buffer = BytesMut::zeroed(N * count);
+        let mut queue = self.queue.lock().unwrap();
+        for _ in 0..count {
             let buf = backing_buffer.split_to(N).split_to(0);
             queue.push_back(buf);
         }
-
-        PacketBufPool {
-            queue: Arc::new(Mutex::new(queue)),
-            capacity,
-        }
-    }
-
-    pub fn capacity(&self) -> usize {
-        self.capacity
     }
 
     /// Get a new [Packet] from the pool.
     ///
     /// This will try to re-use an already allocated packet if possible, or allocate one otherwise.
     pub fn get(&mut self) -> Packet<[u8]> {
-        while let Some(mut pointer_to_start_of_allocation) =
-            { self.queue.lock().unwrap().pop_front() }
-        {
-            debug_assert_eq!(pointer_to_start_of_allocation.len(), 0);
-            if pointer_to_start_of_allocation.try_reclaim(N) {
-                let mut buf = pointer_to_start_of_allocation.split_off(0);
+        loop {
+            while let Some(mut pointer_to_start_of_allocation) =
+                { self.queue.lock().unwrap().pop_front() }
+            {
+                debug_assert_eq!(pointer_to_start_of_allocation.len(), 0);
+                if pointer_to_start_of_allocation.try_reclaim(N) {
+                    let mut buf = pointer_to_start_of_allocation.split_off(0);
 
-                debug_assert!(buf.capacity() >= N);
+                    debug_assert!(buf.capacity() >= N);
 
-                // SAFETY:
-                // - buf was split from the BytesMut allocated below.
-                // - buf has not been mutated, and still points to the original allocation.
-                // - try_reclaim succeeded, so the capacity is at least `N`.
-                // - the allocation was created using `BytesMut::zeroed`, so the bytes are initialized.
-                unsafe { buf.set_len(N) };
+                    // SAFETY:
+                    // - buf was split from the BytesMut allocated below.
+                    // - buf has not been mutated, and still points to the original allocation.
+                    // - try_reclaim succeeded, so the capacity is at least `N`.
+                    // - the allocation was created using `BytesMut::zeroed`, so the bytes are initialized.
+                    unsafe { buf.set_len(N) };
 
-                let return_to_pool = ReturnToPool {
-                    pointer_to_start_of_allocation: Some(pointer_to_start_of_allocation),
-                    queue: self.queue.clone(),
-                };
+                    let return_to_pool = ReturnToPool {
+                        pointer_to_start_of_allocation: Some(pointer_to_start_of_allocation),
+                        queue: self.queue.clone(),
+                    };
 
-                return Packet::new_from_pool(return_to_pool, buf);
-            } else {
-                // Backing buffer is still in use. Someone probably called split_* on it.
-                continue;
+                    return Packet::new_from_pool(return_to_pool, buf);
+                } else {
+                    // Backing buffer is still in use. Someone probably called split_* on it.
+                    continue;
+                }
             }
+
+            // Allocate some more packets
+            self.preallocate(BLOCK_COUNT);
         }
-
-        let mut buf = BytesMut::zeroed(N);
-        let pointer_to_start_of_allocation = buf.split_to(0);
-
-        debug_assert_eq!(pointer_to_start_of_allocation.len(), 0);
-        debug_assert_eq!(buf.len(), N);
-
-        let return_to_pool = ReturnToPool {
-            pointer_to_start_of_allocation: Some(pointer_to_start_of_allocation),
-            queue: self.queue.clone(),
-        };
-
-        Packet::new_from_pool(return_to_pool, buf)
     }
 }
 
