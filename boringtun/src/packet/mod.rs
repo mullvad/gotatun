@@ -105,6 +105,13 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
             _kind: PhantomData::<T>,
         }
     }
+
+    pub fn copy_from_packet<U: CheckedPayload + ?Sized>(mut self, packet: &U) -> Packet<U> {
+        self.inner.buf.clear();
+        self.inner.buf.reserve(packet.as_bytes().len());
+        self.inner.buf.extend_from_slice(packet.as_bytes());
+        self.cast()
+    }
 }
 
 // Trivial From conversions between packet types

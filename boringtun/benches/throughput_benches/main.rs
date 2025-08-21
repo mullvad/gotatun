@@ -60,7 +60,7 @@ fn make_single_fragment(
 
 fn bench_assemble_ipv4_fragment(c: &mut Criterion) {
     let mut fragments = Ipv4Fragments::default();
-
+    let mut packet_pool = boringtun::packet::PacketBufPool::<4096>::new(4000);
     let id = 42;
     let mtu = 1500;
     let mut group = c.benchmark_group("assemble_ipv4_fragment");
@@ -74,8 +74,10 @@ fn bench_assemble_ipv4_fragment(c: &mut Criterion) {
             |b, frags| {
                 b.iter(|| {
                     for frag in frags {
+                        let packet = packet_pool.get();
                         black_box(
-                            fragments.assemble_ipv4_fragment(black_box(Packet::copy_from(frag))),
+                            fragments
+                                .assemble_ipv4_fragment(black_box(packet.copy_from_packet(frag))),
                         );
                     }
                     assert_eq!(fragments.incomplete_packet_count(), 0);
@@ -88,6 +90,7 @@ fn bench_assemble_ipv4_fragment(c: &mut Criterion) {
 
 fn bench_assemble_ipv4_fragment_reverse_order(c: &mut Criterion) {
     let mut fragments = Ipv4Fragments::default();
+    let mut packet_pool = boringtun::packet::PacketBufPool::<4096>::new(4000);
 
     let id = 42;
     let mtu = 1500;
@@ -103,8 +106,10 @@ fn bench_assemble_ipv4_fragment_reverse_order(c: &mut Criterion) {
             |b, frags| {
                 b.iter(|| {
                     for frag in frags {
+                        let packet = packet_pool.get();
                         black_box(
-                            fragments.assemble_ipv4_fragment(black_box(Packet::copy_from(frag))),
+                            fragments
+                                .assemble_ipv4_fragment(black_box(packet.copy_from_packet(frag))),
                         );
                     }
                     assert_eq!(fragments.incomplete_packet_count(), 0);
@@ -117,6 +122,7 @@ fn bench_assemble_ipv4_fragment_reverse_order(c: &mut Criterion) {
 
 fn bench_assemble_ipv4_fragment_interleaved(c: &mut Criterion) {
     let mut fragments = Ipv4Fragments::default();
+    let mut packet_pool = boringtun::packet::PacketBufPool::<4096>::new(4000);
 
     let mtu = 1500;
     let mut group = c.benchmark_group("assemble_ipv4_fragment_interleaved");
@@ -140,8 +146,10 @@ fn bench_assemble_ipv4_fragment_interleaved(c: &mut Criterion) {
             |b, all_frags| {
                 b.iter(|| {
                     for frag in all_frags {
+                        let packet = packet_pool.get();
                         black_box(
-                            fragments.assemble_ipv4_fragment(black_box(Packet::copy_from(frag))),
+                            fragments
+                                .assemble_ipv4_fragment(black_box(packet.copy_from_packet(frag))),
                         );
                     }
                     assert_eq!(fragments.incomplete_packet_count(), 0);
