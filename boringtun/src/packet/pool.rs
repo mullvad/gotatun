@@ -97,7 +97,11 @@ pub struct ReturnToPool {
 impl Drop for ReturnToPool {
     fn drop(&mut self) {
         let p = self.pointer_to_start_of_allocation.take().unwrap();
-        self.queue.lock().unwrap().push_back(p);
+        let mut queue_g = self.queue.lock().unwrap();
+        if queue_g.len() < queue_g.capacity() {
+            // Add the packet back to the pool unless we're at capacity
+            queue_g.push_back(p);
+        }
     }
 }
 
