@@ -116,7 +116,7 @@ mod tests {
     fn pool_buffer_recycle() {
         let mut pool = PacketBufPool::<4096>::new(1);
 
-        for i in 0..1 {
+        for i in 0..10 {
             // Get a packet and record its address.
             let mut packet1 = black_box(pool.get());
             let packet1_addr = packet1.buf().as_ptr();
