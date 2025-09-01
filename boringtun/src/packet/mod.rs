@@ -14,6 +14,7 @@ mod ip;
 mod ipv4;
 mod ipv6;
 mod pool;
+mod tcp;
 mod udp;
 mod util;
 
@@ -21,6 +22,7 @@ pub use ip::*;
 pub use ipv4::*;
 pub use ipv6::*;
 pub use pool::*;
+pub use tcp::*;
 pub use udp::*;
 
 /// An owned packet of some type.
@@ -79,6 +81,7 @@ impl CheckedPayload for Ip {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv6<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv4<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Udp<P> {}
+impl CheckedPayload for Tcp {}
 
 impl<T: CheckedPayload + ?Sized> Packet<T> {
     fn cast<Y: CheckedPayload + ?Sized>(self) -> Packet<Y> {
@@ -112,14 +115,20 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
     FromType ToType;
     [Ipv4<Udp>] [Ipv4];
     [Ipv6<Udp>] [Ipv6];
+    [Ipv4<Tcp>] [Ipv4];
+    [Ipv6<Tcp>] [Ipv6];
 
     [Ipv4<Udp>] [Ip];
     [Ipv6<Udp>] [Ip];
+    [Ipv4<Tcp>] [Ip];
+    [Ipv6<Tcp>] [Ip];
     [Ipv4]      [Ip];
     [Ipv6]      [Ip];
 
     [Ipv4<Udp>] [[u8]];
     [Ipv6<Udp>] [[u8]];
+    [Ipv4<Tcp>] [[u8]];
+    [Ipv6<Tcp>] [[u8]];
     [Ipv4]      [[u8]];
     [Ipv6]      [[u8]];
     [Ip]        [[u8]];
@@ -200,7 +209,9 @@ impl Packet<Ip> {
 
                 let ip_len = usize::from(ipv4.header.total_len.get());
                 if ip_len != buf_len {
-                    bail!("IPv4 `total_len` did not match packet length: {ip_len} != {buf_len}");
+                    return Err(eyre!("{:?}", &ipv4.header)).wrap_err(eyre!(
+                        "IPv4 `total_len` did not match packet length: {ip_len} != {buf_len}"
+                    ));
                 }
 
                 // TODO: validate checksum
@@ -215,10 +226,10 @@ impl Packet<Ip> {
 
                 let payload_len = usize::from(ipv6.header.payload_length.get());
                 if payload_len != ipv6.payload.len() {
-                    bail!(
-                        "IPv6 `payload_len` did not match packet length: {payload_len} != {}",
+                    return Err(eyre!("{:?}", &ipv6.header)).wrap_err(eyre!(
+                        "IPv6 `payload_length` did not match packet length: {payload_len} != {}",
                         ipv6.payload.len()
-                    );
+                    ));
                 }
 
                 // TODO: validate checksum
@@ -229,6 +240,26 @@ impl Packet<Ip> {
             }
             v => bail!("Bad IP version: {v}"),
         }
+    }
+}
+
+#[duplicate_item(
+    FromType ToType either_fn;
+     [[u8]]  [Ipv4] [ left];
+     [[u8]]  [Ipv6] [right];
+     [ Ip ]  [Ipv4] [ left];
+     [ Ip ]  [Ipv6] [right];
+)]
+impl TryFrom<Packet<FromType>> for Packet<ToType> {
+    type Error = eyre::Report;
+
+    fn try_from(packet: Packet<FromType>) -> Result<Self, Self::Error> {
+        packet.try_into_ipvx()?.either_fn().ok_or_else(|| {
+            eyre!(
+                "Expected {} but found another IP version",
+                stringify!(ToType)
+            )
+        })
     }
 }
 
@@ -243,6 +274,8 @@ impl Packet<Ipv4> {
     ///
     /// Returns an error if the IHL is invalid or if UDP validation fails.
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv4<Udp>>> {
+        self.assert_no_ip_options()?;
+
         let ip = self.deref();
 
         // We validate the IHL here, instead of in the `try_into_ipvx` method,
@@ -272,19 +305,42 @@ impl Packet<Ipv4> {
         // update `_kind` to reflect this.
         Ok(self.cast::<Ipv4<Udp>>())
     }
+
+    /// Check if the IP payload is valid TCP.
+    pub fn try_into_tcp(self) -> eyre::Result<Packet<Ipv4<Tcp>>> {
+        self.assert_no_ip_options()?;
+
+        let ip = self.deref();
+        validate_tcp(ip.header.next_protocol(), &ip.payload)
+            .wrap_err_with(|| eyre!("IP header: {:?}", ip.header))?;
+
+        // we have asserted that the packet is a valid IPv4 TCP packet.
+        // update `_kind` to reflect this.
+        Ok(self.cast::<Ipv4<Tcp>>())
+    }
 }
 
 impl Packet<Ipv6> {
     /// Check if the IP payload is valid UDP.
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv6<Udp>>> {
         let ip = self.deref();
-
         validate_udp(ip.header.next_protocol(), &ip.payload)
             .wrap_err_with(|| eyre!("IP header: {:?}", ip.header))?;
 
         // we have asserted that the packet is a valid IPv6 UDP packet.
         // update `_kind` to reflect this.
         Ok(self.cast::<Ipv6<Udp>>())
+    }
+
+    /// Check if the IP payload is valid TCP.
+    pub fn try_into_tcp(self) -> eyre::Result<Packet<Ipv6<Tcp>>> {
+        let ip = self.deref();
+        validate_tcp(ip.header.next_protocol(), &ip.payload)
+            .wrap_err_with(|| eyre!("IP header: {:?}", ip.header))?;
+
+        // we have asserted that the packet is a valid IPv6 TCP packet.
+        // update `_kind` to reflect this.
+        Ok(self.cast::<Ipv6<Tcp>>())
     }
 }
 
@@ -318,11 +374,12 @@ fn validate_udp(next_protocol: IpNextProtocol, payload: &[u8]) -> eyre::Result<(
     };
 
     let ip_payload_len = payload.len();
-    let udp = Udp::<[u8]>::ref_from_bytes(payload).map_err(|e| eyre!("Bad UDP packet: {e:?}"))?;
+    let udp =
+        Udp::<[u8]>::ref_from_bytes(payload).map_err(|_| eyre!("Too small to be a UDP packet"))?;
 
     let udp_len = usize::from(udp.header.length.get());
     if udp_len != ip_payload_len {
-        return Err(eyre!("UDP header: {:?}", udp.header)).wrap_err_with(|| {
+        return Err(eyre!("{:?}", udp.header)).wrap_err_with(|| {
             eyre!(
                 "UDP header length did not match IP payload length: {} != {}",
                 udp_len,
@@ -330,6 +387,23 @@ fn validate_udp(next_protocol: IpNextProtocol, payload: &[u8]) -> eyre::Result<(
             )
         });
     }
+
+    // TODO: validate checksum?
+
+    Ok(())
+}
+
+fn validate_tcp(next_protocol: IpNextProtocol, payload: &[u8]) -> eyre::Result<()> {
+    let IpNextProtocol::Tcp = next_protocol else {
+        bail!("Expected TCP, but packet was {next_protocol:?}");
+    };
+
+    let tcp = Tcp::ref_from_bytes(payload).map_err(|_| eyre!("Too small to be a TCP packet"))?;
+
+    // Check that `data_offset` is correct by trying to look at the payload.
+    tcp.payload()
+        .ok_or(eyre!("{:?}", tcp.header))
+        .wrap_err_with(|| eyre!("Bad TCP packet"))?;
 
     // TODO: validate checksum?
 

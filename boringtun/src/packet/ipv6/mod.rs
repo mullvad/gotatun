@@ -1,4 +1,5 @@
 use bitfield_struct::bitfield;
+use eyre::eyre;
 use std::{fmt::Debug, net::Ipv6Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
@@ -89,6 +90,25 @@ impl Debug for Ipv6Header {
             .field("source_address", &self.source())
             .field("destination_address", &self.destination())
             .finish()
+    }
+}
+
+impl<P: ?Sized> Ipv6<P>
+where
+    P: IntoBytes + Immutable,
+{
+    pub fn update_ip_len(&mut self) {
+        self.try_update_ip_len().unwrap()
+    }
+
+    pub fn try_update_ip_len(&mut self) -> eyre::Result<()> {
+        self.header.payload_length = self
+            .payload
+            .as_bytes()
+            .len()
+            .try_into()
+            .map_err(|_| eyre!("IPv6 payload was larger than {}", u16::MAX))?;
+        Ok(())
     }
 }
 

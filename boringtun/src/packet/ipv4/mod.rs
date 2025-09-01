@@ -1,4 +1,5 @@
 use bitfield_struct::bitfield;
+use eyre::{Context, eyre};
 use std::{fmt::Debug, net::Ipv4Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
@@ -61,6 +62,8 @@ pub struct Ipv4Header {
 }
 
 impl Ipv4Header {
+    pub const LEN: usize = size_must_be::<Ipv4Header>(20);
+
     /// Construct an IPv4 header with the reasonable defaults.
     ///
     /// `payload` field is used to set the length and compute the checksum.
@@ -99,10 +102,6 @@ impl Ipv4Header {
             header_checksum: big_endian::U16::ZERO,
         }
     }
-}
-
-impl Ipv4Header {
-    pub const LEN: usize = size_must_be::<Ipv4Header>(20);
 
     /// The IP version. Must be `4` for a valid IPv4 header.
     pub const fn version(&self) -> u8 {
@@ -152,6 +151,45 @@ impl Ipv4Header {
     /// Note that the value returned is in units of 8 bytes.
     pub const fn fragment_offset(&self) -> u16 {
         self.flags_and_fragment_offset.fragment_offset()
+    }
+}
+
+impl<P: ?Sized> Ipv4<P> {
+    pub fn update_ip_checksum(&mut self) {
+        // TODO: handle IP options
+        debug_assert!(self.assert_no_ip_options().is_ok());
+
+        let checksum = pnet_packet::util::checksum(self.header.as_bytes(), 5);
+        self.header.header_checksum.set(checksum);
+    }
+
+    pub(super) fn assert_no_ip_options(&self) -> eyre::Result<()> {
+        match self.header.ihl() {
+            5 => Ok(()),
+            6.. => Err(eyre!("IP header: {:?}", self.header))
+                .wrap_err(eyre!("IPv4 packets with options are not supported")),
+            ihl @ ..5 => {
+                Err(eyre!("IP header: {:?}", self.header)).wrap_err(eyre!("Bad IHL value: {ihl}"))
+            }
+        }
+    }
+}
+
+impl<P: ?Sized> Ipv4<P>
+where
+    Self: IntoBytes + Immutable,
+{
+    pub fn update_ip_len(&mut self) {
+        self.try_update_ip_len().unwrap()
+    }
+
+    pub fn try_update_ip_len(&mut self) -> eyre::Result<()> {
+        self.header.total_len = self
+            .as_bytes()
+            .len()
+            .try_into()
+            .map_err(|_| eyre!("IPv4 packet was larger than {}", u16::MAX))?;
+        Ok(())
     }
 }
 
