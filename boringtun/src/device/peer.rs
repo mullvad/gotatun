@@ -2,14 +2,19 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use parking_lot::RwLock;
+use tokio::sync::Mutex;
 
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use crate::device::AllowedIps;
+use crate::device::daita::{DaitaHooks, DaitaSettings};
 use crate::noise::Tunn;
 use crate::noise::errors::WireGuardError;
-use crate::packet::{Packet, Wg};
+use crate::packet::{self, WgKind};
+use crate::tun::MtuWatcher;
+use crate::udp::UdpSend;
 
 #[derive(Default, Debug)]
 pub struct Endpoint {
@@ -24,6 +29,9 @@ pub struct Peer {
     endpoint: RwLock<Endpoint>,
     allowed_ips: AllowedIps<()>,
     preshared_key: Option<[u8; 32]>,
+
+    daita_settings: Option<DaitaSettings>,
+    pub(crate) daita: Option<DaitaHooks>,
 }
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
@@ -57,6 +65,7 @@ impl Peer {
         endpoint: Option<SocketAddr>,
         allowed_ips: &[AllowedIP],
         preshared_key: Option<[u8; 32]>,
+        daita_settings: Option<DaitaSettings>,
     ) -> Peer {
         Peer {
             tunnel,
@@ -64,11 +73,46 @@ impl Peer {
             endpoint: RwLock::new(Endpoint { addr: endpoint }),
             allowed_ips: allowed_ips.iter().map(|ip| (ip, ())).collect(),
             preshared_key,
+            daita_settings,
+            daita: None,
         }
     }
 
-    pub fn update_timers(&mut self) -> Result<Option<Packet<Wg>>, WireGuardError> {
+    pub async fn maybe_start_daita<US: UdpSend + Clone + 'static>(
+        peer: &Arc<Mutex<Peer>>,
+        pool: packet::PacketBufPool,
+        tun_rx_mtu: MtuWatcher,
+        udp_tx_v4: US,
+        udp_tx_v6: US,
+    ) -> Result<(), super::Error> {
+        let mut peer_g = peer.lock().await;
+        let Some(daita_settings) = peer_g.daita_settings.clone() else {
+            // No DAITA settings; disabled
+            return Ok(());
+        };
+
+        peer_g.daita = Some(DaitaHooks::new(
+            daita_settings,
+            Arc::downgrade(peer),
+            tun_rx_mtu,
+            udp_tx_v4,
+            udp_tx_v6,
+            pool,
+        )?);
+
+        Ok(())
+    }
+
+    pub fn update_timers(&mut self) -> Result<Option<WgKind>, WireGuardError> {
         self.tunnel.update_timers()
+    }
+
+    pub fn daita_settings(&self) -> Option<&DaitaSettings> {
+        self.daita_settings.as_ref()
+    }
+
+    pub fn daita(&self) -> Option<&DaitaHooks> {
+        self.daita.as_ref()
     }
 
     pub fn endpoint(&self) -> parking_lot::RwLockReadGuard<'_, Endpoint> {

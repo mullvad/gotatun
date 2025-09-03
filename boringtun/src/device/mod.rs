@@ -4,15 +4,17 @@
 pub mod allowed_ips;
 
 pub mod api;
+pub mod daita;
 #[cfg(unix)]
 pub mod drop_privileges;
 #[cfg(test)]
 mod integration_tests;
 pub mod peer;
 
+use ip_network::IpNetwork;
 use std::collections::HashMap;
 use std::io::{self};
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
 use std::ops::BitOrAssign;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -20,6 +22,7 @@ use tokio::join;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
+use crate::device::daita::DaitaSettings;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
@@ -27,11 +30,13 @@ use crate::noise::{Tunn, TunnResult};
 use crate::packet::{PacketBufPool, WgKind};
 use crate::task::Task;
 use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
-use crate::tun::{IpRecv, IpSend};
+#[cfg(feature = "tun")]
+use crate::tun::tun_async_device::TunDevice;
+use crate::tun::{IpRecv, IpSend, MtuWatcher};
 use crate::udp::buffer::{BufferedUdpReceive, BufferedUdpSend};
-use crate::udp::{
-    UdpRecv, UdpSend, UdpTransportFactory, UdpTransportFactoryParams, socket::UdpSocketFactory,
-};
+#[cfg(feature = "tun")]
+use crate::udp::socket::UdpSocketFactory;
+use crate::udp::{UdpRecv, UdpSend, UdpTransportFactory, UdpTransportFactoryParams};
 use crate::x25519;
 use allowed_ips::AllowedIps;
 use peer::{AllowedIP, Peer};
@@ -76,8 +81,11 @@ pub enum Error {
     DropPrivileges(String),
     #[error("API socket error: {0}")]
     ApiSocket(io::Error),
+    #[cfg(feature = "tun")]
     #[error("Device error: {0}")]
     OpenDevice(#[from] tun::Error),
+    #[error("Failed to initialize DAITA hooks")]
+    DaitaHooks(#[from] maybenot::Error),
 }
 
 pub struct DeviceHandle<T: DeviceTransports> {
@@ -91,11 +99,13 @@ pub struct DeviceConfig {
 
 /// By default, use a UDP socket for sending datagrams and a tunnel device for IP packets.
 #[cfg(feature = "tun")]
-pub type DefaultDeviceTransports = (
-    UdpSocketFactory,
-    Arc<tun::AsyncDevice>,
-    Arc<tun::AsyncDevice>,
-);
+pub type DefaultDeviceTransports = (UdpSocketFactory, TunDevice);
+
+pub trait DeviceTransports: 'static {
+    type UdpTransportFactory: UdpTransportFactory;
+    type IpSend: IpSend;
+    type IpRecv: IpRecv;
+}
 
 impl<UF, IS, IR> DeviceTransports for (UF, IS, IR)
 where
@@ -108,10 +118,14 @@ where
     type IpRecv = IR;
 }
 
-pub trait DeviceTransports: 'static {
-    type UdpTransportFactory: UdpTransportFactory;
-    type IpSend: IpSend;
-    type IpRecv: IpRecv;
+impl<UF, IP> DeviceTransports for (UF, IP)
+where
+    UF: UdpTransportFactory,
+    IP: IpSend + IpRecv + Clone,
+{
+    type UdpTransportFactory = UF;
+    type IpSend = IP;
+    type IpRecv = IP;
 }
 
 pub struct Device<T: DeviceTransports> {
@@ -128,6 +142,9 @@ pub struct Device<T: DeviceTransports> {
     /// This is implemented by the task taking the lock upon startup, and holding it until it is
     /// stopped.
     tun_rx: Arc<Mutex<T::IpRecv>>,
+
+    /// MTU watcher of the TUN device.
+    tun_rx_mtu: MtuWatcher,
 
     peers: HashMap<x25519::PublicKey, Arc<Mutex<Peer>>>,
     peers_by_ip: AllowedIps<Arc<Mutex<Peer>>>,
@@ -168,6 +185,11 @@ impl<T: DeviceTransports> Connection<T> {
         let pool = PacketBufPool::new(MAX_PACKET_BUFS);
 
         let mut device_guard = device.write().await;
+        // clean up existing connection
+        if let Some(conn) = device_guard.connection.take() {
+            conn.stop().await;
+        }
+
         let (udp4_tx, udp4_rx, udp6_tx, udp6_rx) = device_guard.open_listen_socket().await?;
         let buffered_ip_rx = BufferedIpRecv::new(
             MAX_PACKET_BUFS,
@@ -175,7 +197,6 @@ impl<T: DeviceTransports> Connection<T> {
             Arc::clone(&device_guard.tun_rx),
         );
         let buffered_ip_tx = BufferedIpSend::new(MAX_PACKET_BUFS, Arc::clone(&device_guard.tun_tx));
-        drop(device_guard);
 
         let buffered_udp_tx_v4 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp4_tx.clone());
         let buffered_udp_tx_v6 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp6_tx.clone());
@@ -187,6 +208,21 @@ impl<T: DeviceTransports> Connection<T> {
             <T::UdpTransportFactory as UdpTransportFactory>::RecvV6,
         >(MAX_PACKET_BUFS, udp6_rx, pool.clone());
 
+        // Start DAITA/hooks tasks
+        for peer_arc in device_guard.peers.values() {
+            Peer::maybe_start_daita(
+                peer_arc,
+                pool.clone(),
+                device_guard.tun_rx_mtu.clone(),
+                buffered_udp_tx_v4.clone(),
+                buffered_udp_tx_v6.clone(),
+            )
+            .await?;
+        }
+
+        drop(device_guard);
+
+        // Start device tasks
         let outgoing = Task::spawn(
             "handle_outgoing",
             Device::handle_outgoing(
@@ -240,9 +276,7 @@ impl<T: DeviceTransports> Connection<T> {
 }
 
 #[cfg(feature = "tun")]
-impl<T: DeviceTransports<IpRecv = Arc<tun::AsyncDevice>, IpSend = Arc<tun::AsyncDevice>>>
-    DeviceHandle<T>
-{
+impl<T: DeviceTransports<IpRecv = TunDevice, IpSend = TunDevice>> DeviceHandle<T> {
     pub async fn from_tun_name(
         udp_factory: T::UdpTransportFactory,
         tun_name: &str,
@@ -255,8 +289,8 @@ impl<T: DeviceTransports<IpRecv = Arc<tun::AsyncDevice>, IpSend = Arc<tun::Async
             p.enable_routing(false);
         });
         let tun = tun::create_as_async(&tun_config)?;
-        let tun_tx = Arc::new(tun);
-        let tun_rx = Arc::clone(&tun_tx);
+        let tun = TunDevice::from_tun_device(tun)?;
+        let (tun_tx, tun_rx) = (tun.clone(), tun);
         Ok(DeviceHandle::new(udp_factory, tun_tx, tun_rx, config).await)
     }
 }
@@ -327,16 +361,27 @@ impl BitOrAssign for Reconfigure {
     }
 }
 
+pub struct PeerUpdateRequest {
+    public_key: x25519::PublicKey,
+    remove: bool,
+    replace_allowed_ips: bool,
+    endpoint: Option<SocketAddr>,
+    new_allowed_ips: Vec<AllowedIP>,
+    keepalive: Option<u16>,
+    preshared_key: Option<[u8; 32]>,
+    daita_settings: Option<DaitaSettings>,
+}
+
 impl<T: DeviceTransports> Device<T> {
     fn next_index(&mut self) -> u32 {
         self.next_index.next()
     }
 
-    fn remove_peer(&mut self, pub_key: &x25519::PublicKey) -> Option<Arc<Mutex<Peer>>> {
+    async fn remove_peer(&mut self, pub_key: &x25519::PublicKey) -> Option<Arc<Mutex<Peer>>> {
         if let Some(peer) = self.peers.remove(pub_key) {
             // Found a peer to remove, now purge all references to it:
             {
-                let p = peer.blocking_lock();
+                let p = peer.lock().await;
                 self.peers_by_idx.remove(&p.index());
             }
             self.peers_by_ip
@@ -351,40 +396,50 @@ impl<T: DeviceTransports> Device<T> {
     }
 
     /// Update or add peer
-    #[allow(clippy::too_many_arguments)]
-    fn update_peer(
-        &mut self,
-        pub_key: x25519::PublicKey,
-        remove: bool,
-        replace_allowed_ips: bool,
-        endpoint: Option<SocketAddr>,
-        new_allowed_ips: &[AllowedIP],
-        keepalive: Option<u16>,
-        preshared_key: Option<[u8; 32]>,
-    ) {
+    async fn update_peer(&mut self, update_peer: PeerUpdateRequest) {
+        let PeerUpdateRequest {
+            public_key: pub_key,
+            remove,
+            replace_allowed_ips,
+            endpoint,
+            new_allowed_ips,
+            keepalive,
+            preshared_key,
+            daita_settings,
+        } = update_peer;
         if remove {
             // Completely remove a peer
-            self.remove_peer(&pub_key);
+            self.remove_peer(&pub_key).await;
             return;
         }
 
-        let (index, old_allowed_ips) = if let Some(old_peer) = self.remove_peer(&pub_key) {
-            // TODO: Update existing peer?
-            let peer = old_peer.blocking_lock();
-            let index = peer.index();
-            let old_allowed_ips = peer
-                .allowed_ips()
-                .map(|(addr, cidr)| AllowedIP { addr, cidr })
-                .collect();
-            drop(peer);
+        let (index, old_allowed_ips, old_daita_settings) = match self.remove_peer(&pub_key).await {
+            None => (self.next_index(), vec![], None),
+            Some(old_peer) => {
+                // TODO: Update existing peer?
+                let peer = old_peer.lock().await;
+                let index = peer.index();
+                let old_allowed_ips = peer
+                    .allowed_ips()
+                    .map(|(addr, cidr)| AllowedIP { addr, cidr })
+                    .collect();
+                let old_daita_settings = peer.daita_settings().cloned();
 
-            // TODO: Match pubkey instead of index
-            self.peers_by_ip
-                .remove(&|p| p.blocking_lock().index() == index);
+                drop(peer);
 
-            (index, old_allowed_ips)
-        } else {
-            (self.next_index(), vec![])
+                // TODO: Match pubkey instead of index
+                let mut remove_list = vec![];
+                for (peer, addr, cidr) in self.peers_by_ip.iter() {
+                    if peer.lock().await.index() == index {
+                        remove_list.push(IpNetwork::new(addr, cidr).unwrap());
+                    }
+                }
+                for network in remove_list {
+                    self.peers_by_ip.remove_network(network);
+                }
+
+                (index, old_allowed_ips, old_daita_settings)
+            }
         };
 
         // Update an existing peer or add peer
@@ -412,7 +467,14 @@ impl<T: DeviceTransports> Device<T> {
             new_allowed_ips.to_vec()
         };
 
-        let peer = Peer::new(tunn, index, endpoint, &allowed_ips, preshared_key);
+        let peer = Peer::new(
+            tunn,
+            index,
+            endpoint,
+            &allowed_ips,
+            preshared_key,
+            daita_settings.or(old_daita_settings),
+        );
         let peer = Arc::new(Mutex::new(peer));
 
         self.peers_by_idx.insert(index, Arc::clone(&peer));
@@ -436,6 +498,7 @@ impl<T: DeviceTransports> Device<T> {
             api: None,
             udp_factory,
             tun_tx: Arc::new(Mutex::new(tun_tx)),
+            tun_rx_mtu: tun_rx.mtu(),
             tun_rx: Arc::new(Mutex::new(tun_rx)),
             fwmark: Default::default(),
             key_pair: Default::default(),
@@ -447,16 +510,13 @@ impl<T: DeviceTransports> Device<T> {
             port: 0,
             connection: None,
         };
-
         let device = Arc::new(RwLock::new(device));
-
         if let Some(channel) = config.api {
             device.write().await.api = Some(Task::spawn(
                 "handle_api",
                 Device::handle_api(Arc::downgrade(&device), channel),
             ));
         }
-
         device
     }
 
@@ -580,12 +640,15 @@ impl<T: DeviceTransports> Device<T> {
                 match p.update_timers() {
                     Ok(Some(packet)) => {
                         drop(p);
+
+                        // NOTE: we don't bother with triggering TunnelRecv DAITA events here.
+
                         match endpoint_addr {
                             SocketAddr::V4(_) => {
-                                udp4.send_to(packet.into_bytes(), endpoint_addr).await.ok()
+                                udp4.send_to(packet.into(), endpoint_addr).await.ok()
                             }
                             SocketAddr::V6(_) => {
-                                udp6.send_to(packet.into_bytes(), endpoint_addr).await.ok()
+                                udp6.send_to(packet.into(), endpoint_addr).await.ok()
                             }
                         };
                     }
@@ -620,7 +683,7 @@ impl<T: DeviceTransports> Device<T> {
             let parsed_packet = match rate_limiter.verify_packet(Some(addr.ip()), src_buf) {
                 Ok(packet) => packet,
                 Err(TunnResult::WriteToNetwork(cookie)) => {
-                    if let Err(_err) = udp_tx.send_to(cookie.into_bytes(), addr).await {
+                    if let Err(_err) = udp_tx.send_to(cookie.into(), addr).await {
                         log::trace!("udp.send_to failed");
                         break;
                     }
@@ -653,40 +716,69 @@ impl<T: DeviceTransports> Device<T> {
                 WgKind::CookieReply(p) => peers_by_idx.get(&(p.receiver_idx.get() >> 8)),
                 WgKind::Data(p) => peers_by_idx.get(&(p.header.receiver_idx.get() >> 8)),
             };
-            let Some(peer) = peer else {
-                continue;
-            };
+            let Some(peer) = peer else { continue };
             let mut peer = peer.lock().await;
 
-            match peer.tunnel.handle_incoming_packet(parsed_packet) {
+            let Peer { tunnel, daita, .. } = &mut *peer;
+
+            if let Some(daita) = daita
+                && let WgKind::Data(packet) = &parsed_packet
+            {
+                daita.before_data_decapsulate(packet);
+            };
+
+            match tunnel.handle_incoming_packet(parsed_packet) {
                 TunnResult::Done => (),
                 TunnResult::Err(_) => continue,
+                // Flush pending queue
                 TunnResult::WriteToNetwork(packet) => {
-                    if let Err(_err) = udp_tx.send_to(packet.into_bytes(), addr).await {
-                        log::trace!("udp.send_to failed");
-                        break;
-                    }
+                    let not_blocked_packets = std::iter::once(packet)
+                        .chain(std::iter::from_fn(|| tunnel.next_queued_packet()))
+                        .filter_map(|p| match daita {
+                            Some(daita) => daita.after_data_encapsulate(p),
+                            None => Some(p),
+                        });
 
-                    // Flush pending queue
-                    while let Some(packet) = peer.tunnel.next_queued_packet() {
-                        if let Err(_err) = udp_tx.send_to(packet.into_bytes(), addr).await {
+                    for packet in not_blocked_packets {
+                        if let Err(_err) = udp_tx.send_to(packet.into(), addr).await {
                             log::trace!("udp.send_to failed");
                             break;
                         }
                     }
                 }
-                TunnResult::WriteToTunnelV4(packet) => {
-                    if peer.is_allowed_ip(packet.header.destination())
-                        && let Err(_err) = tun_tx.send(packet.into()).await
-                    {
-                        log::trace!("buffered_tun_send.send failed");
-                        break;
+                TunnResult::WriteToTunnel(mut packet) => {
+                    if let Some(daita) = daita {
+                        match daita.after_data_decapsulate(packet) {
+                            Some(new) => packet = new,
+                            None => continue,
+                        }
                     }
-                }
-                TunnResult::WriteToTunnelV6(packet) => {
-                    if peer.is_allowed_ip(packet.header.destination())
-                        && let Err(_err) = tun_tx.send(packet.into()).await
-                    {
+
+                    // keepalive
+                    if packet.is_empty() {
+                        continue;
+                    }
+                    let Ok(packet) = packet.try_into_ipvx() else {
+                        continue;
+                    };
+
+                    // check whether `peer` is allowed to send us packets from `source`
+                    let (source, packet): (IpAddr, _) = packet.either(
+                        |ipv4| (ipv4.header.source().into(), ipv4.into()),
+                        |ipv6| (ipv6.header.source().into(), ipv6.into()),
+                    );
+                    if !peer.is_allowed_ip(source) {
+                        if cfg!(debug_assertions) {
+                            let unspecified = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0).into();
+                            log::warn!(
+                                "peer at {} is not allowed to send us packets from: {source}",
+                                peer.endpoint().addr.unwrap_or(unspecified)
+                            );
+                        }
+                        continue;
+                    }
+
+                    if let Err(_err) = tun_tx.send(packet).await {
                         log::trace!("buffered_tun_send.send failed");
                         break;
                     }
@@ -720,8 +812,6 @@ impl<T: DeviceTransports> Device<T> {
                     continue;
                 };
 
-                let packet = packet.into_bytes();
-
                 let Some(device) = device.upgrade() else {
                     return;
                 };
@@ -741,15 +831,30 @@ impl<T: DeviceTransports> Device<T> {
                     continue;
                 };
 
-                let Some(packet) = peer.tunnel.handle_outgoing_packet(packet) else {
+                let Peer { tunnel, daita, .. } = &mut *peer;
+
+                let packet = match daita {
+                    Some(daita) => daita.before_data_encapsulate(packet),
+                    None => packet.into(),
+                };
+
+                let Some(packet) = tunnel.handle_outgoing_packet(packet) else {
                     continue;
+                };
+
+                let packet = match daita {
+                    None => packet.into(),
+                    Some(daita) => match daita.after_data_encapsulate(packet) {
+                        Some(packet) => packet.into(),
+                        None => continue,
+                    },
                 };
 
                 drop(peer); // release lock
 
                 let result = match peer_addr {
-                    SocketAddr::V4(..) => udp4.send_to(packet.into(), peer_addr).await,
-                    SocketAddr::V6(..) => udp6.send_to(packet.into(), peer_addr).await,
+                    SocketAddr::V4(..) => udp4.send_to(packet, peer_addr).await,
+                    SocketAddr::V6(..) => udp6.send_to(packet, peer_addr).await,
                 };
 
                 if result.is_err() {

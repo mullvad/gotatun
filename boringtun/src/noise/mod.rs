@@ -1,6 +1,5 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
-
 pub mod errors;
 pub mod handshake;
 pub mod rate_limiter;
@@ -14,9 +13,7 @@ use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
-use crate::packet::{
-    Ipv4, Ipv6, Packet, Wg, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind,
-};
+use crate::packet::{Packet, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind};
 use crate::x25519;
 
 use std::collections::VecDeque;
@@ -34,9 +31,8 @@ const N_SESSIONS: usize = 8;
 pub enum TunnResult {
     Done,
     Err(WireGuardError),
-    WriteToNetwork(Packet<Wg>),
-    WriteToTunnelV4(Packet<Ipv4>),
-    WriteToTunnelV6(Packet<Ipv6>),
+    WriteToNetwork(WgKind),
+    WriteToTunnel(Packet),
 }
 
 impl From<WireGuardError> for TunnResult {
@@ -124,10 +120,8 @@ impl Tunn {
     /// If there's an active session, return the encapsulated packet. Otherwise, if needed, return
     /// a handshake initiation. `None` is returned if a handshake is already in progress. In that
     /// case, the packet is added to a queue.
-    pub fn handle_outgoing_packet(&mut self, packet: Packet) -> Option<Packet<Wg>> {
-        let current = self.current;
-
-        match self.encapsulate_with_session(packet, current) {
+    pub fn handle_outgoing_packet(&mut self, packet: Packet) -> Option<WgKind> {
+        match self.encapsulate_with_session(packet) {
             Ok(encapsulated_packet) => Some(encapsulated_packet.into()),
             Err(packet) => {
                 // If there is no session, queue the packet for future retry
@@ -140,12 +134,9 @@ impl Tunn {
 
     /// Encapsulate a single packet into a [WgData].
     ///
-    /// Returns `Err(original_packet)` if `current` does not refer to an active session.
-    fn encapsulate_with_session(
-        &mut self,
-        packet: Packet,
-        current: usize,
-    ) -> Result<Packet<WgData>, Packet> {
+    /// Returns `Err(original_packet)` if there is no active session.
+    pub fn encapsulate_with_session(&mut self, packet: Packet) -> Result<Packet<WgData>, Packet> {
+        let current = self.current;
         if let Some(ref session) = self.sessions[current % N_SESSIONS] {
             // Send the packet using an established session
             let packet = session.format_packet_data(packet);
@@ -161,7 +152,7 @@ impl Tunn {
         }
     }
 
-    pub(crate) fn handle_incoming_packet(&mut self, packet: WgKind) -> TunnResult {
+    pub fn handle_incoming_packet(&mut self, packet: WgKind) -> TunnResult {
         match packet {
             WgKind::HandshakeInit(p) => self.handle_handshake_init(p),
             WgKind::HandshakeResp(p) => self.handle_handshake_response(p),
@@ -254,7 +245,10 @@ impl Tunn {
     fn handle_data(&mut self, packet: Packet<WgData>) -> Result<TunnResult, WireGuardError> {
         let decapsulated_packet = self.decapsulate_with_session(packet)?;
 
-        Ok(self.validate_decapsulated_packet(decapsulated_packet))
+        self.timer_tick(TimerName::TimeLastDataPacketReceived);
+        self.rx_bytes += decapsulated_packet.as_bytes().len();
+
+        Ok(TunnResult::WriteToTunnel(decapsulated_packet))
     }
 
     pub fn decapsulate_with_session(
@@ -310,37 +304,8 @@ impl Tunn {
         Some(packet)
     }
 
-    /// Check that packet is an IP packet,
-    /// then truncate to [Ipv4Header::total_len](crate::packet::Ipv4Header::total_len)
-    /// or [Ipv6Header::payload_length](crate::packet::Ipv6Header::payload_length).
-    ///
-    /// Returns the truncated packet and the source IP as [TunnResult::WriteToTunnelV4] (or `*V6`).
-    pub fn validate_decapsulated_packet(&mut self, packet: Packet) -> TunnResult {
-        // keepalive
-        if packet.is_empty() {
-            return TunnResult::Done;
-        }
-
-        let Ok(packet) = packet.try_into_ipvx() else {
-            return TunnResult::Err(WireGuardError::InvalidPacket);
-        };
-
-        self.timer_tick(TimerName::TimeLastDataPacketReceived);
-
-        match packet {
-            either::Either::Left(ipv4) => {
-                self.rx_bytes += ipv4.as_bytes().len();
-                TunnResult::WriteToTunnelV4(ipv4)
-            }
-            either::Either::Right(ipv6) => {
-                self.rx_bytes += ipv6.as_bytes().len();
-                TunnResult::WriteToTunnelV6(ipv6)
-            }
-        }
-    }
-
     /// Get the first packet from [Self::packet_queue], and try to encapsulate it.
-    pub fn next_queued_packet(&mut self) -> Option<Packet<Wg>> {
+    pub fn next_queued_packet(&mut self) -> Option<WgKind> {
         self.dequeue_packet()
             .and_then(|packet| self.handle_outgoing_packet(packet))
     }
@@ -406,6 +371,7 @@ impl Tunn {
 mod tests {
     #[cfg(feature = "mock_instant")]
     use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT};
+    use crate::packet::Ipv4;
 
     use super::*;
     use bytes::BytesMut;
@@ -443,9 +409,8 @@ mod tests {
             unreachable!("expected WriteToNetwork");
         };
 
-        let packet_type = handshake_resp.packet_type;
-        let Ok(WgKind::HandshakeResp(handshake_resp)) = handshake_resp.into_kind() else {
-            unreachable!("expected WgHandshakeResp, got {packet_type:?}");
+        let WgKind::HandshakeResp(handshake_resp) = handshake_resp else {
+            unreachable!("expected WgHandshakeResp, got {handshake_resp:?}");
         };
 
         handshake_resp
@@ -462,9 +427,8 @@ mod tests {
             unreachable!("expected WriteToNetwork")
         };
 
-        let packet_type = keepalive.packet_type;
-        let Ok(WgKind::Data(keepalive)) = keepalive.into_kind() else {
-            unreachable!("expected WgData, got {packet_type:?}");
+        let WgKind::Data(keepalive) = keepalive else {
+            unreachable!("expected WgData, got {keepalive:?}");
         };
 
         keepalive
@@ -472,7 +436,7 @@ mod tests {
 
     fn parse_keepalive(tun: &mut Tunn, keepalive: Packet<WgData>) {
         let result = tun.handle_incoming_packet(WgKind::Data(keepalive));
-        assert!(matches!(result, TunnResult::Done));
+        assert!(matches!(result, TunnResult::WriteToTunnel(p) if p.is_empty()));
     }
 
     fn create_two_tuns_and_handshake() -> (Tunn, Tunn) {
@@ -502,7 +466,6 @@ mod tests {
             .update_timers()
             .expect("update_timers should succeed")
             .unwrap();
-        let packet = packet.into_kind().unwrap();
         assert!(matches!(packet, WgKind::HandshakeInit(..)));
     }
 
@@ -624,11 +587,10 @@ mod tests {
             .handle_outgoing_packet(sent_packet_buf.clone().into_bytes())
             .unwrap();
 
-        let data = data.into_kind().unwrap();
         assert!(matches!(data, WgKind::Data(..)));
 
         let data = their_tun.handle_incoming_packet(data);
-        let recv_packet_buf = if let TunnResult::WriteToTunnelV4(recv) = data {
+        let recv_packet_buf = if let TunnResult::WriteToTunnel(recv) = data {
             recv
         } else {
             unreachable!("expected WritetoTunnelV4");

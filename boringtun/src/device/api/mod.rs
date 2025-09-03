@@ -5,7 +5,7 @@ pub mod command;
 
 use super::peer::AllowedIP;
 use super::{Connection, Device, Reconfigure};
-use crate::device::DeviceTransports;
+use crate::device::{DeviceTransports, PeerUpdateRequest};
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
 use eyre::{Context, bail, eyre};
@@ -13,7 +13,7 @@ use libc::EINVAL;
 use std::fmt::Debug;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::str::FromStr;
-use std::sync::Weak;
+use std::sync::{Weak, atomic};
 use tokio::sync::{RwLock, mpsc, oneshot};
 
 #[cfg(unix)]
@@ -279,11 +279,6 @@ impl<T: DeviceTransports> Device<T> {
     //                 return Action::Exit;
     //             }
     //
-    //             // Periodically read the mtu of the interface in case it changes
-    //             if let Ok(mtu) = d.iface.mtu() {
-    //                 d.mtu.store(mtu, Ordering::Relaxed);
-    //             }
-    //
     //             Action::Continue
     //         }),
     //         std::time::Duration::from_millis(1000),
@@ -300,6 +295,7 @@ async fn on_api_get(_: Get, d: &Device<impl DeviceTransports>) -> GetResponse {
         let peer = peer.lock().await;
         let (_, tx_bytes, rx_bytes, ..) = peer.tunnel.stats();
         let endpoint = peer.endpoint().addr;
+        let padding_overhead = peer.daita.as_ref().map(|daita| daita.padding_overhead());
 
         peers.push(GetPeer {
             peer: Peer {
@@ -316,6 +312,11 @@ async fn on_api_get(_: Get, d: &Device<impl DeviceTransports>) -> GetResponse {
             last_handshake_time_nsec: peer.time_since_last_handshake().map(|d| d.subsec_nanos()),
             rx_bytes: Some(rx_bytes as u64),
             tx_bytes: Some(tx_bytes as u64),
+            tx_padding_bytes: padding_overhead.map(|p| p.tx_padding_bytes as u64),
+            tx_padding_packet_bytes: padding_overhead
+                .map(|p| p.tx_padding_packet_bytes.load(atomic::Ordering::SeqCst) as u64),
+            rx_padding_bytes: padding_overhead.map(|p| p.rx_padding_bytes as u64),
+            rx_padding_packet_bytes: padding_overhead.map(|p| p.rx_padding_packet_bytes as u64),
         });
     }
 
@@ -387,6 +388,8 @@ async fn on_api_set(
         let _ = fwmark;
     }
 
+    let mut pending_peer_updates = vec![];
+
     for peer in peers {
         let SetPeer {
             peer:
@@ -400,6 +403,7 @@ async fn on_api_set(
             remove,
             update_only,
             replace_allowed_ips,
+            daita_settings,
         } = peer;
 
         let public_key = x25519_dalek::PublicKey::from(public_key.0);
@@ -413,15 +417,37 @@ async fn on_api_set(
             command::SetUnset::Unset => todo!("not sure how to handle this"),
         });
 
-        device.update_peer(
+        let daita_settings = match daita_settings {
+            Some(daita_settings) => {
+                // TODO: Check if there are any changes
+                reconfigure |= Reconfigure::Yes;
+
+                // Parse from API repr to actual settings
+                match crate::device::daita::DaitaSettings::try_from(daita_settings) {
+                    Ok(settings) => Some(settings),
+                    Err(e) => {
+                        log::error!("Invalid DAITA settings: {e}");
+                        return (SetResponse { errno: EINVAL }, Reconfigure::No);
+                    }
+                }
+            }
+            None => None,
+        };
+        let update_peer = PeerUpdateRequest {
             public_key,
             remove,
             replace_allowed_ips,
             endpoint,
-            allowed_ip.as_slice(),
-            persistent_keepalive_interval,
+            new_allowed_ips: allowed_ip,
+            keepalive: persistent_keepalive_interval,
             preshared_key,
-        );
+            daita_settings,
+        };
+        pending_peer_updates.push(update_peer);
+    }
+
+    for update_peer in pending_peer_updates {
+        device.update_peer(update_peer).await;
     }
 
     (SetResponse { errno: 0 }, reconfigure)
