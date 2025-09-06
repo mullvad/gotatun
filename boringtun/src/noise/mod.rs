@@ -8,6 +8,8 @@ pub mod rate_limiter;
 mod session;
 mod timers;
 
+use tokio::sync::mpsc;
+
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::rate_limiter::RateLimiter;
@@ -267,6 +269,34 @@ impl Tunn {
         self.format_handshake_initiation(dst, false)
     }
 
+    pub fn encapsulate2<'a>(
+        &mut self,
+        src: &[u8],
+        dst2: &'a mut crate::packet::Packet,
+        dst: crate::packet::Packet,
+        encrypt_tx: mpsc::Sender<crate::packet::Packet>,
+    ) -> TunnResult<'a> {
+        // FIXME: double buffer hack
+        let current = self.current;
+        if let Some(ref session) = self.sessions[current % N_SESSIONS] {
+            // Send the packet using an established session
+            session.format_packet_data2(src, dst, encrypt_tx);
+            // FIXME: updating stuff before encryption
+            self.timer_tick(TimerName::TimeLastPacketSent);
+            // Exclude Keepalive packets from timer update.
+            if !src.is_empty() {
+                self.timer_tick(TimerName::TimeLastDataPacketSent);
+            }
+            self.tx_bytes += src.len();
+            return TunnResult::Done;
+        }
+
+        // If there is no session, queue the packet for future retry
+        self.queue_packet(src);
+        // Initiate a new handshake if none is in progress
+        self.format_handshake_initiation(dst2, false)
+    }
+
     /// Receives a UDP datagram from the network and parses it.
     /// Returns TunnResult.
     ///
@@ -315,7 +345,7 @@ impl Tunn {
         .unwrap_or_else(TunnResult::from)
     }
 
-    fn handle_handshake_init<'a>(
+    pub fn handle_handshake_init<'a>(
         &mut self,
         p: HandshakeInit,
         dst: &'a mut [u8],
@@ -337,7 +367,7 @@ impl Tunn {
         Ok(TunnResult::WriteToNetwork(packet))
     }
 
-    fn handle_handshake_response<'a>(
+    pub fn handle_handshake_response<'a>(
         &mut self,
         p: HandshakeResponse,
         dst: &'a mut [u8],
@@ -365,7 +395,7 @@ impl Tunn {
         Ok(TunnResult::WriteToNetwork(keepalive_packet)) // Send a keepalive as a response
     }
 
-    fn handle_cookie_reply<'a>(
+    pub fn handle_cookie_reply<'a>(
         &mut self,
         p: PacketCookieReply,
     ) -> Result<TunnResult<'a>, WireGuardError> {
@@ -397,7 +427,7 @@ impl Tunn {
     }
 
     /// Decrypts a data packet, and stores the decapsulated packet in dst.
-    fn handle_data<'a>(
+    pub fn handle_data<'a>(
         &mut self,
         packet: PacketData,
         dst: &'a mut [u8],
@@ -421,6 +451,42 @@ impl Tunn {
         self.timer_tick(TimerName::TimeLastPacketReceived);
 
         Ok(self.validate_decapsulated_packet(decapsulated_packet))
+    }
+
+    /// Decrypts a data packet, and stores the decapsulated packet in dst.
+    pub fn handle_data2<'a>(
+        &mut self,
+        packet: PacketData,
+        //dst: &'a mut [u8],
+        dst: crate::packet::Packet,
+        decrypt_tx: mpsc::Sender<crate::packet::Packet>,
+    ) -> Result<TunnResult<'a>, WireGuardError> {
+        let r_idx = packet.receiver_idx as usize;
+        let idx = r_idx % N_SESSIONS;
+
+        // Get the (probably) right session
+        let session = self.sessions[idx].as_ref();
+        let session = session.ok_or_else(|| {
+            //log::trace!(message = "No current session available", remote_idx = r_idx);
+            log::trace!("No current session available: {r_idx}");
+            WireGuardError::NoCurrentSession
+        })?;
+
+        // just queue decryption
+        session.receive_packet_data2(packet, dst, decrypt_tx)?;
+
+        // FIXME: should come after receiving and validating
+        self.set_current_session(r_idx);
+
+        self.timer_tick(TimerName::TimeLastPacketReceived);
+
+        // FIXME: broke counter :)
+        self.timer_tick(TimerName::TimeLastDataPacketReceived);
+        self.rx_bytes += 123;
+
+        // FIXME: no validation
+
+        Ok(TunnResult::Done)
     }
 
     /// Formats a new handshake initiation message and store it in dst. If force_resend is true will send

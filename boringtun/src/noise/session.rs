@@ -5,7 +5,11 @@ use super::PacketData;
 use crate::noise::errors::WireGuardError;
 use parking_lot::Mutex;
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+use tokio::sync::mpsc;
 
 pub struct Session {
     pub(crate) receiving_index: u32,
@@ -229,6 +233,60 @@ impl Session {
         &mut dst[..DATA_OFFSET + n]
     }
 
+    pub(super) fn format_packet_data2(
+        &self,
+        src: &[u8],
+        mut dst: crate::packet::Packet,
+        encrypt_tx: mpsc::Sender<crate::packet::Packet>,
+    ) {
+        if dst.len() < src.len() + super::DATA_OVERHEAD_SZ {
+            panic!("The destination buffer is too small");
+        }
+
+        let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
+
+        let sending_index = self.sending_index;
+        let sender = self.sender.clone();
+        let len = src.len();
+
+        dst[DATA_OFFSET..DATA_OFFSET + len].copy_from_slice(src);
+
+        tokio::spawn(async move {
+            let (message_type, rest) = dst.split_at_mut(4);
+            let (receiver_index, rest) = rest.split_at_mut(4);
+            let (counter, data) = rest.split_at_mut(8);
+
+            message_type.copy_from_slice(&super::DATA.to_le_bytes());
+            receiver_index.copy_from_slice(&sending_index.to_le_bytes());
+            counter.copy_from_slice(&sending_key_counter.to_le_bytes());
+
+            // TODO: spec requires padding to 16 bytes, but actually works fine without it
+            let n = {
+                let mut nonce = [0u8; 12];
+                nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
+                sender
+                    .seal_in_place_separate_tag(
+                        Nonce::assume_unique_for_key(nonce),
+                        Aad::from(&[]),
+                        &mut data[..len],
+                    )
+                    .map(|tag| {
+                        data[len..len + AEAD_SIZE].copy_from_slice(tag.as_ref());
+                        len + AEAD_SIZE
+                    })
+                    .unwrap()
+            };
+
+            dst.truncate(DATA_OFFSET + n);
+
+            if let Err(err) = encrypt_tx.try_send(dst) {
+                log::error!("Failed to send packet to encrypted queue (likely full): {err}");
+            }
+        });
+
+        //&mut dst[..DATA_OFFSET + n]
+    }
+
     /// packet - a data packet we received from the network
     /// dst - pre-allocated space to hold the encapsulated IP packet, to send to the interface
     ///       dst will always take less space than src
@@ -265,6 +323,64 @@ impl Session {
         // After decryption is done, check counter again, and mark as received
         self.receiving_counter_mark(packet.counter)?;
         Ok(ret)
+    }
+
+    /// packet - a data packet we received from the network
+    /// dst - pre-allocated space to hold the encapsulated IP packet, to send to the interface
+    ///       dst will always take less space than src
+    /// return the size of the encapsulated packet on success
+    pub(super) fn receive_packet_data2<'a>(
+        &self,
+        packet: PacketData<'_>,
+        mut dst: crate::packet::Packet,
+        decrypt_tx: mpsc::Sender<crate::packet::Packet>,
+    ) -> Result<(), WireGuardError> {
+        let ct_len = packet.encrypted_encapsulated_packet.len();
+        /*if dst.len() < ct_len {
+            // This is a very incorrect use of the library, therefore panic and not error
+            panic!("The destination buffer is too small");
+        }*/
+        if packet.receiver_idx != self.receiving_index {
+            return Err(WireGuardError::WrongIndex);
+        }
+        // Don't reuse counters, in case this is a replay attack we want to quickly check the counter without running expensive decryption
+        self.receiving_counter_quick_check(packet.counter)?;
+
+        dst[..ct_len].copy_from_slice(packet.encrypted_encapsulated_packet);
+        dst.truncate(ct_len);
+        let counter = packet.counter;
+        /*self.receiver
+        .open_in_place(
+            Nonce::assume_unique_for_key(nonce),
+            Aad::from(&[]),
+            &mut dst[..ct_len],
+        )
+        .map_err(|_| WireGuardError::InvalidAeadTag)?*/
+
+        // TODO: spawn a fixed number of worker threads and handle all queued packets on them
+        let receiver = self.receiver.clone();
+        tokio::spawn(async move {
+            let mut nonce = [0u8; 12];
+            nonce[4..12].copy_from_slice(&counter.to_le_bytes());
+            receiver
+                .open_in_place(
+                    Nonce::assume_unique_for_key(nonce),
+                    Aad::from(&[]),
+                    &mut dst,
+                )
+                .map_err(|_| WireGuardError::InvalidAeadTag)
+                .unwrap();
+
+            if let Err(err) = decrypt_tx.try_send(dst) {
+                log::error!("Failed to send packet to decrypt queue (likely full): {err}");
+            }
+        });
+
+        // FIXME: this is broken because we're not waiting for decryption
+
+        // After decryption is done, check counter again, and mark as received
+        self.receiving_counter_mark(packet.counter)?;
+        Ok(())
     }
 
     /// Returns the estimated downstream packet loss for this session

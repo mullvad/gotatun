@@ -18,14 +18,14 @@ use std::ops::BitOrAssign;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::join;
-use tokio::sync::Mutex;
 use tokio::sync::RwLock;
+use tokio::sync::{Mutex, mpsc};
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::{Tunn, TunnResult};
-use crate::packet::PacketBufPool;
+use crate::packet::{Packet, PacketBufPool};
 use crate::task::Task;
 use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
 use crate::tun::{IpRecv, IpSend};
@@ -621,6 +621,22 @@ impl<T: DeviceTransports> Device<T> {
             (private_key, public_key, rate_limiter)
         };
 
+        let (decrypted_tx, mut decrypted_rx) = mpsc::channel::<Packet>(1000);
+        tokio::spawn(async move {
+            // TODO: out of order packets
+            // TODO: check allowed IPs
+            while let Some(packet) = decrypted_rx.recv().await {
+                let Ok(packet) = packet.try_into_ip() else {
+                    log::trace!("Invalid packet");
+                    continue;
+                };
+                if let Err(_err) = tun_tx.send(packet).await {
+                    log::trace!("tun_tx.send failed");
+                    break;
+                }
+            }
+        });
+
         while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
             let mut dst_buf = packet_pool.get();
 
@@ -658,9 +674,23 @@ impl<T: DeviceTransports> Device<T> {
                 continue;
             };
             let mut peer = peer.lock().await;
-            match peer
+            /*match peer
                 .tunnel
                 .handle_verified_packet(parsed_packet, &mut dst_buf[..])
+            {*/
+
+            match match parsed_packet {
+                Packet::HandshakeInit(p) => peer.tunnel.handle_handshake_init(p, &mut dst_buf[..]),
+                Packet::HandshakeResponse(p) => {
+                    peer.tunnel.handle_handshake_response(p, &mut dst_buf[..])
+                }
+                Packet::PacketCookieReply(p) => peer.tunnel.handle_cookie_reply(p),
+                Packet::PacketData(p) => {
+                    let dst_buf2 = packet_pool.get();
+                    peer.tunnel.handle_data2(p, dst_buf2, decrypted_tx.clone())
+                }
+            }
+            .unwrap_or_else(TunnResult::from)
             {
                 TunnResult::Done => (),
                 TunnResult::Err(_) => continue,
@@ -694,7 +724,7 @@ impl<T: DeviceTransports> Device<T> {
                     }
                 }
                 TunnResult::WriteToTunnelV4(packet, addr) => {
-                    let len = packet.len();
+                    /*let len = packet.len();
                     dst_buf.truncate(len); // hacky but works
                     let Ok(dst_buf) = dst_buf.try_into_ip() else {
                         log::trace!("Invalid packet");
@@ -705,10 +735,10 @@ impl<T: DeviceTransports> Device<T> {
                     {
                         log::trace!("buffered_tun_send.send failed");
                         break;
-                    }
+                    }*/
                 }
                 TunnResult::WriteToTunnelV6(packet, addr) => {
-                    let len = packet.len();
+                    /*let len = packet.len();
                     dst_buf.truncate(len); // hacky but works
                     let Ok(dst_buf) = dst_buf.try_into_ip() else {
                         log::trace!("Invalid packet");
@@ -719,7 +749,7 @@ impl<T: DeviceTransports> Device<T> {
                     {
                         log::trace!("buffered_tun_send.send failed");
                         break;
-                    }
+                    }*/
                 }
             };
         }
@@ -731,10 +761,48 @@ impl<T: DeviceTransports> Device<T> {
     async fn handle_outgoing(
         device: Weak<RwLock<Self>>,
         mut tun_rx: impl IpRecv,
-        udp4: impl UdpSend,
-        udp6: impl UdpSend,
+        udp4: impl UdpSend + 'static,
+        udp6: impl UdpSend + 'static,
         mut packet_pool: PacketBufPool,
     ) {
+        let mut endpoint_addr = None;
+        let device2 = device.clone();
+
+        let udp4 = Arc::new(udp4);
+        let udp6 = Arc::new(udp6);
+
+        let (encrypted_tx, mut encrypted_rx) = mpsc::channel::<Packet>(1000);
+        let udp4_2 = udp4.clone();
+        let udp6_2 = udp6.clone();
+        tokio::spawn(async move {
+            // TODO: out of order packets
+            // TODO: endpoint addr depends on peer
+            while let Some(packet) = encrypted_rx.recv().await {
+                if endpoint_addr.is_none() {
+                    // FIXME: hack to get endpoint. broken for multiple peers
+
+                    let Some(dev) = device2.upgrade() else { break };
+                    let dev = dev.read().await;
+                    // FIXME: get correct peer
+                    let Some(p) = dev.peers.values().next() else {
+                        break;
+                    };
+                    endpoint_addr = p.lock().await.endpoint().addr
+                };
+                if let Some(SocketAddr::V4(addr)) = endpoint_addr {
+                    if udp4_2.send_to(packet, addr.into()).await.is_err() {
+                        break;
+                    }
+                } else if let Some(SocketAddr::V6(addr)) = endpoint_addr {
+                    if udp6_2.send_to(packet, addr.into()).await.is_err() {
+                        break;
+                    }
+                } else {
+                    log::error!("No endpoint");
+                }
+            }
+        });
+
         loop {
             let packets = match tun_rx.recv(&mut packet_pool).await {
                 Ok(packets) => packets,
@@ -760,10 +828,13 @@ impl<T: DeviceTransports> Device<T> {
                 };
 
                 let mut dst_buf = packet_pool.get();
-                match peer
-                    .tunnel
-                    .encapsulate(&packet.into_bytes(), &mut dst_buf[..])
-                {
+                let dst_buf2 = packet_pool.get();
+                match peer.tunnel.encapsulate2(
+                    &packet.into_bytes(),
+                    &mut dst_buf,
+                    dst_buf2,
+                    encrypted_tx.clone(),
+                ) {
                     TunnResult::Done => {}
                     TunnResult::Err(e) => {
                         log::error!("Encapsulate error={e:?}: {e:?}");
