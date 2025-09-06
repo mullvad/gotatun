@@ -22,6 +22,7 @@ mock-instant = ["mock_instant"]
 pcap = ["dep:pcap-file"]
 
 [dependencies]
+crossbeam = "*"
 base64 = "0.13"
 hex = "0.4"
 untrusted = "0.9.0"

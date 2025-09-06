@@ -621,7 +621,7 @@ impl<T: DeviceTransports> Device<T> {
             (private_key, public_key, rate_limiter)
         };
 
-        let (decrypted_tx, mut decrypted_rx) = mpsc::channel::<Packet>(1000);
+        let (decrypted_tx, mut decrypted_rx) = mpsc::channel::<Packet>(5000);
         tokio::spawn(async move {
             // TODO: out of order packets
             // TODO: check allowed IPs
@@ -771,7 +771,7 @@ impl<T: DeviceTransports> Device<T> {
         let udp4 = Arc::new(udp4);
         let udp6 = Arc::new(udp6);
 
-        let (encrypted_tx, mut encrypted_rx) = mpsc::channel::<Packet>(1000);
+        let (encrypted_tx, mut encrypted_rx) = mpsc::channel::<Packet>(5000);
         let udp4_2 = udp4.clone();
         let udp6_2 = udp6.clone();
         tokio::spawn(async move {

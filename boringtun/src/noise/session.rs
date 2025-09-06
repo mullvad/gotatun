@@ -16,8 +16,18 @@ pub struct Session {
     sending_index: u32,
     receiver: LessSafeKey,
     sender: LessSafeKey,
-    sending_key_counter: AtomicUsize,
+    sending_key_counter: Arc<AtomicUsize>,
     receiving_key_counter: Mutex<ReceivingKeyCounterValidator>,
+    enc_tx: crossbeam::channel::Sender<(
+        crate::packet::Packet,
+        usize,
+        mpsc::Sender<crate::packet::Packet>,
+    )>,
+    dec_tx: crossbeam::channel::Sender<(
+        crate::packet::Packet,
+        u64,
+        mpsc::Sender<crate::packet::Packet>,
+    )>,
 }
 
 impl std::fmt::Debug for Session {
@@ -155,6 +165,78 @@ impl ReceivingKeyCounterValidator {
     }
 }
 
+fn run_encryption_thread(
+    sending_key_counter: Arc<AtomicUsize>,
+    sending_index: u32,
+    enc_rx: crossbeam::channel::Receiver<(
+        crate::packet::Packet,
+        usize,
+        mpsc::Sender<crate::packet::Packet>,
+    )>,
+    sender: LessSafeKey,
+) {
+    while let Ok((mut dst, len, encrypt_tx)) = enc_rx.recv() {
+        let key_counter = sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
+
+        let (message_type, rest) = dst.split_at_mut(4);
+        let (receiver_index, rest) = rest.split_at_mut(4);
+        let (counter, data) = rest.split_at_mut(8);
+
+        message_type.copy_from_slice(&super::DATA.to_le_bytes());
+        receiver_index.copy_from_slice(&sending_index.to_le_bytes());
+        counter.copy_from_slice(&key_counter.to_le_bytes());
+
+        // TODO: spec requires padding to 16 bytes, but actually works fine without it
+        let n = {
+            let mut nonce = [0u8; 12];
+            nonce[4..12].copy_from_slice(&key_counter.to_le_bytes());
+            sender
+                .seal_in_place_separate_tag(
+                    Nonce::assume_unique_for_key(nonce),
+                    Aad::from(&[]),
+                    &mut data[..len],
+                )
+                .map(|tag| {
+                    data[len..len + AEAD_SIZE].copy_from_slice(tag.as_ref());
+                    len + AEAD_SIZE
+                })
+                .unwrap()
+        };
+
+        dst.truncate(DATA_OFFSET + n);
+
+        if let Err(err) = encrypt_tx.try_send(dst) {
+            log::error!("Failed to send packet to encrypted queue (likely full): {err}");
+        }
+    }
+}
+
+fn run_decryption_thread(
+    dec_rx: crossbeam::channel::Receiver<(
+        crate::packet::Packet,
+        u64,
+        mpsc::Sender<crate::packet::Packet>,
+    )>,
+    receiver: LessSafeKey,
+) {
+    while let Ok((mut dst, counter, decrypt_tx)) = dec_rx.recv() {
+        let mut nonce = [0u8; 12];
+        nonce[4..12].copy_from_slice(&counter.to_le_bytes());
+        receiver
+            .open_in_place(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(&[]),
+                &mut dst,
+            )
+            .map_err(|_| WireGuardError::InvalidAeadTag)
+            .unwrap();
+
+        if let Err(err) = decrypt_tx.try_send(dst) {
+            log::error!("Failed to send packet to decrypt queue (likely full): {err}");
+        }
+    }
+}
+
 impl Session {
     pub(super) fn new(
         local_index: u32,
@@ -162,15 +244,43 @@ impl Session {
         receiving_key: [u8; 32],
         sending_key: [u8; 32],
     ) -> Session {
+        let encryption_thread_count = std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(8);
+
+        let sending_key_counter = Arc::new(AtomicUsize::new(0));
+
+        let sender = LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &sending_key).unwrap());
+
+        let (enc_tx, enc_rx) = crossbeam::channel::bounded(5000);
+        for _ in 0..encryption_thread_count {
+            let counter = sending_key_counter.clone();
+            let enc_rx_copy = enc_rx.clone();
+            let sender = sender.clone();
+            std::thread::spawn(move || {
+                run_encryption_thread(counter, peer_index, enc_rx_copy, sender)
+            });
+        }
+
+        let receiver =
+            LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap());
+
+        let (dec_tx, dec_rx) = crossbeam::channel::bounded(5000);
+        for _ in 0..encryption_thread_count {
+            let dec_rx_copy = dec_rx.clone();
+            let receiver = receiver.clone();
+            std::thread::spawn(move || run_decryption_thread(dec_rx_copy, receiver));
+        }
+
         Session {
             receiving_index: local_index,
             sending_index: peer_index,
-            receiver: LessSafeKey::new(
-                UnboundKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
-            ),
+            receiver,
             sender: LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &sending_key).unwrap()),
-            sending_key_counter: AtomicUsize::new(0),
+            sending_key_counter,
             receiving_key_counter: Mutex::new(Default::default()),
+            enc_tx,
+            dec_tx,
         }
     }
 
@@ -243,48 +353,10 @@ impl Session {
             panic!("The destination buffer is too small");
         }
 
-        let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
-
-        let sending_index = self.sending_index;
-        let sender = self.sender.clone();
-        let len = src.len();
-
-        dst[DATA_OFFSET..DATA_OFFSET + len].copy_from_slice(src);
-
-        tokio::spawn(async move {
-            let (message_type, rest) = dst.split_at_mut(4);
-            let (receiver_index, rest) = rest.split_at_mut(4);
-            let (counter, data) = rest.split_at_mut(8);
-
-            message_type.copy_from_slice(&super::DATA.to_le_bytes());
-            receiver_index.copy_from_slice(&sending_index.to_le_bytes());
-            counter.copy_from_slice(&sending_key_counter.to_le_bytes());
-
-            // TODO: spec requires padding to 16 bytes, but actually works fine without it
-            let n = {
-                let mut nonce = [0u8; 12];
-                nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
-                sender
-                    .seal_in_place_separate_tag(
-                        Nonce::assume_unique_for_key(nonce),
-                        Aad::from(&[]),
-                        &mut data[..len],
-                    )
-                    .map(|tag| {
-                        data[len..len + AEAD_SIZE].copy_from_slice(tag.as_ref());
-                        len + AEAD_SIZE
-                    })
-                    .unwrap()
-            };
-
-            dst.truncate(DATA_OFFSET + n);
-
-            if let Err(err) = encrypt_tx.try_send(dst) {
-                log::error!("Failed to send packet to encrypted queue (likely full): {err}");
-            }
-        });
-
-        //&mut dst[..DATA_OFFSET + n]
+        dst[DATA_OFFSET..DATA_OFFSET + src.len()].copy_from_slice(src);
+        if self.enc_tx.try_send((dst, src.len(), encrypt_tx)).is_err() {
+            log::debug!("Failed to queue packet");
+        }
     }
 
     /// packet - a data packet we received from the network
@@ -348,33 +420,13 @@ impl Session {
 
         dst[..ct_len].copy_from_slice(packet.encrypted_encapsulated_packet);
         dst.truncate(ct_len);
-        let counter = packet.counter;
-        /*self.receiver
-        .open_in_place(
-            Nonce::assume_unique_for_key(nonce),
-            Aad::from(&[]),
-            &mut dst[..ct_len],
-        )
-        .map_err(|_| WireGuardError::InvalidAeadTag)?*/
-
-        // TODO: spawn a fixed number of worker threads and handle all queued packets on them
-        let receiver = self.receiver.clone();
-        tokio::spawn(async move {
-            let mut nonce = [0u8; 12];
-            nonce[4..12].copy_from_slice(&counter.to_le_bytes());
-            receiver
-                .open_in_place(
-                    Nonce::assume_unique_for_key(nonce),
-                    Aad::from(&[]),
-                    &mut dst,
-                )
-                .map_err(|_| WireGuardError::InvalidAeadTag)
-                .unwrap();
-
-            if let Err(err) = decrypt_tx.try_send(dst) {
-                log::error!("Failed to send packet to decrypt queue (likely full): {err}");
-            }
-        });
+        if self
+            .dec_tx
+            .try_send((dst, packet.counter, decrypt_tx))
+            .is_err()
+        {
+            log::debug!("Failed to queue dec packet");
+        }
 
         // FIXME: this is broken because we're not waiting for decryption
 
