@@ -4,8 +4,10 @@
 pub mod allowed_ips;
 
 pub mod api;
+pub mod daita;
 #[cfg(unix)]
 pub mod drop_privileges;
+pub mod hooks;
 #[cfg(test)]
 mod integration_tests;
 pub mod peer;
@@ -20,6 +22,7 @@ use tokio::join;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
+use crate::device::daita::DaitaHooks;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
@@ -136,12 +139,16 @@ pub struct Device<T: DeviceTransports> {
 
     rate_limiter: Option<Arc<RateLimiter>>,
 
+    daita: Option<Arc<Mutex<DaitaHooks>>>,
+
     port: u16,
     udp_factory: T::UdpTransportFactory,
     connection: Option<Connection<T>>,
 
     /// The task that responds to API requests.
     api: Option<Task>,
+    // FIXME
+    //hooks: Arc<DaitaHooks>,
 }
 
 pub(crate) struct Connection<T: DeviceTransports> {
@@ -446,6 +453,7 @@ impl<T: DeviceTransports> Device<T> {
             rate_limiter: None,
             port: 0,
             connection: None,
+            daita: None,
         };
 
         let device = Arc::new(RwLock::new(device));
@@ -615,6 +623,14 @@ impl<T: DeviceTransports> Device<T> {
             let rate_limiter = device.rate_limiter.clone().unwrap();
             (private_key, public_key, rate_limiter)
         };
+        /*let hooks = {
+            let Some(device) = device.upgrade() else {
+                return Ok(());
+            };
+
+            let device = device.read().await;
+            device.hooks.clone()
+        };*/
 
         while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
             let parsed_packet = match rate_limiter.verify_packet(Some(addr.ip()), src_buf) {
@@ -628,6 +644,10 @@ impl<T: DeviceTransports> Device<T> {
                 }
                 Err(_) => continue,
             };
+
+            /*if let WgKind::Data(_) = &parsed_packet {
+                hooks.on_incoming_encapsulated();
+            };*/
 
             let Some(device) = device.upgrade() else {
                 return Ok(());
@@ -676,18 +696,25 @@ impl<T: DeviceTransports> Device<T> {
                     }
                 }
                 TunnResult::WriteToTunnelV4(packet) => {
-                    if peer.is_allowed_ip(packet.header.destination())
-                        && let Err(_err) = tun_tx.send(packet.into()).await {
+                    if peer.is_allowed_ip(packet.header.destination()) {
+                        /*let Some(packet) = hooks.map_incoming_data(packet.into_bytes()) else {
+                            continue;
+                        };*/
+                        if let Err(_err) = tun_tx.send(packet.into()).await {
                             log::trace!("buffered_tun_send.send failed");
                             break;
                         }
+                    }
                 }
                 TunnResult::WriteToTunnelV6(packet) => {
-                    if peer.is_allowed_ip(packet.header.destination())
-                        && let Err(_err) = tun_tx.send(packet.into()).await
-                    {
-                        log::trace!("buffered_tun_send.send failed");
-                        break;
+                    if peer.is_allowed_ip(packet.header.destination()) {
+                        /*let Some(packet) = hooks.map_incoming_data(packet.into_bytes()) else {
+                            continue;
+                        };*/
+                        if let Err(_err) = tun_tx.send(packet.into()).await {
+                            log::trace!("buffered_tun_send.send failed");
+                            break;
+                        }
                     }
                 }
             };
@@ -704,6 +731,15 @@ impl<T: DeviceTransports> Device<T> {
         udp6: impl UdpSend,
         mut packet_pool: PacketBufPool,
     ) {
+        /*let hooks = {
+            let Some(device) = device.upgrade() else {
+                return;
+            };
+
+            let device = device.read().await;
+            device.hooks.clone()
+        };*/
+
         loop {
             let packets = match tun_rx.recv(&mut packet_pool).await {
                 Ok(packets) => packets,
@@ -720,6 +756,7 @@ impl<T: DeviceTransports> Device<T> {
                 };
 
                 let packet = packet.into_bytes();
+                //let packet = hooks.map_outgoing_data(packet);
 
                 let Some(device) = device.upgrade() else {
                     return;
@@ -745,6 +782,10 @@ impl<T: DeviceTransports> Device<T> {
                 };
 
                 drop(peer); // release lock
+
+                /*let Some(packet) = hooks.map_outgoing_encapsulated(packet, peer_addr) else {
+                    continue;
+                };*/
 
                 let result = match peer_addr {
                     SocketAddr::V4(..) => udp4.send_to(packet.into(), peer_addr).await,
