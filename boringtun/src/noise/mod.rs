@@ -1,4 +1,4 @@
-// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+//Bytes/ Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 pub mod errors;
@@ -329,10 +329,12 @@ impl Tunn {
 
         match packet {
             either::Either::Left(ipv4) => {
+                // TODO: Should we instead add length before truncating? see discussion on symmetrical counters
                 self.rx_bytes += ipv4.as_bytes().len();
                 TunnResult::WriteToTunnelV4(ipv4)
             }
             either::Either::Right(ipv6) => {
+                // TODO: Should we instead add length before truncating? see discussion on symmetrical counters
                 self.rx_bytes += ipv6.as_bytes().len();
                 TunnResult::WriteToTunnelV6(ipv6)
             }
