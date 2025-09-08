@@ -18,8 +18,8 @@ use std::ops::BitOrAssign;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::join;
-use tokio::sync::RwLock;
 use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{RwLock, oneshot};
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
@@ -621,11 +621,14 @@ impl<T: DeviceTransports> Device<T> {
             (private_key, public_key, rate_limiter)
         };
 
-        let (decrypted_tx, mut decrypted_rx) = mpsc::channel::<Packet>(5000);
+        let (decrypted_tx, mut decrypted_rx) = mpsc::channel::<oneshot::Receiver<Packet>>(5000);
         tokio::spawn(async move {
-            // TODO: out of order packets
             // TODO: check allowed IPs
-            while let Some(packet) = decrypted_rx.recv().await {
+
+            while let Some(packet_rx) = decrypted_rx.recv().await {
+                let Ok(packet) = packet_rx.await else {
+                    continue;
+                };
                 let Ok(packet) = packet.try_into_ip() else {
                     log::trace!("Invalid packet");
                     continue;
@@ -637,16 +640,17 @@ impl<T: DeviceTransports> Device<T> {
             }
         });
 
+        let mut dst_buf = packet_pool.get();
         while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
-            let mut dst_buf = packet_pool.get();
-
             let parsed_packet =
                 match rate_limiter.verify_packet(Some(addr.ip()), &src_buf, &mut dst_buf[..]) {
                     Ok(packet) => packet,
                     Err(TunnResult::WriteToNetwork(cookie)) => {
                         let len = cookie.len();
-                        dst_buf.truncate(len);
-                        if let Err(_err) = udp_tx.send_to(dst_buf, addr).await {
+                        let mut buf = std::mem::take(&mut dst_buf);
+                        buf.truncate(len);
+                        buf.truncate(len);
+                        if let Err(_err) = udp_tx.send_to(buf, addr).await {
                             log::trace!("udp.send_to failed");
                             break;
                         }
@@ -687,7 +691,11 @@ impl<T: DeviceTransports> Device<T> {
                 Packet::PacketCookieReply(p) => peer.tunnel.handle_cookie_reply(p),
                 Packet::PacketData(p) => {
                     let dst_buf2 = packet_pool.get();
-                    peer.tunnel.handle_data2(p, dst_buf2, decrypted_tx.clone())
+                    let (tx, rx) = oneshot::channel();
+                    if decrypted_tx.send(rx).await.is_err() {
+                        log::error!("Failed to send oneshot to decrypted_tx");
+                    }
+                    peer.tunnel.handle_data2(p, dst_buf2, tx)
                 }
             }
             .unwrap_or_else(TunnResult::from)
@@ -696,8 +704,9 @@ impl<T: DeviceTransports> Device<T> {
                 TunnResult::Err(_) => continue,
                 TunnResult::WriteToNetwork(packet) => {
                     let len = packet.len();
-                    dst_buf.truncate(len);
-                    if let Err(_err) = udp_tx.send_to(dst_buf, addr).await {
+                    let mut buf = std::mem::take(&mut dst_buf);
+                    buf.truncate(len);
+                    if let Err(_err) = udp_tx.send_to(buf, addr).await {
                         log::trace!("udp.send_to failed");
                         break;
                     }
@@ -771,13 +780,16 @@ impl<T: DeviceTransports> Device<T> {
         let udp4 = Arc::new(udp4);
         let udp6 = Arc::new(udp6);
 
-        let (encrypted_tx, mut encrypted_rx) = mpsc::channel::<Packet>(5000);
+        let (encrypted_tx, mut encrypted_rx) = mpsc::channel::<oneshot::Receiver<Packet>>(5000);
         let udp4_2 = udp4.clone();
         let udp6_2 = udp6.clone();
         tokio::spawn(async move {
-            // TODO: out of order packets
             // TODO: endpoint addr depends on peer
-            while let Some(packet) = encrypted_rx.recv().await {
+            while let Some(packet_rx) = encrypted_rx.recv().await {
+                let Ok(packet) = packet_rx.await else {
+                    continue;
+                };
+
                 if endpoint_addr.is_none() {
                     // FIXME: hack to get endpoint. broken for multiple peers
 
@@ -812,6 +824,8 @@ impl<T: DeviceTransports> Device<T> {
                 }
             };
 
+            let mut dst_buf2 = packet_pool.get();
+
             for packet in packets {
                 // Determine peer to use from the destination address
                 let Some(dst_addr) = packet.destination() else {
@@ -828,27 +842,34 @@ impl<T: DeviceTransports> Device<T> {
                 };
 
                 let mut dst_buf = packet_pool.get();
-                let dst_buf2 = packet_pool.get();
+
+                let (oneshot_tx, oneshot_rx) = oneshot::channel();
+
                 match peer.tunnel.encapsulate2(
                     &packet.into_bytes(),
-                    &mut dst_buf,
-                    dst_buf2,
-                    encrypted_tx.clone(),
+                    &mut dst_buf2,
+                    dst_buf,
+                    oneshot_tx,
                 ) {
-                    TunnResult::Done => {}
+                    TunnResult::Done => {
+                        if encrypted_tx.send(oneshot_rx).await.is_err() {
+                            log::error!("Failed to send oneshot to encrypted_tx");
+                        }
+                    }
                     TunnResult::Err(e) => {
                         log::error!("Encapsulate error={e:?}: {e:?}");
                     }
                     TunnResult::WriteToNetwork(packet) => {
                         let len = packet.len();
-                        dst_buf.truncate(len);
+                        let mut buf = std::mem::take(&mut dst_buf2);
+                        buf.truncate(len);
                         let endpoint_addr = peer.endpoint().addr;
                         if let Some(SocketAddr::V4(addr)) = endpoint_addr {
-                            if udp4.send_to(dst_buf, addr.into()).await.is_err() {
+                            if udp4.send_to(buf, addr.into()).await.is_err() {
                                 break;
                             }
                         } else if let Some(SocketAddr::V6(addr)) = endpoint_addr {
-                            if udp6.send_to(dst_buf, addr.into()).await.is_err() {
+                            if udp6.send_to(buf, addr.into()).await.is_err() {
                                 break;
                             }
                         } else {

@@ -9,7 +9,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 pub struct Session {
     pub(crate) receiving_index: u32,
@@ -21,12 +21,12 @@ pub struct Session {
     enc_tx: crossbeam::channel::Sender<(
         crate::packet::Packet,
         usize,
-        mpsc::Sender<crate::packet::Packet>,
+        oneshot::Sender<crate::packet::Packet>,
     )>,
     dec_tx: crossbeam::channel::Sender<(
         crate::packet::Packet,
         u64,
-        mpsc::Sender<crate::packet::Packet>,
+        oneshot::Sender<crate::packet::Packet>,
     )>,
 }
 
@@ -171,7 +171,7 @@ fn run_encryption_thread(
     enc_rx: crossbeam::channel::Receiver<(
         crate::packet::Packet,
         usize,
-        mpsc::Sender<crate::packet::Packet>,
+        oneshot::Sender<crate::packet::Packet>,
     )>,
     sender: LessSafeKey,
 ) {
@@ -205,8 +205,8 @@ fn run_encryption_thread(
 
         dst.truncate(DATA_OFFSET + n);
 
-        if let Err(err) = encrypt_tx.try_send(dst) {
-            log::error!("Failed to send packet to encrypted queue (likely full): {err}");
+        if let Err(_pkt) = encrypt_tx.send(dst) {
+            log::error!("Failed to send packet to encrypted queue (dropped)");
         }
     }
 }
@@ -215,7 +215,7 @@ fn run_decryption_thread(
     dec_rx: crossbeam::channel::Receiver<(
         crate::packet::Packet,
         u64,
-        mpsc::Sender<crate::packet::Packet>,
+        oneshot::Sender<crate::packet::Packet>,
     )>,
     receiver: LessSafeKey,
 ) {
@@ -231,8 +231,8 @@ fn run_decryption_thread(
             .map_err(|_| WireGuardError::InvalidAeadTag)
             .unwrap();
 
-        if let Err(err) = decrypt_tx.try_send(dst) {
-            log::error!("Failed to send packet to decrypt queue (likely full): {err}");
+        if let Err(_pkt) = decrypt_tx.send(dst) {
+            log::error!("Failed to send packet to decrypted queue (dropped)");
         }
     }
 }
@@ -347,7 +347,7 @@ impl Session {
         &self,
         src: &[u8],
         mut dst: crate::packet::Packet,
-        encrypt_tx: mpsc::Sender<crate::packet::Packet>,
+        encrypt_tx: oneshot::Sender<crate::packet::Packet>,
     ) {
         if dst.len() < src.len() + super::DATA_OVERHEAD_SZ {
             panic!("The destination buffer is too small");
@@ -405,7 +405,7 @@ impl Session {
         &self,
         packet: PacketData<'_>,
         mut dst: crate::packet::Packet,
-        decrypt_tx: mpsc::Sender<crate::packet::Packet>,
+        decrypt_tx: oneshot::Sender<crate::packet::Packet>,
     ) -> Result<(), WireGuardError> {
         let ct_len = packet.encrypted_encapsulated_packet.len();
         /*if dst.len() < ct_len {

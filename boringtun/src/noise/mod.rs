@@ -8,7 +8,7 @@ pub mod rate_limiter;
 mod session;
 mod timers;
 
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
@@ -274,7 +274,7 @@ impl Tunn {
         src: &[u8],
         dst2: &'a mut crate::packet::Packet,
         dst: crate::packet::Packet,
-        encrypt_tx: mpsc::Sender<crate::packet::Packet>,
+        encrypt_tx: oneshot::Sender<crate::packet::Packet>,
     ) -> TunnResult<'a> {
         // FIXME: double buffer hack
         let current = self.current;
@@ -459,7 +459,7 @@ impl Tunn {
         packet: PacketData,
         //dst: &'a mut [u8],
         dst: crate::packet::Packet,
-        decrypt_tx: mpsc::Sender<crate::packet::Packet>,
+        decrypt_tx: oneshot::Sender<crate::packet::Packet>,
     ) -> Result<TunnResult<'a>, WireGuardError> {
         let r_idx = packet.receiver_idx as usize;
         let idx = r_idx % N_SESSIONS;
