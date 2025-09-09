@@ -65,30 +65,22 @@ pub trait UdpRecv: Send + Sync {
     /// Receive up to `x` packets at once,
     /// where `x` is [UdpRecv::max_number_of_packets_to_recv].
     ///
-    /// Returns the number of packets received.
-    ///
     /// # Arguments
-    /// - `pool` - A pool that allocates packets.
-    /// - `packets` - A vector that will receive UDP datagrams.
-    /// - 'source_addrs' - Source addresses to receive. The length must equal that of 'bufs'.
-    //
-    // The default implementation always reads 1 packet.
+    /// - `recv_buf` - Internal buffer. Should be reused between calls. Create with [Default].
+    /// - `pool` - A pool that allocates packet buffers.
+    /// - `packets` - Output. UDP datagrams and source addresses will be appended to this vector.
+    ///
+    /// The default implementation always reads 1 packet.
     fn recv_many_from(
         &mut self,
-        _recv_buf: &mut Self::RecvManyBuf,
+        recv_buf: &mut Self::RecvManyBuf,
         pool: &mut PacketBufPool,
-        packets: &mut Vec<Packet>,
-        source_addrs: &mut [Option<SocketAddr>],
+        packets: &mut Vec<(Packet, SocketAddr)>,
     ) -> impl Future<Output = io::Result<()>> + Send {
+        let _ = recv_buf;
         async move {
-            let [source_addr_out, ..] = source_addrs else {
-                return Err(io::Error::other("source_addrs.len() must be > 0"));
-            };
-
-            let (p, source_addr) = self.recv_from(pool).await?;
-            *source_addr_out = Some(source_addr);
-            packets.push(p);
-
+            let (packet, source_addr) = self.recv_from(pool).await?;
+            packets.push((packet, source_addr));
             Ok(())
         }
     }
@@ -115,13 +107,17 @@ pub trait UdpSend: Send + Sync + Clone {
     /// Send up to `x` UDP packets to the destination,
     /// where `x` is [UdpSend::max_number_of_packets_to_send];
     ///
-    /// All sent packets will be removed from `packets`.
+    /// # Arguments
+    /// - `send_buf` - Internal buffer. Should be reused between calls. Create with [Default].
+    /// - `packets` - Input. Packets to send. Packets are removed from this vector when sent.
+    //
     // TODO: define how many packets are sent in case of an error.
     fn send_many_to(
         &self,
-        _bufs: &mut Self::SendManyBuf,
+        send_buf: &mut Self::SendManyBuf,
         packets: &mut Vec<(Packet, SocketAddr)>,
     ) -> impl Future<Output = io::Result<()>> + Send {
+        let _ = send_buf;
         generic_send_many_to(self, packets)
     }
 

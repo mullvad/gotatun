@@ -160,8 +160,7 @@ mod gro {
             &mut self,
             recv_many_bufs: &mut Self::RecvManyBuf,
             pool: &mut PacketBufPool,
-            bufs: &mut Vec<Packet>,
-            source_addrs: &mut [Option<SocketAddr>],
+            packets: &mut Vec<(Packet, SocketAddr)>,
         ) -> io::Result<()> {
             let fd = self.inner.as_raw_fd();
 
@@ -189,10 +188,15 @@ mod gro {
                         None,
                     )?;
 
-                    let mut bufs_index = 0;
-
                     for result in results {
                         let iov = result.iovs().next().expect("we create exactly one IoSlice");
+
+                        let Some(source_addr) = result.address.map(|addr| addr.into()) else {
+                            if cfg!(debug_assertions) {
+                                log::debug!("recvmmsg returned packet without source");
+                            }
+                            continue;
+                        };
 
                         // TODO: is this true? Under what circumstance can the cmsg buffer overflow?
                         let mut cmsgs = result.cmsgs().expect("we have allocated enough memory");
@@ -214,22 +218,16 @@ mod gro {
                                 // BytesMut to avoid copying the data here.
                                 buf[..gro_segment.len()].copy_from_slice(gro_segment);
                                 buf.truncate(gro_segment.len());
-                                bufs.push(buf);
 
-                                source_addrs[bufs_index] = result.address.map(|addr| addr.into());
-                                bufs_index += 1;
+                                packets.push((buf, source_addr));
                             }
                         } else {
                             // Single packet
-                            source_addrs[bufs_index] = result.address.map(|addr| addr.into());
-
                             let size = result.bytes;
                             let mut buf = pool.get();
                             buf[..size].copy_from_slice(&iov[..size]);
                             buf.truncate(size);
-                            bufs.push(buf);
-
-                            bufs_index += 1;
+                            packets.push((buf, source_addr));
                         }
                     }
 
