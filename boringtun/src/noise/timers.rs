@@ -305,7 +305,7 @@ impl Tunn {
         }
 
         if keepalive_required {
-            return self.encapsulate(&[], dst);
+            return self.handle_outgoing(&[], dst);
         }
 
         TunnResult::Done

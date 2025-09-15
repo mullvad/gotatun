@@ -676,7 +676,8 @@ impl<T: DeviceTransports> Device<T> {
                     // Flush pending queue
                     loop {
                         let mut dst_buf = packet_pool.get();
-                        match peer.tunnel.decapsulate(None, &[], &mut dst_buf[..]) {
+
+                        match peer.tunnel.send_queued_packet(&mut dst_buf[..]) {
                             TunnResult::WriteToNetwork(packet) => {
                                 let len = packet.len();
                                 dst_buf.truncate(len);
@@ -774,7 +775,7 @@ impl<T: DeviceTransports> Device<T> {
                 let mut dst_buf = packet_pool.get();
                 match peer
                     .tunnel
-                    .encapsulate(&packet.into_bytes(), &mut dst_buf[..])
+                    .handle_outgoing(&packet.into_bytes(), &mut dst_buf[..])
                 {
                     TunnResult::Done => {}
                     TunnResult::Err(e) => {

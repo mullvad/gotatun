@@ -247,8 +247,26 @@ impl Tunn {
     /// # Panics
     /// Panics if dst buffer is too small.
     /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
-    pub fn encapsulate<'a>(&mut self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
+    pub fn handle_outgoing<'a>(&mut self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
         let current = self.current;
+
+        match self.encapsulate_with_session(src, dst, current) {
+            Ok(encapsulated_packet) => TunnResult::WriteToNetwork(encapsulated_packet),
+            Err(dst) => {
+                // If there is no session, queue the packet for future retry
+                self.queue_packet(src);
+                // Initiate a new handshake if none is in progress
+                self.format_handshake_initiation(dst, false)
+            }
+        }
+    }
+
+    fn encapsulate_with_session<'a>(
+        &mut self,
+        src: &[u8],
+        dst: &'a mut [u8],
+        current: usize,
+    ) -> Result<&'a mut [u8], &'a mut [u8]> {
         if let Some(ref session) = self.sessions[current % N_SESSIONS] {
             // Send the packet using an established session
             let packet = session.format_packet_data(src, dst);
@@ -258,13 +276,10 @@ impl Tunn {
                 self.timer_tick(TimerName::TimeLastDataPacketSent);
             }
             self.tx_bytes += src.len();
-            return TunnResult::WriteToNetwork(packet);
+            Ok(packet)
+        } else {
+            Err(dst)
         }
-
-        // If there is no session, queue the packet for future retry
-        self.queue_packet(src);
-        // Initiate a new handshake if none is in progress
-        self.format_handshake_initiation(dst, false)
     }
 
     /// Receives a UDP datagram from the network and parses it.
@@ -273,7 +288,8 @@ impl Tunn {
     /// If the result is of type TunnResult::WriteToNetwork, should repeat the call with empty datagram,
     /// until TunnResult::Done is returned. If batch processing packets, it is OK to defer until last
     /// packet is processed.
-    pub fn decapsulate<'a>(
+    // TODO: Remove this?
+    pub fn handle_incoming<'a>(
         &mut self,
         src_addr: Option<IpAddr>,
         datagram: &[u8],
@@ -403,10 +419,18 @@ impl Tunn {
         packet: PacketData,
         dst: &'a mut [u8],
     ) -> Result<TunnResult<'a>, WireGuardError> {
+        let decapsulated_packet = self.decapsulate_with_session(packet, dst)?;
+
+        Ok(self.validate_decapsulated_packet(decapsulated_packet))
+    }
+
+    pub fn decapsulate_with_session<'a>(
+        &mut self,
+        packet: PacketData<'_>,
+        dst: &'a mut [u8],
+    ) -> Result<&'a mut [u8], WireGuardError> {
         let r_idx = packet.receiver_idx as usize;
         let idx = r_idx % N_SESSIONS;
-
-        // Get the (probably) right session
         let decapsulated_packet = {
             let session = self.sessions[idx].as_ref();
             let session = session.ok_or_else(|| {
@@ -416,12 +440,9 @@ impl Tunn {
             })?;
             session.receive_packet_data(packet, dst)?
         };
-
         self.set_current_session(r_idx);
-
         self.timer_tick(TimerName::TimeLastPacketReceived);
-
-        Ok(self.validate_decapsulated_packet(decapsulated_packet))
+        Ok(decapsulated_packet)
     }
 
     /// Formats a new handshake initiation message and store it in dst. If force_resend is true will send
@@ -455,9 +476,10 @@ impl Tunn {
         }
     }
 
+    // TODO: Replace with out zero-copy packet abstraction
     /// Check if an IP packet is v4 or v6, truncate to the length indicated by the length field
     /// Returns the truncated packet and the source IP as TunnResult
-    fn validate_decapsulated_packet<'a>(&mut self, packet: &'a mut [u8]) -> TunnResult<'a> {
+    pub fn validate_decapsulated_packet<'a>(&mut self, packet: &'a mut [u8]) -> TunnResult<'a> {
         let (computed_len, src_ip_address) = match packet.len() {
             0 => return TunnResult::Done, // This is keepalive, and not an error
             _ if packet[0] >> 4 == 4 && packet.len() >= IPV4_MIN_HEADER_SIZE => {
@@ -494,7 +516,7 @@ impl Tunn {
         }
 
         self.timer_tick(TimerName::TimeLastDataPacketReceived);
-        self.rx_bytes += computed_len;
+        self.rx_bytes += computed_len; // TODO: Should we instead add `packet.len()`, see discussion on symmetrical counters
 
         match src_ip_address {
             IpAddr::V4(addr) => TunnResult::WriteToTunnelV4(&mut packet[..computed_len], addr),
@@ -503,9 +525,9 @@ impl Tunn {
     }
 
     /// Get a packet from the queue, and try to encapsulate it
-    fn send_queued_packet<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
+    pub fn send_queued_packet<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
         if let Some(packet) = self.dequeue_packet() {
-            match self.encapsulate(&packet, dst) {
+            match self.handle_outgoing(&packet, dst) {
                 TunnResult::Err(_) => {
                     // On error, return packet to the queue
                     self.requeue_packet(packet);
@@ -620,7 +642,7 @@ mod tests {
 
     fn create_handshake_response(tun: &mut Tunn, handshake_init: &[u8]) -> Vec<u8> {
         let mut dst = vec![0u8; 2048];
-        let handshake_resp = tun.decapsulate(None, handshake_init, &mut dst);
+        let handshake_resp = tun.handle_incoming(None, handshake_init, &mut dst);
         assert!(matches!(handshake_resp, TunnResult::WriteToNetwork(_)));
 
         let handshake_resp = if let TunnResult::WriteToNetwork(sent) = handshake_resp {
@@ -634,7 +656,7 @@ mod tests {
 
     fn parse_handshake_resp(tun: &mut Tunn, handshake_resp: &[u8]) -> Vec<u8> {
         let mut dst = vec![0u8; 2048];
-        let keepalive = tun.decapsulate(None, handshake_resp, &mut dst);
+        let keepalive = tun.handle_incoming(None, handshake_resp, &mut dst);
         assert!(matches!(keepalive, TunnResult::WriteToNetwork(_)));
 
         let keepalive = if let TunnResult::WriteToNetwork(sent) = keepalive {
@@ -648,7 +670,7 @@ mod tests {
 
     fn parse_keepalive(tun: &mut Tunn, keepalive: &[u8]) {
         let mut dst = vec![0u8; 2048];
-        let keepalive = tun.decapsulate(None, keepalive, &mut dst);
+        let keepalive = tun.handle_incoming(None, keepalive, &mut dst);
         assert!(matches!(keepalive, TunnResult::Done));
     }
 
@@ -770,7 +792,7 @@ mod tests {
 
         let sent_packet_buf = create_ipv4_udp_packet();
 
-        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst);
+        let data = my_tun.handle_outgoing(&sent_packet_buf, &mut my_dst);
         assert!(matches!(data, TunnResult::WriteToNetwork(_)));
         let data = if let TunnResult::WriteToNetwork(sent) = data {
             sent
@@ -778,7 +800,7 @@ mod tests {
             unreachable!();
         };
 
-        let data = their_tun.decapsulate(None, data, &mut their_dst);
+        let data = their_tun.handle_incoming(None, data, &mut their_dst);
         assert!(matches!(data, TunnResult::WriteToTunnelV4(..)));
         let recv_packet_buf = if let TunnResult::WriteToTunnelV4(recv, _addr) = data {
             recv
