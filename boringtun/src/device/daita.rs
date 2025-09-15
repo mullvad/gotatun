@@ -7,12 +7,19 @@
 //! into boringtun.
 //!
 //! ## TODO
+//!
 //! - Implement correct hooks
 //!   The current idea was to substitute the DAITA enabled peer for a `DaitaPeer` which implements
 //!   `TunnelCapsule`, a trait that represents a peer and its ability to encapsulate/decapsulate
 //!   packets. I.e. `Device` would contain a ` Arc<Mutex<dyn TunnelCapsule>>>` instead of a `Arc<Mutex<Peer>>>`.
 //!   This is not going to work, because `DaitaPeer` needs to wrap a `Peer` and delegate most calls to it,
 //!   but cannot get ownership of the `Peer` because it is already owned by the `Device`.
+//! - Make encapsulation/decapsulation concurrent with IO.
+//!   Currently, it would only be theoretically possible to replace padding packets with outbound packets
+//!   (i.e. those currently being encapsulated) if the `DAITA::handle_events` task runs in parallel,
+//!   as there are no `await` points in the encapsulation/decapsulation code. This would be a regression
+//!   in comparison with the `wireguard-go` implementation. As far as I remember, replacing padding packets
+//!   with outbound packets occurred quite often, so this could be important for performance.
 //! - Add overhead counters (see point 3 below)
 //!     - `tx_padding_bytes`, `tx_padding_packet_bytes`
 //! - Upper limit for blocking.
