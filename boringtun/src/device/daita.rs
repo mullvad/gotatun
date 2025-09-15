@@ -1,10 +1,18 @@
 //! # NOTES
 //!
+//! This is a work-in-progress implementation of DAITA version 3.
+//!
+//! The intent of the design is that DAITA will exist in the app-repo (i.e. this module will not
+//! be part of boringtun proper) and that it will be possible inject DAITA as a set of hooks/plugins
+//! into boringtun.
+//!
 //! ## TODO
-//! - Constant packet size
 //! - Implement correct hooks
-//!   - Currently, `TunnelSent` is triggered on all outgoing packets, not just data packets.
-//!   - Handle incoming packets and their non-ip header correctly.
+//!   The current idea was to substitute the DAITA enabled peer for a `DaitaPeer` which implements
+//!   `TunnelCapsule`, a trait that represents a peer and its ability to encapsulate/decapsulate
+//!   packets. I.e. `Device` would contain a ` Arc<Mutex<dyn TunnelCapsule>>>` instead of a `Arc<Mutex<Peer>>>`.
+//!   This is not going to work, because `DaitaPeer` needs to wrap a `Peer` and delegate most calls to it,
+//!   but cannot get ownership of the `Peer` because it is already owned by the `Device`.
 //! - Add overhead counters (see point 3 below)
 //!     - `tx_padding_bytes`, `tx_padding_packet_bytes`
 //! - Upper limit for blocking.
@@ -17,15 +25,6 @@
 //! I would prefer to completely disregard any non-data packets for DAITA. This would be
 //! less intrusive help decouple DAITA from WireGuard.
 //! Keepalives should thus be left as-is and not padded to constant packet size.
-//!
-//! ### 2. Ensure counters for sent/received bytes are symmetrical
-//! Should be handled by the hooks.
-//!
-//! ### 3. Measure overhead on the wire
-//! Should be possible with the hooks.
-//!
-//! ### 4. Ensure DAITA padding packet header is being processed correctly
-//! Not an issue.
 //!
 //! ### 5. Add support for Maybenot BlockOutgoing action in the client
 //! Is implemented, but not the upper limit.
@@ -93,7 +92,8 @@ where
 
     let daita = DAITA {
         maybenot,
-        padding_sender: PaddingSender::new(peer.clone(), packet_pool, udp_send.clone()), // TODO: Real MTU
+        peer: peer.clone(),
+        packet_pool,
         packet_count: packet_count.clone(),
         blocking_queue_rx,
         blocking: blocking.clone(),
@@ -145,6 +145,9 @@ enum MachineTimer {
     Action(ActionTimerType),
 }
 
+/// Counter for the number of packets that have been received on the tunnel interface
+/// but not yet sent to the network, and the number of those packets that have been
+/// replaced by padding packets.
 struct PacketCount {
     outbound: AtomicU32,
     replaced: AtomicU32,
@@ -334,10 +337,11 @@ where
     US: UdpSend + Clone + 'static,
 {
     maybenot: Framework<M, R>,
-    padding_sender: PaddingSender<P, US>,
     packet_count: Arc<PacketCount>,
     blocking_queue_rx: mpsc::UnboundedReceiver<(Packet, SocketAddr)>,
     blocking: Arc<RwLock<Blocking>>,
+    peer: Weak<Mutex<P>>,
+    packet_pool: crate::packet::PacketBufPool,
     udp_send: US,
 }
 
@@ -488,12 +492,12 @@ where
             (Some(true), true) => {
                 if let Ok((packet, destination)) = self.blocking_queue_rx.try_recv() {
                     self.udp_send.send_to(packet, destination).await.unwrap();
-                } else if let Err(ErrorAction::Close) = self.padding_sender.send_padding().await {
+                } else if let Err(ErrorAction::Close) = self.send_padding().await {
                     return;
                 }
             }
             (Some(true), false) => {
-                if let Err(ErrorAction::Close) = self.padding_sender.send_padding().await {
+                if let Err(ErrorAction::Close) = self.send_padding().await {
                     return;
                 }
             }
@@ -515,7 +519,7 @@ where
                 return;
             }
             (None, _) => {
-                if let Err(ErrorAction::Close) = self.padding_sender.send_padding().await {
+                if let Err(ErrorAction::Close) = self.send_padding().await {
                     return;
                 }
             }
@@ -549,31 +553,6 @@ where
                 .send_many_to(&mut send_many_bufs, packets)
                 .await
                 .unwrap();
-        }
-    }
-}
-
-// TODO: unclear purpose of this type
-struct PaddingSender<P, US>
-where
-    US: UdpSend + Clone + 'static,
-    P: TunnelCapsule,
-{
-    peer: Weak<Mutex<P>>,
-    packet_pool: crate::packet::PacketBufPool,
-    udp_send: US,
-}
-
-impl<P, US> PaddingSender<P, US>
-where
-    US: UdpSend + Clone + 'static,
-    P: TunnelCapsule,
-{
-    fn new(peer: Weak<Mutex<P>>, packet_pool: crate::packet::PacketBufPool, udp_send: US) -> Self {
-        Self {
-            peer,
-            packet_pool,
-            udp_send,
         }
     }
 
@@ -683,7 +662,7 @@ struct DaitaPeer<P> {
 
 impl<P: TunnelCapsule> TunnelCapsule for DaitaPeer<P> {
     fn handle_outgoing<'a>(&mut self, mut src: Packet, dst: &'a mut [u8]) -> TunnResult<'a> {
-        self.event_tx.send(TriggerEvent::NormalSent).unwrap(); // TODO: Close on error?
+        let _ = self.event_tx.send(TriggerEvent::NormalSent);
         self.packet_count
             .outbound
             .fetch_add(1, atomic::Ordering::SeqCst); // TODO: Ordering?
