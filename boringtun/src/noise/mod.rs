@@ -247,7 +247,7 @@ impl Tunn {
     /// # Panics
     /// Panics if dst buffer is too small.
     /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
-    pub fn handle_outgoing<'a>(&mut self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
+    pub fn handle_outgoing_packet<'a>(&mut self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
         let current = self.current;
 
         match self.encapsulate_with_session(src, dst, current) {
@@ -289,7 +289,7 @@ impl Tunn {
     /// until TunnResult::Done is returned. If batch processing packets, it is OK to defer until last
     /// packet is processed.
     // TODO: Remove this? It's not used anymore outside of tests
-    pub fn handle_incoming<'a>(
+    pub fn verify_and_handle_incoming_packet<'a>(
         &mut self,
         src_addr: Option<IpAddr>,
         datagram: &[u8],
@@ -314,10 +314,10 @@ impl Tunn {
             _ => unreachable!(),
         };
 
-        self.handle_verified_packet(packet, dst)
+        self.handle_incoming_packet(packet, dst)
     }
 
-    pub(crate) fn handle_verified_packet<'a>(
+    pub(crate) fn handle_incoming_packet<'a>(
         &mut self,
         packet: Packet,
         dst: &'a mut [u8],
@@ -531,7 +531,7 @@ impl Tunn {
     /// Get a packet from the queue, and try to encapsulate it
     pub fn send_queued_packet<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
         if let Some(packet) = self.dequeue_packet() {
-            match self.handle_outgoing(&packet, dst) {
+            match self.handle_outgoing_packet(&packet, dst) {
                 TunnResult::Err(_) => {
                     // On error, return packet to the queue
                     self.requeue_packet(packet);
@@ -646,7 +646,7 @@ mod tests {
 
     fn create_handshake_response(tun: &mut Tunn, handshake_init: &[u8]) -> Vec<u8> {
         let mut dst = vec![0u8; 2048];
-        let handshake_resp = tun.handle_incoming(None, handshake_init, &mut dst);
+        let handshake_resp = tun.verify_and_handle_incoming_packet(None, handshake_init, &mut dst);
         assert!(matches!(handshake_resp, TunnResult::WriteToNetwork(_)));
 
         let handshake_resp = if let TunnResult::WriteToNetwork(sent) = handshake_resp {
@@ -660,7 +660,7 @@ mod tests {
 
     fn parse_handshake_resp(tun: &mut Tunn, handshake_resp: &[u8]) -> Vec<u8> {
         let mut dst = vec![0u8; 2048];
-        let keepalive = tun.handle_incoming(None, handshake_resp, &mut dst);
+        let keepalive = tun.verify_and_handle_incoming_packet(None, handshake_resp, &mut dst);
         assert!(matches!(keepalive, TunnResult::WriteToNetwork(_)));
 
         let keepalive = if let TunnResult::WriteToNetwork(sent) = keepalive {
@@ -674,7 +674,7 @@ mod tests {
 
     fn parse_keepalive(tun: &mut Tunn, keepalive: &[u8]) {
         let mut dst = vec![0u8; 2048];
-        let keepalive = tun.handle_incoming(None, keepalive, &mut dst);
+        let keepalive = tun.verify_and_handle_incoming_packet(None, keepalive, &mut dst);
         assert!(matches!(keepalive, TunnResult::Done));
     }
 
@@ -796,7 +796,7 @@ mod tests {
 
         let sent_packet_buf = create_ipv4_udp_packet();
 
-        let data = my_tun.handle_outgoing(&sent_packet_buf, &mut my_dst);
+        let data = my_tun.handle_outgoing_packet(&sent_packet_buf, &mut my_dst);
         assert!(matches!(data, TunnResult::WriteToNetwork(_)));
         let data = if let TunnResult::WriteToNetwork(sent) = data {
             sent
@@ -804,7 +804,7 @@ mod tests {
             unreachable!();
         };
 
-        let data = their_tun.handle_incoming(None, data, &mut their_dst);
+        let data = their_tun.verify_and_handle_incoming_packet(None, data, &mut their_dst);
         assert!(matches!(data, TunnResult::WriteToTunnelV4(..)));
         let recv_packet_buf = if let TunnResult::WriteToTunnelV4(recv, _addr) = data {
             recv

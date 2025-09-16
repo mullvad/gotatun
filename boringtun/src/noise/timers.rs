@@ -305,7 +305,7 @@ impl Tunn {
         }
 
         if keepalive_required {
-            return self.handle_outgoing(&[], dst);
+            return self.handle_outgoing_packet(&[], dst);
         }
 
         TunnResult::Done

@@ -660,7 +660,7 @@ impl<T: DeviceTransports> Device<T> {
             let mut peer = peer.lock().await;
             match peer
                 .tunnel
-                .handle_verified_packet(parsed_packet, &mut dst_buf[..])
+                .handle_incoming_packet(parsed_packet, &mut dst_buf[..])
             {
                 TunnResult::Done => (),
                 TunnResult::Err(_) => continue,
@@ -762,7 +762,7 @@ impl<T: DeviceTransports> Device<T> {
                 let mut dst_buf = packet_pool.get();
                 match peer
                     .tunnel
-                    .handle_outgoing(&packet.into_bytes(), &mut dst_buf[..])
+                    .handle_outgoing_packet(&packet.into_bytes(), &mut dst_buf[..])
                 {
                     TunnResult::Done => {}
                     TunnResult::Err(e) => {

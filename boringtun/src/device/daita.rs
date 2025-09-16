@@ -648,7 +648,7 @@ where
         // TODO: Reuse the same padding packet each time (unless MTU changes)?
         match peer
             .tunnel
-            .handle_outgoing(&self.create_padding_packet(MTU), &mut dst_buf[..])
+            .handle_outgoing_packet(&self.create_padding_packet(MTU), &mut dst_buf[..])
         {
             TunnResult::Done => Ok(()), // TODO: error?
             TunnResult::Err(e) => {
