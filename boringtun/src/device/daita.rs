@@ -12,15 +12,17 @@
 //!   should be injected. They need to operate on data packets for a particular peer, and need to have
 //!   the ability to mutate the packet (constant packet size) or withhold it (blocking).
 //! - Make encapsulation/decapsulation concurrent with IO.
-//!   Currently, it would only be theoretically possible to replace padding packets with outbound packets
-//!   (i.e. those currently being encapsulated) if the `DAITA::handle_events` task runs in parallel,
-//!   as there are no `await` points in the encapsulation/decapsulation code. This would be a regression
-//!   in comparison with the `wireguard-go` implementation. As far as I remember, replacing padding packets
-//!   with outbound packets occurred quite often, so this could be important for performance.
-//! - Upper limit for blocking.
+//!   The maybenot spec describes that outbound packet (i.e. those that have been received on the tunnel
+//!   interface but not yet sent on the network) can replace padding packets. However, currently there
+//!   are not `await`-points in `handle_outgoing` that would allow this to happen, I think.
+//!   Lacking the ability to replace padding packets with in-flight packets would be a regression
+//!   in comparison with the `wireguard-go` implementation. As far as I remember, this occurred quite
+//!   often, so it could be important for performance.
 //! - The [crate::noise::Tunn] type already has a concept for a queue of blocked packets. Consider how this
 //!   should interact/integrate with the blocking queue used by DAITA.
 //! - Tests and benches
+//! - Track MTU changes from somewhere. In wg-go, there is an atomic variable in `Tun` that updates in realized
+//!   with MTU changes, that we use.
 //!
 //!
 //! ## Regarding <https://mullvad.atlassian.net/wiki/spaces/PPS/pages/4285923358/DAITA+version+3>
@@ -49,7 +51,10 @@ use super::peer::Peer;
 use futures::{FutureExt, future::Fuse};
 use maybenot::{Framework, Machine, MachineId, TriggerAction, TriggerEvent};
 use rand::RngCore;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{
+    RwLock,
+    mpsc::{self, error::TrySendError},
+};
 use tokio::time::Instant;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
@@ -58,9 +63,12 @@ use tokio::sync::Mutex;
 // TODO: get real MTU
 const MTU: u16 = 1300;
 
+// TODO: Pick a good number
+const MAX_BLOCKED_PACKETS: usize = 256;
+
 enum ErrorAction {
     Close,
-    Ignore,
+    Ignore, // TODO: log error?
 }
 
 type Result<T> = std::result::Result<T, ErrorAction>;
@@ -68,7 +76,7 @@ type Result<T> = std::result::Result<T, ErrorAction>;
 pub struct DaitaHooks {
     event_tx: mpsc::UnboundedSender<TriggerEvent>,
     packet_count: Arc<PacketCount>,
-    blocking_queue_tx: mpsc::UnboundedSender<(Packet, SocketAddr)>,
+    blocking_queue_tx: mpsc::Sender<(Packet, SocketAddr)>,
     blocking_state: Arc<RwLock<BlockingState>>, // TODO: Replace with `tokio::sync::watch`?
     // TODO: Export to metrics sink
     /// Total extra bytes added due to constant-size padding of data packets.
@@ -100,7 +108,7 @@ impl DaitaHooks {
             replaced_normal: AtomicU32::new(0),
         });
         let blocking = Arc::new(RwLock::new(BlockingState::Inactive));
-        let (blocking_queue_tx, blocking_queue_rx) = mpsc::unbounded_channel();
+        let (blocking_queue_tx, blocking_queue_rx) = mpsc::channel(MAX_BLOCKED_PACKETS);
         let tx_padding_packet_bytes = Arc::new(AtomicUsize::new(0));
 
         let daita = DAITA {
@@ -147,7 +155,12 @@ impl DaitaHooks {
         if let Ok(blocking) = self.blocking_state.try_read()
             && blocking.is_active()
         {
-            self.blocking_queue_tx.send((packet, addr)).unwrap();
+            // TODO: Can we send the oldest blocked packet instead of dropping the newest?
+            if let Err(TrySendError::Full((packet, _addr))) =
+                self.blocking_queue_tx.try_send((packet, addr))
+            {
+                return Some(packet);
+            }
             None
         } else {
             let _ = self.event_tx.send(TriggerEvent::TunnelSent);
@@ -425,8 +438,8 @@ where
 {
     maybenot: Framework<M, R>,
     packet_count: Arc<PacketCount>,
-    blocking_queue_rx: mpsc::UnboundedReceiver<(Packet, SocketAddr)>,
-    blocking_queue_tx: mpsc::UnboundedSender<(Packet, SocketAddr)>,
+    blocking_queue_rx: mpsc::Receiver<(Packet, SocketAddr)>,
+    blocking_queue_tx: mpsc::Sender<(Packet, SocketAddr)>,
     blocking: Arc<RwLock<BlockingState>>,
     peer: Weak<Mutex<Peer>>,
     packet_pool: packet::PacketBufPool,
@@ -596,7 +609,8 @@ where
             // Padding packet should or cannot replace any blocked packet
             (Some(false), _) => {
                 let padding_packet = self.encapsulate_padding(event_buf, machine).await?;
-                let _ = self.blocking_queue_tx.send(padding_packet);
+                //  Drop the padding packet if blocking queue is full
+                let _ = self.blocking_queue_tx.try_send(padding_packet);
                 Ok(())
             }
             (None, true) if self.packet_count.replaced() < self.packet_count.outbound() => {
