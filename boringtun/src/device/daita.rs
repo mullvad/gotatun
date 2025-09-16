@@ -8,12 +8,9 @@
 //!
 //! ## TODO
 //!
-//! - Implement correct hooks
-//!   The current idea was to substitute the DAITA enabled peer for a `DaitaPeer` which implements
-//!   `TunnelCapsule`, a trait that represents a peer and its ability to encapsulate/decapsulate
-//!   packets. I.e. `Device` would contain a ` Arc<Mutex<dyn TunnelCapsule>>>` instead of a `Arc<Mutex<Peer>>>`.
-//!   This is not going to work, because `DaitaPeer` needs to wrap a `Peer` and delegate most calls to it,
-//!   but cannot get ownership of the `Peer` because it is already owned by the `Device`.
+//! - Implement correct hooks in the packet pipeline. The methods on [DaitaHooks] describe where they
+//!   should be injected. They need to operate on data packets for a particular peer, and need to have
+//!   the ability to mutate the packet (constant packet size) or withhold it (blocking).
 //! - Make encapsulation/decapsulation concurrent with IO.
 //!   Currently, it would only be theoretically possible to replace padding packets with outbound packets
 //!   (i.e. those currently being encapsulated) if the `DAITA::handle_events` task runs in parallel,
@@ -23,7 +20,8 @@
 //! - Add overhead counters (see point 3 below)
 //!     - `tx_padding_bytes`, `tx_padding_packet_bytes`
 //! - Upper limit for blocking.
-//! - Consider using the existing packet queue instead of the separate channel solution for blocked packets.
+//! - The [crate::noise::Tunn] type already has a concept for a queue of blocked packets. Consider how this
+//!   should interact/integrate with the blocking queue used by DAITA.
 //! - Tests and benches
 //!
 //!
@@ -32,14 +30,10 @@
 //! I would prefer to completely disregard any non-data packets for DAITA. This would be
 //! less intrusive help decouple DAITA from WireGuard.
 //! Keepalives should thus be left as-is and not padded to constant packet size.
-//!
-//! ### 5. Add support for Maybenot BlockOutgoing action in the client
-//! Is implemented, but not the upper limit.
 
 use std::{
     collections::VecDeque,
     net::SocketAddr,
-    ops::Deref,
     pin::pin,
     sync::{
         Arc, Weak,
@@ -49,8 +43,7 @@ use std::{
 
 use crate::{
     noise::{self, TunnResult},
-    packet::Packet,
-    tun::IpRecv,
+    packet::{self, Ipv6Header, Packet},
     udp::UdpSend,
 };
 
@@ -74,53 +67,121 @@ enum ErrorAction {
 
 type Result<T> = std::result::Result<T, ErrorAction>;
 
-pub fn get_daita_hooks<M, R, IR, US, P>(
-    maybenot: Framework<M, R>,
-    peer: Weak<Mutex<P>>,
-    ip_recv: IR,
-    udp_send: US,
-    packet_pool: crate::packet::PacketBufPool,
-) -> DaitaPeer<P>
-where
-    Framework<M, R>: Send + 'static,
-    IR: IpRecv,
-    US: UdpSend + Clone + 'static,
-    M: AsRef<[Machine]> + Send + 'static,
-    R: RngCore,
-    P: TunnelCapsule + Sync + Send,
-{
-    let (event_tx, event_rx) = mpsc::unbounded_channel();
-    let packet_count = Arc::new(PacketCount {
-        outbound: AtomicU32::new(0),
-        replaced: AtomicU32::new(0),
-    });
-    let blocking = Arc::new(RwLock::new(Blocking::Inactive));
-    let (blocking_queue_tx, blocking_queue_rx) = mpsc::unbounded_channel();
+pub struct DaitaHooks {
+    event_tx: mpsc::UnboundedSender<TriggerEvent>,
+    packet_count: Arc<PacketCount>,
+    blocking_queue_tx: mpsc::UnboundedSender<(Packet, SocketAddr)>,
+    blocking_state: Arc<RwLock<BlockingState>>,
+}
 
-    let daita = DAITA {
-        maybenot,
-        peer: peer.clone(),
-        packet_pool,
-        packet_count: packet_count.clone(),
-        blocking_queue_rx,
-        blocking: blocking.clone(),
-        udp_send: udp_send.clone(),
-    };
-    tokio::spawn(daita.handle_events(event_rx));
-    DaitaPeer {
-        inner: peer,
-        event_tx: event_tx.clone(),
-        packet_count,
-        blocking_queue_tx,
-        blocking,
+impl DaitaHooks {
+    pub fn new<M, R, US, P>(
+        maybenot: Framework<M, R>,
+        peer: Weak<Mutex<Peer>>,
+        udp_send: US,
+        packet_pool: packet::PacketBufPool,
+    ) -> Self
+    where
+        Framework<M, R>: Send + 'static,
+        US: UdpSend + Clone + 'static,
+        M: AsRef<[Machine]> + Send + Sync + 'static,
+        R: RngCore + Send + Sync,
+    {
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let packet_count = Arc::new(PacketCount {
+            outbound: AtomicU32::new(0),
+            replaced: AtomicU32::new(0),
+        });
+        let blocking = Arc::new(RwLock::new(BlockingState::Inactive));
+        let (blocking_queue_tx, blocking_queue_rx) = mpsc::unbounded_channel();
+
+        let daita = DAITA {
+            maybenot,
+            peer,
+            packet_pool,
+            packet_count: packet_count.clone(),
+            blocking_queue_rx,
+            blocking: blocking.clone(),
+            udp_send: udp_send.clone(),
+        };
+        tokio::spawn(daita.handle_events(event_rx));
+        DaitaHooks {
+            event_tx: event_tx.clone(),
+            packet_count,
+            blocking_queue_tx,
+            blocking_state: blocking,
+        }
+    }
+
+    /// Should be called on outgoing data packets, before encapsulation
+    pub fn map_outgoing_data(&self, mut packet: Packet) -> Packet {
+        let _ = self.event_tx.send(TriggerEvent::NormalSent);
+        self.packet_count.inc_outbound(1);
+
+        // Pad to constant size
+        debug_assert!(packet.len() <= MTU as usize);
+        packet.buf_mut().resize(MTU as usize, 0);
+        packet
+    }
+
+    /// Should be called on encapsulated *data* packets, before they are
+    /// send to the network. Should *not* be called on handshake a keepalive
+    /// packets, to prevent counters from drifting.
+    pub fn map_outgoing_encapsulated(&self, packet: Packet, addr: SocketAddr) -> Option<Packet> {
+        if let Ok(blocking) = self.blocking_state.try_read()
+            && blocking.is_active()
+        {
+            self.blocking_queue_tx.send((packet, addr)).unwrap();
+            None
+        } else {
+            let _ = self.event_tx.send(TriggerEvent::TunnelSent);
+            self.packet_count.dec(1);
+            Some(packet)
+        }
+    }
+
+    /// Should be called on incoming validated encapsulated packets.
+    pub fn on_incoming_encapsulated<'a>(&self, packet: noise::Packet<'a>) {
+        if matches!(packet, noise::Packet::PacketData(_)) {
+            let _ = self.event_tx.send(TriggerEvent::TunnelRecv);
+        }
+    }
+
+    /// Should be called on incoming decapsulated *data* packets.
+    pub fn map_incoming_data(&self, mut packet: Packet) -> Option<Packet> {
+        if let Ok(padding) = PaddingPacket::ref_from_bytes(packet.as_bytes())
+            && padding.header._daita_marker == DAITA_MARKER
+        {
+            let _ = self.event_tx.send(TriggerEvent::PaddingRecv);
+            None
+        } else {
+            let ip_packet = packet::Ip::ref_from_bytes(packet.as_bytes()).ok()?;
+
+            match ip_packet.header.version() {
+                4 => {
+                    let ipv4 = packet::Ipv4::<[u8]>::mut_from_bytes(packet.as_mut_bytes()).ok()?;
+                    let total_len = usize::from(ipv4.header.total_len.get());
+                    packet.truncate(total_len);
+                }
+                6 => {
+                    let ipv6 = packet::Ipv6::<[u8]>::mut_from_bytes(packet.as_mut_bytes()).ok()?;
+                    let payload_len = usize::from(ipv6.header.payload_length.get());
+                    packet.truncate(payload_len + Ipv6Header::LEN);
+                }
+                _ => return None,
+            }
+            let _ = self.event_tx.send(TriggerEvent::NormalRecv);
+
+            Some(packet)
+        }
     }
 }
 
-#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
+#[derive(FromBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 #[repr(C)]
-struct PaddingPacket<Payload: ?Sized = [u8]> {
+struct PaddingPacket {
     header: PaddingHeader,
-    payload: Payload,
+    payload: [u8],
 }
 
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq, Clone, Copy)]
@@ -155,13 +216,15 @@ enum MachineTimer {
 /// Counter for the number of packets that have been received on the tunnel interface
 /// but not yet sent to the network, and the number of those packets that have been
 /// replaced by padding packets.
+///
+/// TODO: Is sequential atomic ordering correct/necessary?
 struct PacketCount {
     outbound: AtomicU32,
     replaced: AtomicU32,
 }
 
 impl PacketCount {
-    fn sub(&self, amount: u32) {
+    fn dec(&self, amount: u32) {
         self.replaced
             .fetch_update(atomic::Ordering::SeqCst, atomic::Ordering::SeqCst, |x| {
                 if x >= amount {
@@ -175,12 +238,12 @@ impl PacketCount {
         // TODO: Ordering?
     }
 
-    fn inc_outbound(&self) {
-        self.outbound.fetch_add(1, atomic::Ordering::SeqCst);
+    fn inc_outbound(&self, amount: u32) {
+        self.outbound.fetch_add(amount, atomic::Ordering::SeqCst);
     }
 
-    fn inc_replaced(&self) {
-        self.replaced.fetch_add(1, atomic::Ordering::SeqCst);
+    fn inc_replaced(&self, amount: u32) {
+        self.replaced.fetch_add(amount, atomic::Ordering::SeqCst);
     }
 
     fn outbound(&self) -> u32 {
@@ -192,12 +255,12 @@ impl PacketCount {
     }
 }
 
-enum Blocking {
+enum BlockingState {
     Inactive,
     Active { bypass: bool, expires_at: Instant },
 }
 
-impl Blocking {
+impl BlockingState {
     /// Returns `true` if the blocking is [`Active`].
     ///
     /// [`Active`]: Blocking::Active
@@ -336,27 +399,25 @@ impl MachineTimers {
     }
 }
 
-pub struct DAITA<M, R, P, US>
+pub struct DAITA<M, R, US>
 where
     M: AsRef<[Machine]> + Send + 'static,
     R: RngCore,
-    P: TunnelCapsule,
     US: UdpSend + Clone + 'static,
 {
     maybenot: Framework<M, R>,
     packet_count: Arc<PacketCount>,
     blocking_queue_rx: mpsc::UnboundedReceiver<(Packet, SocketAddr)>,
-    blocking: Arc<RwLock<Blocking>>,
-    peer: Weak<Mutex<P>>,
-    packet_pool: crate::packet::PacketBufPool,
+    blocking: Arc<RwLock<BlockingState>>,
+    peer: Weak<Mutex<Peer>>,
+    packet_pool: packet::PacketBufPool,
     udp_send: US,
 }
 
-impl<M, R, P, US> DAITA<M, R, P, US>
+impl<M, R, US> DAITA<M, R, US>
 where
     M: AsRef<[Machine]> + Send + 'static,
     R: RngCore,
-    P: TunnelCapsule,
     US: UdpSend + Clone + 'static,
 {
     pub async fn handle_events(mut self, mut event_rx: mpsc::UnboundedReceiver<TriggerEvent>) {
@@ -370,7 +431,7 @@ where
         loop {
             // TODO: Try refactoring this into a function, I dare you
             blocking_ended.set(
-                if let Blocking::Active { expires_at, .. } = &*self.blocking.read().await {
+                if let BlockingState::Active { expires_at, .. } = &*self.blocking.read().await {
                     tokio::time::sleep_until(*expires_at).fuse()
                 } else {
                     Fuse::terminated()
@@ -464,10 +525,10 @@ where
                     let mut blocking = self.blocking.write().await;
                     let new_expiry = Instant::now() + duration;
                     match &mut *blocking {
-                        Blocking::Active { expires_at, .. }
+                        BlockingState::Active { expires_at, .. }
                             if !replace && new_expiry <= *expires_at => {}
                         _ => {
-                            *blocking = Blocking::Active {
+                            *blocking = BlockingState::Active {
                                 bypass,
                                 expires_at: new_expiry,
                             };
@@ -489,8 +550,8 @@ where
         padding_bypass: bool,
     ) {
         let blocking_with_bypass = match &*self.blocking.read().await {
-            Blocking::Inactive => None,
-            Blocking::Active {
+            BlockingState::Inactive => None,
+            BlockingState::Active {
                 bypass: blocking_bypass,
                 ..
             } => Some(*blocking_bypass && padding_bypass),
@@ -512,7 +573,7 @@ where
                 if self.packet_count.replaced()
                     < self.packet_count.outbound() + self.blocking_queue_rx.len() as u32 =>
             {
-                self.packet_count.inc_replaced();
+                self.packet_count.inc_replaced(1);
                 machine_timers.remove_action(&machine);
                 return;
             }
@@ -521,7 +582,7 @@ where
                 // TODO: Generate a padding packing and add it to the blocking queue
             }
             (None, true) if self.packet_count.replaced() < self.packet_count.outbound() => {
-                self.packet_count.inc_replaced();
+                self.packet_count.inc_replaced(1);
                 machine_timers.remove_action(&machine);
                 return;
             }
@@ -531,7 +592,7 @@ where
                 }
             }
         };
-        self.packet_count.inc_outbound();
+        self.packet_count.inc_outbound(1);
     }
 
     async fn end_blocking(
@@ -539,7 +600,7 @@ where
         packets: &mut Vec<(Packet, SocketAddr)>,
         event_buf: &mut Vec<TriggerEvent>,
     ) {
-        *self.blocking.write().await = Blocking::Inactive;
+        *self.blocking.write().await = BlockingState::Inactive;
         event_buf.push(TriggerEvent::BlockingEnd);
         loop {
             let limit = self.udp_send.max_number_of_packets_to_send();
@@ -571,7 +632,10 @@ where
         let mut peer = peer.lock().await;
 
         // TODO: Reuse the same padding packet each time (unless MTU changes)?
-        match peer.handle_outgoing(self.create_padding_packet(MTU), &mut dst_buf[..]) {
+        match peer
+            .tunnel
+            .handle_outgoing(&self.create_padding_packet(MTU), &mut dst_buf[..])
+        {
             TunnResult::Done => Ok(()), // TODO: error?
             TunnResult::Err(e) => {
                 log::error!("Encapsulate error={e:?}: {e:?}");
@@ -608,136 +672,5 @@ where
             .extend_from_slice(padding_packet_header.as_bytes());
         padding_packet_buf.buf_mut().resize(mtu.into(), 0);
         padding_packet_buf
-    }
-}
-
-// This is intended to be a used as a hook for encapsulation and decapsulation
-// so that we can can trigger `TunnelSent` on only outgoing data packets
-// (e.g. not keepalives) destined for the DAITA peer.
-// For incoming packets, it should trigger `PaddingReceived`/`NormalReceived` based on
-// the header and subsequently filter out the padding packets before passing the
-// data packets to the IP layer.
-// TODO: better name
-pub trait TunnelCapsule {
-    fn handle_outgoing<'a>(&mut self, src: Packet, dst: &'a mut [u8]) -> TunnResult<'a>;
-
-    fn endpoint(&self) -> impl Deref<Target = crate::device::peer::Endpoint>;
-
-    fn handle_incoming<'a>(&mut self, packet: noise::Packet, dst: &'a mut [u8]) -> TunnResult<'a>;
-
-    fn decapsulate_with_session<'a>(
-        &mut self,
-        packet: noise::PacketData<'_>,
-        dst: &'a mut [u8],
-    ) -> core::result::Result<&'a mut [u8], noise::errors::WireGuardError>;
-    fn validate_decapsulated_packet<'a>(&mut self, packet: &'a mut [u8]) -> TunnResult<'a>;
-}
-
-impl TunnelCapsule for Peer {
-    fn handle_outgoing<'a>(&mut self, src: Packet, dst: &'a mut [u8]) -> TunnResult<'a> {
-        self.tunnel.handle_outgoing(src.as_bytes(), dst)
-    }
-
-    fn endpoint(&self) -> impl Deref<Target = crate::device::peer::Endpoint> {
-        self.endpoint()
-    }
-
-    fn handle_incoming<'a>(&mut self, packet: noise::Packet, dst: &'a mut [u8]) -> TunnResult<'a> {
-        self.tunnel.handle_verified_packet(packet, dst)
-    }
-
-    fn decapsulate_with_session<'a>(
-        &mut self,
-        packet: noise::PacketData<'_>,
-        dst: &'a mut [u8],
-    ) -> core::result::Result<&'a mut [u8], noise::errors::WireGuardError> {
-        self.tunnel.decapsulate_with_session(packet, dst)
-    }
-
-    fn validate_decapsulated_packet<'a>(&mut self, packet: &'a mut [u8]) -> TunnResult<'a> {
-        self.tunnel.validate_decapsulated_packet(packet)
-    }
-}
-
-struct DaitaPeer<P> {
-    inner: P, // TODO: use Capsulation instead of Peer?
-    event_tx: mpsc::UnboundedSender<TriggerEvent>,
-    packet_count: Arc<PacketCount>,
-    blocking_queue_tx: mpsc::UnboundedSender<(Packet, SocketAddr)>,
-    blocking: Arc<RwLock<Blocking>>,
-}
-
-impl<P: TunnelCapsule> TunnelCapsule for DaitaPeer<P> {
-    fn handle_outgoing<'a>(&mut self, mut src: Packet, dst: &'a mut [u8]) -> TunnResult<'a> {
-        let _ = self.event_tx.send(TriggerEvent::NormalSent);
-        self.packet_count
-            .outbound
-            .fetch_add(1, atomic::Ordering::SeqCst); // TODO: Ordering?
-
-        debug_assert!(src.len() <= MTU as usize);
-        src.buf_mut().resize(MTU as usize, 0);
-        let res = self.inner.handle_outgoing(src, dst);
-
-        if let TunnResult::WriteToNetwork(packet) = &res {
-            if let Ok(blocking) = self.blocking.try_read()
-                && blocking.is_active()
-            {
-                let packet: Packet<[u8]> = todo!("make packet be this type");
-                let _ = self
-                    .blocking_queue_tx
-                    .send((packet, self.endpoint().addr.unwrap()));
-                return TunnResult::Done;
-            }
-            let _ = self.event_tx.send(TriggerEvent::TunnelSent);
-            self.packet_count.sub(1);
-        }
-        res
-    }
-
-    fn endpoint(&self) -> impl Deref<Target = crate::device::peer::Endpoint> {
-        self.inner.endpoint()
-    }
-
-    fn handle_incoming<'a>(&mut self, packet: noise::Packet, dst: &'a mut [u8]) -> TunnResult<'a> {
-        match packet {
-            noise::Packet::PacketData(data_packet) => {
-                let _ = self.event_tx.send(TriggerEvent::TunnelRecv);
-                let decapsulated_packet = self
-                    .inner
-                    .decapsulate_with_session(data_packet, dst)
-                    .unwrap();
-
-                // TODO: parse `PaddingPacket` from bytes
-                if decapsulated_packet[0] == DAITA_MARKER
-                    && decapsulated_packet.len() >= size_of::<PaddingHeader>()
-                {
-                    let _ = self.event_tx.send(TriggerEvent::PaddingRecv);
-                    // TODO: Count padding packet bytes
-                    TunnResult::Done
-                } else {
-                    let res = self.inner.validate_decapsulated_packet(decapsulated_packet);
-                    if matches!(
-                        res,
-                        TunnResult::WriteToTunnelV4(..) | TunnResult::WriteToTunnelV6(..),
-                    ) {
-                        let _ = self.event_tx.send(TriggerEvent::NormalRecv);
-                    }
-                    res
-                }
-            }
-            non_data_packet => self.inner.handle_incoming(non_data_packet, dst),
-        }
-    }
-
-    fn decapsulate_with_session<'a>(
-        &mut self,
-        packet: noise::PacketData<'_>,
-        dst: &'a mut [u8],
-    ) -> core::result::Result<&'a mut [u8], noise::errors::WireGuardError> {
-        self.inner.decapsulate_with_session(packet, dst)
-    }
-
-    fn validate_decapsulated_packet<'a>(&mut self, packet: &'a mut [u8]) -> TunnResult<'a> {
-        self.inner.validate_decapsulated_packet(packet)
     }
 }
