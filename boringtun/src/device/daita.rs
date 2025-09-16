@@ -69,10 +69,15 @@ pub struct DaitaHooks {
     event_tx: mpsc::UnboundedSender<TriggerEvent>,
     packet_count: Arc<PacketCount>,
     blocking_queue_tx: mpsc::UnboundedSender<(Packet, SocketAddr)>,
-    blocking_state: Arc<RwLock<BlockingState>>,
+    blocking_state: Arc<RwLock<BlockingState>>, // TODO: Replace with `tokio::sync::watch`?
+    // TODO: Export to metrics sink
+    /// Total extra bytes added due to constant-size padding of data packets.
     tx_padding_bytes: usize,
+    /// Bytes of standalone padding packets transmitted.
     tx_padding_packet_bytes: Arc<AtomicUsize>,
+    /// Total extra bytes removed due to constant-size padding of data packets.
     rx_padding_bytes: usize,
+    /// Bytes of standalone padding packets received.
     rx_padding_packet_bytes: usize,
 }
 
@@ -91,8 +96,8 @@ impl DaitaHooks {
     {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let packet_count = Arc::new(PacketCount {
-            outbound: AtomicU32::new(0),
-            replaced: AtomicU32::new(0),
+            outbound_normal: AtomicU32::new(0),
+            replaced_normal: AtomicU32::new(0),
         });
         let blocking = Arc::new(RwLock::new(BlockingState::Inactive));
         let (blocking_queue_tx, blocking_queue_rx) = mpsc::unbounded_channel();
@@ -104,6 +109,7 @@ impl DaitaHooks {
             packet_pool,
             packet_count: packet_count.clone(),
             blocking_queue_rx,
+            blocking_queue_tx: blocking_queue_tx.clone(),
             blocking: blocking.clone(),
             udp_send: udp_send.clone(),
             tx_padding_packet_bytes: tx_padding_packet_bytes.clone(),
@@ -181,7 +187,8 @@ impl DaitaHooks {
                 }
                 _ => return None,
             };
-            self.rx_padding_bytes += original_total_len - packet.len();
+            debug_assert!(packet.len() >= original_total_len);
+            self.rx_padding_bytes += packet.len() - original_total_len;
             packet.truncate(original_total_len);
             let _ = self.event_tx.send(TriggerEvent::NormalRecv);
 
@@ -226,45 +233,43 @@ enum MachineTimer {
     Action(ActionTimerType),
 }
 
-/// Counter for the number of packets that have been received on the tunnel interface
-/// but not yet sent to the network, and the number of those packets that have been
-/// replaced by padding packets.
+/// Counter for the number of normal packets that have been received on the tunnel interface
+/// but not yet sent to the network, and the number of those packets that have replaced
+/// padding packets.
 ///
-/// TODO: Is sequential atomic ordering correct/necessary?
+/// TODO: Is `Relaxed` atomic ordering fine?
 struct PacketCount {
-    outbound: AtomicU32,
-    replaced: AtomicU32,
+    outbound_normal: AtomicU32,
+    replaced_normal: AtomicU32,
 }
 
 impl PacketCount {
     fn dec(&self, amount: u32) {
-        self.replaced
-            .fetch_update(atomic::Ordering::SeqCst, atomic::Ordering::SeqCst, |x| {
-                if x >= amount {
-                    Some(x - amount)
-                } else {
-                    Some(0)
-                }
+        self.replaced_normal
+            .fetch_update(atomic::Ordering::Relaxed, atomic::Ordering::Relaxed, |x| {
+                Some(x.saturating_sub(amount))
             })
             .ok();
-        self.outbound.fetch_sub(amount, atomic::Ordering::SeqCst);
-        // TODO: Ordering?
+        self.outbound_normal
+            .fetch_sub(amount, atomic::Ordering::Relaxed);
     }
 
     fn inc_outbound(&self, amount: u32) {
-        self.outbound.fetch_add(amount, atomic::Ordering::SeqCst);
+        self.outbound_normal
+            .fetch_add(amount, atomic::Ordering::Relaxed);
     }
 
     fn inc_replaced(&self, amount: u32) {
-        self.replaced.fetch_add(amount, atomic::Ordering::SeqCst);
+        self.replaced_normal
+            .fetch_add(amount, atomic::Ordering::Relaxed);
     }
 
     fn outbound(&self) -> u32 {
-        self.outbound.load(atomic::Ordering::SeqCst)
+        self.outbound_normal.load(atomic::Ordering::Relaxed)
     }
 
     fn replaced(&self) -> u32 {
-        self.replaced.load(atomic::Ordering::SeqCst)
+        self.replaced_normal.load(atomic::Ordering::Relaxed)
     }
 }
 
@@ -421,6 +426,7 @@ where
     maybenot: Framework<M, R>,
     packet_count: Arc<PacketCount>,
     blocking_queue_rx: mpsc::UnboundedReceiver<(Packet, SocketAddr)>,
+    blocking_queue_tx: mpsc::UnboundedSender<(Packet, SocketAddr)>,
     blocking: Arc<RwLock<BlockingState>>,
     peer: Weak<Mutex<Peer>>,
     packet_pool: packet::PacketBufPool,
@@ -462,13 +468,15 @@ where
                 }
                 _ = machine_timers.wait_next_timer().fuse() => {
                     let (machine, timer) = machine_timers.pop_next_timer().unwrap();
-                    self.on_machine_timer(machine, timer, &mut machine_timers, &mut event_buf).await;
+                    if let Err(ErrorAction::Close) = self.on_machine_timer(machine, timer, &mut machine_timers, &mut event_buf).await {
+                        return
+                    }
                 }
             }
             loop {
                 let actions = self
                     .maybenot
-                    .trigger_events(event_buf.as_slice(), std::time::Instant::now()); // TODO: support mocked time?
+                    .trigger_events(event_buf.as_slice(), Instant::now().into()); // TODO: support mocked time?
                 event_buf.clear(); // Clear immediately after use so we can add new events generated by actions
                 for action in actions {
                     match action {
@@ -520,15 +528,12 @@ where
         timer: MachineTimer,
         machine_timers: &mut MachineTimers,
         event_buf: &mut Vec<TriggerEvent>,
-    ) {
+    ) -> Result<()> {
         match timer {
             MachineTimer::Action(action_type) => match action_type {
                 ActionTimerType::Padding { replace, bypass } => {
-                    // TODO: Double check the spec for when to trigger these?
-                    // What about if the padding is blocked or fails to send?
-                    event_buf.push(TriggerEvent::PaddingSent { machine });
-                    self.handle_padding(machine, machine_timers, replace, bypass)
-                        .await
+                    self.handle_padding(machine, machine_timers, replace, bypass, event_buf)
+                        .await?;
                 }
                 ActionTimerType::Block {
                     replace,
@@ -554,6 +559,7 @@ where
                 event_buf.push(TriggerEvent::TimerEnd { machine });
             }
         }
+        Ok(())
     }
 
     async fn handle_padding(
@@ -562,7 +568,8 @@ where
         machine_timers: &mut MachineTimers,
         replace: bool,
         padding_bypass: bool,
-    ) {
+        event_buf: &mut Vec<TriggerEvent>,
+    ) -> Result<()> {
         let blocking_with_bypass = match &*self.blocking.read().await {
             BlockingState::Inactive => None,
             BlockingState::Active {
@@ -574,39 +581,31 @@ where
             (Some(true), true) => {
                 if let Ok((packet, destination)) = self.blocking_queue_rx.try_recv() {
                     self.udp_send.send_to(packet, destination).await.unwrap();
-                } else if let Err(ErrorAction::Close) = self.send_padding().await {
-                    return;
                 }
+                self.send_padding(event_buf, machine).await
             }
-            (Some(true), false) => {
-                if let Err(ErrorAction::Close) = self.send_padding().await {
-                    return;
-                }
-            }
+            (Some(true), false) => self.send_padding(event_buf, machine).await,
             (Some(false), true)
                 if self.packet_count.replaced()
                     < self.packet_count.outbound() + self.blocking_queue_rx.len() as u32 =>
             {
                 self.packet_count.inc_replaced(1);
                 machine_timers.remove_action(&machine);
-                return;
+                Ok(())
             }
             // Padding packet should or cannot replace any blocked packet
             (Some(false), _) => {
-                // TODO: Generate a padding packing and add it to the blocking queue
+                let padding_packet = self.encapsulate_padding(event_buf, machine).await?;
+                let _ = self.blocking_queue_tx.send(padding_packet);
+                Ok(())
             }
             (None, true) if self.packet_count.replaced() < self.packet_count.outbound() => {
                 self.packet_count.inc_replaced(1);
                 machine_timers.remove_action(&machine);
-                return;
+                Ok(())
             }
-            (None, _) => {
-                if let Err(ErrorAction::Close) = self.send_padding().await {
-                    return;
-                }
-            }
-        };
-        self.packet_count.inc_outbound(1);
+            (None, _) => self.send_padding(event_buf, machine).await,
+        }
     }
 
     async fn end_blocking(
@@ -618,9 +617,8 @@ where
         event_buf.push(TriggerEvent::BlockingEnd);
         loop {
             let limit = self.udp_send.max_number_of_packets_to_send();
-            packets.clear();
             futures::select! {
-                count = self.blocking_queue_rx.recv_many(packets, limit).fuse() => {
+                count = self.blocking_queue_rx.recv_many(packets, limit - packets.len()).fuse() => {
                     if count == 0 {
                         break; // channel closed
                     }
@@ -629,16 +627,42 @@ where
             }
 
             let mut send_many_bufs = US::SendManyBuf::default();
-            // Trigger a TunnelSent for each packet sent
-            event_buf.resize(event_buf.len() + packets.len(), TriggerEvent::TunnelSent);
-            self.udp_send
+            let count = packets.len();
+            if let Ok(()) = self
+                .udp_send
                 .send_many_to(&mut send_many_bufs, packets)
                 .await
-                .unwrap();
+            {
+                // Trigger a TunnelSent for each packet sent
+                let sent = count - packets.len();
+                event_buf.resize(event_buf.len() + sent, TriggerEvent::TunnelSent);
+            }
         }
     }
 
-    async fn send_padding(&self) -> Result<()> {
+    async fn send_padding(
+        &self,
+        event_buf: &mut Vec<TriggerEvent>,
+        machine: MachineId,
+    ) -> Result<()> {
+        let (dst_buf, addr) = self.encapsulate_padding(event_buf, machine).await?;
+
+        self.udp_send
+            .send_to(dst_buf, addr)
+            .await
+            .map_err(|_| ErrorAction::Close)?;
+
+        self.tx_padding_packet_bytes
+            .fetch_add(MTU as usize, atomic::Ordering::SeqCst);
+        event_buf.push(TriggerEvent::TunnelSent);
+        Ok(())
+    }
+
+    async fn encapsulate_padding(
+        &self,
+        event_buf: &mut Vec<TriggerEvent>,
+        machine: MachineId,
+    ) -> Result<(Packet, SocketAddr)> {
         let mut dst_buf = self.packet_pool.get();
         let Some(peer) = self.peer.upgrade() else {
             return Err(ErrorAction::Close);
@@ -646,17 +670,17 @@ where
         let mut peer = peer.lock().await;
 
         // TODO: Reuse the same padding packet each time (unless MTU changes)?
+        event_buf.push(TriggerEvent::PaddingSent { machine });
         match peer
             .tunnel
             .handle_outgoing_packet(&self.create_padding_packet(MTU), &mut dst_buf[..])
         {
-            TunnResult::Done => Ok(()), // TODO: error?
+            TunnResult::Done => Err(ErrorAction::Ignore), // TODO: error?
             TunnResult::Err(e) => {
                 log::error!("Encapsulate error={e:?}: {e:?}");
                 Err(ErrorAction::Close)
             }
             TunnResult::WriteToNetwork(packet) => {
-                // TODO: DAITA tunnel_sent here?
                 let len = packet.len();
                 dst_buf.truncate(len);
                 let endpoint_addr = peer.endpoint().addr;
@@ -664,12 +688,7 @@ where
                     log::error!("No endpoint");
                     return Err(ErrorAction::Ignore);
                 };
-                self.tx_padding_packet_bytes
-                    .fetch_add(MTU as usize, atomic::Ordering::SeqCst);
-                self.udp_send
-                    .send_to(dst_buf, addr)
-                    .await
-                    .map_err(|_| ErrorAction::Close)
+                Ok((dst_buf, addr))
             }
             _ => panic!("Unexpected result from encapsulate"),
         }
