@@ -288,7 +288,7 @@ impl Tunn {
     /// If the result is of type TunnResult::WriteToNetwork, should repeat the call with empty datagram,
     /// until TunnResult::Done is returned. If batch processing packets, it is OK to defer until last
     /// packet is processed.
-    // TODO: Remove this?
+    // TODO: Remove this? It's not used anymore outside of tests
     pub fn handle_incoming<'a>(
         &mut self,
         src_addr: Option<IpAddr>,
