@@ -17,8 +17,6 @@
 //!   as there are no `await` points in the encapsulation/decapsulation code. This would be a regression
 //!   in comparison with the `wireguard-go` implementation. As far as I remember, replacing padding packets
 //!   with outbound packets occurred quite often, so this could be important for performance.
-//! - Add overhead counters (see point 3 below)
-//!     - `tx_padding_bytes`, `tx_padding_packet_bytes`
 //! - Upper limit for blocking.
 //! - The [crate::noise::Tunn] type already has a concept for a queue of blocked packets. Consider how this
 //!   should interact/integrate with the blocking queue used by DAITA.
@@ -37,7 +35,7 @@ use std::{
     pin::pin,
     sync::{
         Arc, Weak,
-        atomic::{self, AtomicU32},
+        atomic::{self, AtomicU32, AtomicUsize},
     },
 };
 
@@ -72,6 +70,10 @@ pub struct DaitaHooks {
     packet_count: Arc<PacketCount>,
     blocking_queue_tx: mpsc::UnboundedSender<(Packet, SocketAddr)>,
     blocking_state: Arc<RwLock<BlockingState>>,
+    tx_padding_bytes: usize,
+    tx_padding_packet_bytes: Arc<AtomicUsize>,
+    rx_padding_bytes: usize,
+    rx_padding_packet_bytes: usize,
 }
 
 impl DaitaHooks {
@@ -94,6 +96,7 @@ impl DaitaHooks {
         });
         let blocking = Arc::new(RwLock::new(BlockingState::Inactive));
         let (blocking_queue_tx, blocking_queue_rx) = mpsc::unbounded_channel();
+        let tx_padding_packet_bytes = Arc::new(AtomicUsize::new(0));
 
         let daita = DAITA {
             maybenot,
@@ -103,6 +106,7 @@ impl DaitaHooks {
             blocking_queue_rx,
             blocking: blocking.clone(),
             udp_send: udp_send.clone(),
+            tx_padding_packet_bytes: tx_padding_packet_bytes.clone(),
         };
         tokio::spawn(daita.handle_events(event_rx));
         DaitaHooks {
@@ -110,16 +114,22 @@ impl DaitaHooks {
             packet_count,
             blocking_queue_tx,
             blocking_state: blocking,
+            tx_padding_bytes: 0,
+            tx_padding_packet_bytes,
+            rx_padding_bytes: 0,
+            rx_padding_packet_bytes: 0,
         }
     }
 
     /// Should be called on outgoing data packets, before encapsulation
-    pub fn map_outgoing_data(&self, mut packet: Packet) -> Packet {
+    pub fn map_outgoing_data(&mut self, mut packet: Packet) -> Packet {
         let _ = self.event_tx.send(TriggerEvent::NormalSent);
         self.packet_count.inc_outbound(1);
 
         // Pad to constant size
         debug_assert!(packet.len() <= MTU as usize);
+        self.tx_padding_bytes += MTU as usize - packet.len();
+
         packet.buf_mut().resize(MTU as usize, 0);
         packet
     }
@@ -148,28 +158,31 @@ impl DaitaHooks {
     }
 
     /// Should be called on incoming decapsulated *data* packets.
-    pub fn map_incoming_data(&self, mut packet: Packet) -> Option<Packet> {
+    pub fn map_incoming_data(&mut self, mut packet: Packet) -> Option<Packet> {
         if let Ok(padding) = PaddingPacket::ref_from_bytes(packet.as_bytes())
             && padding.header._daita_marker == DAITA_MARKER
         {
             let _ = self.event_tx.send(TriggerEvent::PaddingRecv);
+            // Count received padding
+            self.rx_padding_packet_bytes += u16::from(padding.header.length) as usize;
             None
         } else {
             let ip_packet = packet::Ip::ref_from_bytes(packet.as_bytes()).ok()?;
 
-            match ip_packet.header.version() {
+            let original_total_len = match ip_packet.header.version() {
                 4 => {
                     let ipv4 = packet::Ipv4::<[u8]>::mut_from_bytes(packet.as_mut_bytes()).ok()?;
-                    let total_len = usize::from(ipv4.header.total_len.get());
-                    packet.truncate(total_len);
+                    usize::from(ipv4.header.total_len.get())
                 }
                 6 => {
                     let ipv6 = packet::Ipv6::<[u8]>::mut_from_bytes(packet.as_mut_bytes()).ok()?;
                     let payload_len = usize::from(ipv6.header.payload_length.get());
-                    packet.truncate(payload_len + Ipv6Header::LEN);
+                    payload_len + Ipv6Header::LEN
                 }
                 _ => return None,
-            }
+            };
+            self.rx_padding_bytes += original_total_len - packet.len();
+            packet.truncate(original_total_len);
             let _ = self.event_tx.send(TriggerEvent::NormalRecv);
 
             Some(packet)
@@ -412,6 +425,7 @@ where
     peer: Weak<Mutex<Peer>>,
     packet_pool: packet::PacketBufPool,
     udp_send: US,
+    tx_padding_packet_bytes: Arc<AtomicUsize>,
 }
 
 impl<M, R, US> DAITA<M, R, US>
@@ -650,10 +664,12 @@ where
                     log::error!("No endpoint");
                     return Err(ErrorAction::Ignore);
                 };
+                self.tx_padding_packet_bytes
+                    .fetch_add(MTU as usize, atomic::Ordering::SeqCst);
                 self.udp_send
                     .send_to(dst_buf, addr)
                     .await
-                    .map_err(|_| ErrorAction::Close) // TODO: what action?
+                    .map_err(|_| ErrorAction::Close)
             }
             _ => panic!("Unexpected result from encapsulate"),
         }
