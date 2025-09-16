@@ -295,7 +295,6 @@ impl Tunn {
         datagram: &[u8],
         dst: &'a mut [u8],
     ) -> TunnResult<'a> {
-        // NOTE: can we split this to a separate fn?
         if datagram.is_empty() {
             // Indicates a repeated call
             return self.send_queued_packet(dst);
@@ -431,6 +430,8 @@ impl Tunn {
     ) -> Result<&'a mut [u8], WireGuardError> {
         let r_idx = packet.receiver_idx as usize;
         let idx = r_idx % N_SESSIONS;
+
+        // Get the (probably) right session
         let decapsulated_packet = {
             let session = self.sessions[idx].as_ref();
             let session = session.ok_or_else(|| {
@@ -440,8 +441,11 @@ impl Tunn {
             })?;
             session.receive_packet_data(packet, dst)?
         };
+
         self.set_current_session(r_idx);
+
         self.timer_tick(TimerName::TimeLastPacketReceived);
+
         Ok(decapsulated_packet)
     }
 
@@ -476,7 +480,7 @@ impl Tunn {
         }
     }
 
-    // TODO: Replace with out zero-copy packet abstraction
+    // TODO: Use our zero-copy packet abstraction [crate::packet::Packet]
     /// Check if an IP packet is v4 or v6, truncate to the length indicated by the length field
     /// Returns the truncated packet and the source IP as TunnResult
     pub fn validate_decapsulated_packet<'a>(&mut self, packet: &'a mut [u8]) -> TunnResult<'a> {
