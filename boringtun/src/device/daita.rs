@@ -155,10 +155,16 @@ impl DaitaHooks {
         if let Ok(blocking) = self.blocking_state.try_read()
             && blocking.is_active()
         {
-            // TODO: Can we send the oldest blocked packet instead of dropping the newest?
+            // Send the packet anyway if the blocking queue is full
+            // TODO: this would be an out of order packet, not ideal.
+            // We should probably trigger the blocking the end here and flush
+            // the queue (don't forget to send `TriggerEvent::BlockingEnd`)
+            // before sending the packet
             if let Err(TrySendError::Full((packet, _addr))) =
                 self.blocking_queue_tx.try_send((packet, addr))
             {
+                let _ = self.event_tx.send(TriggerEvent::TunnelSent);
+                self.packet_count.dec(1);
                 return Some(packet);
             }
             None
