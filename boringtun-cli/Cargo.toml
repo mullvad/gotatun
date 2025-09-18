@@ -1,11 +1,14 @@
 [package]
-name = "boringtun-cli"
+name = "boringtun-cli" # todo
 description = "an implementation of the WireGuard® protocol designed for portability and speed"
 version = "0.6.0"
-authors = ["Noah Kennedy <nkennedy@cloudflare.com>", "Andy Grover <agrover@cloudflare.com>", "Jeff Hiner <jhiner@cloudflare.com>"]
+authors = [
+    "Noah Kennedy <nkennedy@cloudflare.com>",
+    "Andy Grover <agrover@cloudflare.com>",
+    "Jeff Hiner <jhiner@cloudflare.com>",
+]
 license = "BSD-3-Clause"
-repository = "https://github.com/cloudflare/boringtun"
-documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
+repository = "https://github.com/mullvad/gotatun"
 edition = "2024"
 
 
