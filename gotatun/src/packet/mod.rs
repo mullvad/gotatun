@@ -35,7 +35,7 @@ pub use wg::*;
 /// [Packet] uses [BytesMut] as the backing buffer.
 ///
 /// ```
-/// use boringtun::packet::*;
+/// use gotatun::packet::*;
 /// use std::net::Ipv4Addr;
 /// use zerocopy::IntoBytes;
 ///

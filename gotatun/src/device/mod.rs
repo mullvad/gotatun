@@ -312,7 +312,7 @@ impl<T: DeviceTransports> DeviceHandle<T> {
     }
 
     async fn stop_inner(device: Arc<RwLock<Device<T>>>) {
-        log::debug!("Stopping boringtun device");
+        log::debug!("Stopping gotatun device");
 
         let mut device = device.write().await;
 
@@ -328,7 +328,7 @@ impl<T: DeviceTransports> DeviceHandle<T> {
 
 impl<T: DeviceTransports> Drop for DeviceHandle<T> {
     fn drop(&mut self) {
-        log::debug!("Dropping boringtun device");
+        log::debug!("Dropping gotatun device");
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
             log::warn!("Failed to get tokio runtime handle");
             return;

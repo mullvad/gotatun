@@ -197,67 +197,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "boringtun"
-version = "0.6.0"
-dependencies = [
- "aead",
- "async-trait",
- "base64 0.13.1",
- "bitfield-struct",
- "blake2",
- "bytes",
- "chacha20poly1305",
- "constant_time_eq",
- "criterion",
- "duplicate",
- "either",
- "etherparse",
- "eyre",
- "futures",
- "hex",
- "hmac",
- "ip_network",
- "ip_network_table",
- "libc",
- "log",
- "maybenot",
- "mock_instant",
- "nix",
- "parking_lot",
- "pcap-file",
- "pnet_packet",
- "rand",
- "rand_chacha",
- "rand_core 0.6.4",
- "ring",
- "socket2",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "tun",
- "typed-builder",
- "untrusted",
- "windows-sys 0.61.1",
- "x25519-dalek",
- "zerocopy",
-]
-
-[[package]]
-name = "boringtun-cli"
-version = "0.6.0"
-dependencies = [
- "boringtun",
- "clap 3.2.25",
- "daemonize",
- "log",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "boxfnonce"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -869,6 +808,67 @@ name = "glob"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
+
+[[package]]
+name = "gotatun"
+version = "0.6.0"
+dependencies = [
+ "aead",
+ "async-trait",
+ "base64 0.13.1",
+ "bitfield-struct",
+ "blake2",
+ "bytes",
+ "chacha20poly1305",
+ "constant_time_eq",
+ "criterion",
+ "duplicate",
+ "either",
+ "etherparse",
+ "eyre",
+ "futures",
+ "hex",
+ "hmac",
+ "ip_network",
+ "ip_network_table",
+ "libc",
+ "log",
+ "maybenot",
+ "mock_instant",
+ "nix",
+ "parking_lot",
+ "pcap-file",
+ "pnet_packet",
+ "rand",
+ "rand_chacha",
+ "rand_core 0.6.4",
+ "ring",
+ "socket2",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "tun",
+ "typed-builder",
+ "untrusted",
+ "windows-sys 0.61.1",
+ "x25519-dalek",
+ "zerocopy",
+]
+
+[[package]]
+name = "gotatun-cli"
+version = "0.6.0"
+dependencies = [
+ "clap 3.2.25",
+ "daemonize",
+ "gotatun",
+ "log",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "half"
