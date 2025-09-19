@@ -212,7 +212,7 @@ impl Packet<[u8]> {
 }
 
 impl Packet<Ip> {
-    pub fn try_into_ipvx(self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
+    pub fn try_into_ipvx(mut self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
         match self.header.version() {
             4 => {
                 let buf_len = self.buf().len();
@@ -221,9 +221,17 @@ impl Packet<Ip> {
                     .map_err(|e| eyre!("Bad IPv4 packet: {e:?}"))?;
 
                 let ip_len = usize::from(ipv4.header.total_len.get());
-                if ip_len != buf_len {
-                    bail!("IPv4 `total_len` did not match packet length: {ip_len} != {buf_len}");
+                if ip_len > buf_len {
+                    bail!("IPv4 `total_len` exceeded actual packet length: {ip_len} > {buf_len}");
                 }
+                if ip_len < Ipv4Header::LEN {
+                    bail!(
+                        "IPv4 `total_len` less than packet header len: {ip_len} < {}",
+                        Ipv4Header::LEN
+                    );
+                }
+
+                self.inner.buf.truncate(ip_len);
 
                 // TODO: validate checksum
 
@@ -236,12 +244,14 @@ impl Packet<Ip> {
                     .map_err(|e| eyre!("Bad IPv6 packet: {e:?}"))?;
 
                 let payload_len = usize::from(ipv6.header.payload_length.get());
-                if payload_len != ipv6.payload.len() {
+                if payload_len > ipv6.payload.len() {
                     bail!(
-                        "IPv6 `payload_len` did not match packet length: {payload_len} != {}",
+                        "IPv6 `payload_len` exceeded packet length: {payload_len} > {}",
                         ipv6.payload.len()
                     );
                 }
+
+                self.inner.buf.truncate(payload_len + Ipv6Header::LEN);
 
                 // TODO: validate checksum
 

@@ -388,7 +388,6 @@ impl Tunn {
             return TunnResult::Done;
         }
 
-        // TODO: truncate packet to ip_len
         let Ok(packet) = packet.try_into_ipvx() else {
             return TunnResult::Err(WireGuardError::InvalidPacket);
         };
