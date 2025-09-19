@@ -60,7 +60,27 @@ pub struct WgData {
 
     pub receiver_idx: little_endian::U32,
     pub counter: little_endian::U64,
-    pub encrypted_encapsulated_packet: [u8],
+    pub encrypted_encapsulated_packet_and_tag: [u8],
+}
+
+impl WgData {
+    pub fn encrypted_encapsulated_packet_mut(&mut self) -> &mut [u8] {
+        let (encrypted_encapsulated_packet, _tag) = self
+            .encrypted_encapsulated_packet_and_tag
+            .split_last_chunk_mut::<16>()
+            .unwrap(); // TODO
+
+        encrypted_encapsulated_packet
+    }
+
+    pub fn tag_mut(&mut self) -> &mut [u8] {
+        let (_, tag) = self
+            .encrypted_encapsulated_packet_and_tag
+            .split_last_chunk_mut::<16>()
+            .unwrap(); // TODO
+
+        tag
+    }
 }
 
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]

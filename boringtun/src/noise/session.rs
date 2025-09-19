@@ -213,21 +213,21 @@ impl Session {
         // TODO: spec requires padding to 16 bytes, but actually works fine without it
         let mut nonce = [0u8; 12];
         nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
-        data.encrypted_encapsulated_packet.copy_from_slice(&packet);
+        data.encrypted_encapsulated_packet_mut()
+            .copy_from_slice(&packet);
         self.sender
             .seal_in_place_separate_tag(
                 Nonce::assume_unique_for_key(nonce),
                 Aad::from(&[]),
-                &mut data.encrypted_encapsulated_packet,
+                data.encrypted_encapsulated_packet_mut(),
             )
             .map(|tag| {
-                data.encrypted_encapsulated_packet[packet.len()..packet.len() + AEAD_SIZE]
-                    .copy_from_slice(tag.as_ref());
+                data.tag_mut().copy_from_slice(tag.as_ref());
                 packet.len() + AEAD_SIZE
             })
             .unwrap();
 
-        buf.try_into_wg().unwrap()
+        buf.try_into_wg().unwrap(/* TODO */)
     }
 
     /// packet - a data packet we received from the network
@@ -256,7 +256,7 @@ impl Session {
             .open_in_place(
                 Nonce::assume_unique_for_key(nonce),
                 Aad::from(&[]),
-                &mut packet.encrypted_encapsulated_packet,
+                &mut packet.encrypted_encapsulated_packet_and_tag,
             )
             .map_err(|_| WireGuardError::InvalidAeadTag)?
             .len();

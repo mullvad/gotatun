@@ -381,6 +381,13 @@ impl Tunn {
     /// Check if an IP packet is v4 or v6, truncate to the length indicated by the length field
     /// Returns the truncated packet and the source IP as TunnResult
     pub fn validate_decapsulated_packet(&mut self, packet: Packet) -> TunnResult {
+        // keepalive
+        // TODO: is this right?
+        if packet.is_empty() {
+            self.timer_tick(TimerName::TimeLastDataPacketReceived);
+            return TunnResult::Done;
+        }
+
         // TODO: truncate packet to ip_len
         let Ok(packet) = packet.try_into_ipvx() else {
             return TunnResult::Err(WireGuardError::InvalidPacket);
@@ -486,6 +493,7 @@ mod tests {
     use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT};
 
     use super::*;
+    use bytes::BytesMut;
     use rand_core::{OsRng, RngCore};
 
     fn create_two_tuns() -> (Tunn, Tunn) {
@@ -504,70 +512,85 @@ mod tests {
         (my_tun, their_tun)
     }
 
-    fn create_handshake_init(tun: &mut Tunn) -> Vec<u8> {
-        let mut dst = vec![0u8; 2048];
+    fn create_handshake_init(tun: &mut Tunn) -> Packet<WgHandshakeInit> {
         let handshake_init = tun.format_handshake_initiation(false);
         assert!(matches!(handshake_init, TunnResult::WriteToNetwork(_)));
-        let handshake_init = if let TunnResult::WriteToNetwork(sent) = handshake_init {
-            sent
-        } else {
+        let TunnResult::WriteToNetwork(handshake_init) = handshake_init else {
             unreachable!();
         };
 
-        handshake_init.into()
+        let packet_type = handshake_init.packet_type;
+        let Ok(WgKind::HandshakeInit(handshake_init)) = handshake_init.into_kind() else {
+            panic!("expected WgHandshakeInit, got {packet_type:?}");
+        };
+
+        handshake_init
     }
 
-    fn create_handshake_response(tun: &mut Tunn, handshake_init: &[u8]) -> Vec<u8> {
-        let mut dst = vec![0u8; 2048];
-        let handshake_resp = tun.decapsulate(None, handshake_init, &mut dst);
+    fn create_handshake_response(
+        tun: &mut Tunn,
+        handshake_init: Packet<WgHandshakeInit>,
+    ) -> Packet<WgHandshakeResp> {
+        let handshake_resp = tun.handle_incoming_packet(WgKind::HandshakeInit(handshake_init));
+        //let handshake_resp = tun.verify_and_handle_incoming_packet(None, handshake_init, &mut dst);
         assert!(matches!(handshake_resp, TunnResult::WriteToNetwork(_)));
 
-        let handshake_resp = if let TunnResult::WriteToNetwork(sent) = handshake_resp {
-            sent
-        } else {
+        let TunnResult::WriteToNetwork(handshake_resp) = handshake_resp else {
             unreachable!();
         };
 
-        handshake_resp.into()
+        let packet_type = handshake_resp.packet_type;
+        let Ok(WgKind::HandshakeResp(handshake_resp)) = handshake_resp.into_kind() else {
+            panic!("expected WgHandshakeResp, got {packet_type:?}");
+        };
+
+        handshake_resp
     }
 
-    fn parse_handshake_resp(tun: &mut Tunn, handshake_resp: &[u8]) -> Vec<u8> {
-        let mut dst = vec![0u8; 2048];
-        let keepalive = tun.decapsulate(None, handshake_resp, &mut dst);
+    fn parse_handshake_resp(
+        tun: &mut Tunn,
+        handshake_resp: Packet<WgHandshakeResp>,
+    ) -> Packet<WgData> {
+        //let keepalive = tun.verify_and_handle_incoming_packet(None, handshake_resp, &mut dst);
+        let keepalive = tun.handle_incoming_packet(WgKind::HandshakeResp(handshake_resp));
         assert!(matches!(keepalive, TunnResult::WriteToNetwork(_)));
 
-        let keepalive = if let TunnResult::WriteToNetwork(sent) = keepalive {
-            sent
-        } else {
-            unreachable!();
+        let TunnResult::WriteToNetwork(keepalive) = keepalive else {
+            unreachable!()
         };
 
-        keepalive.into()
+        let packet_type = keepalive.packet_type;
+        let Ok(WgKind::Data(keepalive)) = keepalive.into_kind() else {
+            panic!("expected WgData, got {packet_type:?}");
+        };
+
+        keepalive
     }
 
-    fn parse_keepalive(tun: &mut Tunn, keepalive: &[u8]) {
-        let mut dst = vec![0u8; 2048];
-        let keepalive = tun.decapsulate(None, keepalive, &mut dst);
-        assert!(matches!(keepalive, TunnResult::Done));
+    fn parse_keepalive(tun: &mut Tunn, keepalive: Packet<WgData>) {
+        let result = tun.handle_incoming_packet(WgKind::Data(keepalive));
+        assert!(matches!(dbg!(result), TunnResult::Done));
     }
 
     fn create_two_tuns_and_handshake() -> (Tunn, Tunn) {
         let (mut my_tun, mut their_tun) = create_two_tuns();
         let init = create_handshake_init(&mut my_tun);
-        let resp = create_handshake_response(&mut their_tun, &init);
-        let keepalive = parse_handshake_resp(&mut my_tun, &resp);
-        parse_keepalive(&mut their_tun, &keepalive);
+        let resp = create_handshake_response(&mut their_tun, init);
+        let keepalive = parse_handshake_resp(&mut my_tun, resp);
+        parse_keepalive(&mut their_tun, keepalive);
 
         (my_tun, their_tun)
     }
 
-    fn create_ipv4_udp_packet() -> Vec<u8> {
+    fn create_ipv4_udp_packet() -> Packet<Ipv4> {
         let header =
             etherparse::PacketBuilder::ipv4([192, 168, 1, 2], [192, 168, 1, 3], 5).udp(5678, 23);
         let payload = [0, 1, 2, 3];
         let mut packet = Vec::<u8>::with_capacity(header.size(payload.len()));
         header.write(&mut packet, &payload).unwrap();
-        packet
+        let packet = Packet::from_bytes(BytesMut::from(&packet[..]));
+
+        packet.try_into_ipvx().unwrap().unwrap_left()
     }
 
     #[cfg(feature = "mock-instant")]
@@ -592,36 +615,30 @@ mod tests {
     #[test]
     fn handshake_init() {
         let (mut my_tun, _their_tun) = create_two_tuns();
-        let init = create_handshake_init(&mut my_tun);
-        let packet = Tunn::parse_incoming_packet(&init).unwrap();
-        assert!(matches!(packet, Packet::HandshakeInit(_)));
+        let _init = create_handshake_init(&mut my_tun);
     }
 
     #[test]
     fn handshake_init_and_response() {
         let (mut my_tun, mut their_tun) = create_two_tuns();
         let init = create_handshake_init(&mut my_tun);
-        let resp = create_handshake_response(&mut their_tun, &init);
-        let packet = Tunn::parse_incoming_packet(&resp).unwrap();
-        assert!(matches!(packet, Packet::HandshakeResponse(_)));
+        let _resp = create_handshake_response(&mut their_tun, init);
     }
 
     #[test]
     fn full_handshake() {
         let (mut my_tun, mut their_tun) = create_two_tuns();
         let init = create_handshake_init(&mut my_tun);
-        let resp = create_handshake_response(&mut their_tun, &init);
-        let keepalive = parse_handshake_resp(&mut my_tun, &resp);
-        let packet = Tunn::parse_incoming_packet(&keepalive).unwrap();
-        assert!(matches!(packet, Packet::PacketData(_)));
+        let resp = create_handshake_response(&mut their_tun, init);
+        let _keepalive = parse_handshake_resp(&mut my_tun, resp);
     }
 
     #[test]
     fn full_handshake_plus_timers() {
         let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
         // Time has not yet advanced so their is nothing to do
-        assert!(matches!(my_tun.update_timers(&mut []), TunnResult::Done));
-        assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
+        assert!(matches!(my_tun.update_timers(), TunnResult::Done));
+        assert!(matches!(their_tun.update_timers(), TunnResult::Done));
     }
 
     #[test]
@@ -664,26 +681,25 @@ mod tests {
     #[test]
     fn one_ip_packet() {
         let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
-        let mut my_dst = [0u8; 1024];
-        let mut their_dst = [0u8; 1024];
 
         let sent_packet_buf = create_ipv4_udp_packet();
 
-        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst);
+        let data = my_tun.handle_outgoing_packet(sent_packet_buf.clone().into_bytes());
         assert!(matches!(data, TunnResult::WriteToNetwork(_)));
-        let data = if let TunnResult::WriteToNetwork(sent) = data {
-            sent
-        } else {
+        let TunnResult::WriteToNetwork(data) = data else {
             unreachable!();
         };
 
-        let data = their_tun.decapsulate(None, data, &mut their_dst);
+        let data = data.into_kind().unwrap();
+        assert!(matches!(data, WgKind::Data(..)));
+
+        let data = their_tun.handle_incoming_packet(data);
         assert!(matches!(data, TunnResult::WriteToTunnelV4(..)));
-        let recv_packet_buf = if let TunnResult::WriteToTunnelV4(recv, _addr) = data {
+        let recv_packet_buf = if let TunnResult::WriteToTunnelV4(recv) = data {
             recv
         } else {
             unreachable!();
         };
-        assert_eq!(sent_packet_buf, recv_packet_buf);
+        assert_eq!(sent_packet_buf.as_bytes(), recv_packet_buf.as_bytes());
     }
 }
