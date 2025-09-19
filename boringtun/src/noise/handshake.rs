@@ -718,8 +718,8 @@ impl Handshake {
         packet: &mut WgHandshakeInit,
         local_index: u32,
     ) -> Result<(), WireGuardError> {
-        const MAC1_OFF: usize = offset_of!(WgHandshakeResp, mac1);
-        const MAC2_OFF: usize = offset_of!(WgHandshakeResp, mac2);
+        const MAC1_OFF: usize = offset_of!(WgHandshakeInit, mac1);
+        const MAC2_OFF: usize = offset_of!(WgHandshakeInit, mac2);
 
         // msg.mac1 = MAC(HASH(LABEL_MAC1 || responder.static_public), msg[0:offsetof(msg.mac1)])
         packet.mac1 = b2s_keyed_mac_16(

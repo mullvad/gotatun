@@ -80,7 +80,7 @@ pub struct WgHandshakeInit {
 impl WgHandshakeInit {
     pub fn new() -> Self {
         Self {
-            packet_type: WgPacketType::HandshakeResp,
+            packet_type: WgPacketType::HandshakeInit,
             ..WgHandshakeInit::new_zeroed()
         }
     }
