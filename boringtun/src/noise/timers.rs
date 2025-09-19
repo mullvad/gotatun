@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::errors::WireGuardError;
-use crate::noise::{Tunn, TunnResult};
+use crate::noise::Tunn;
+use crate::packet::{Packet, Wg};
+
 use std::mem;
 use std::ops::{Index, IndexMut};
-
 use std::time::Duration;
 
+use bytes::BytesMut;
 #[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
 
@@ -165,7 +167,11 @@ impl Tunn {
         }
     }
 
-    pub fn update_timers<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
+    /// Update the tunnel timers
+    ///
+    /// This returns `Ok(None)` if no action is needed, `Ok(Some(packet))` if a packet
+    /// (keepalive or handshake) should be sent, or an error if something went wrong.
+    pub fn update_timers(&mut self) -> Result<Option<Packet<Wg>>, WireGuardError> {
         let mut handshake_initiation_required = false;
         let mut keepalive_required = false;
 
@@ -193,7 +199,7 @@ impl Tunn {
 
         {
             if self.handshake.is_expired() {
-                return TunnResult::Err(WireGuardError::ConnectionExpired);
+                return Err(WireGuardError::ConnectionExpired);
             }
 
             // Clear cookie after COOKIE_EXPIRATION_TIME
@@ -209,7 +215,7 @@ impl Tunn {
                 log::error!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
                 self.handshake.set_expired();
                 self.clear_all();
-                return TunnResult::Err(WireGuardError::ConnectionExpired);
+                return Err(WireGuardError::ConnectionExpired);
             }
 
             if let Some(time_init_sent) = self.handshake.timer() {
@@ -222,7 +228,7 @@ impl Tunn {
                     log::error!("CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
                     self.handshake.set_expired();
                     self.clear_all();
-                    return TunnResult::Err(WireGuardError::ConnectionExpired);
+                    return Err(WireGuardError::ConnectionExpired);
                 }
 
                 if time_init_sent.elapsed() >= REKEY_TIMEOUT {
@@ -301,14 +307,16 @@ impl Tunn {
         }
 
         if handshake_initiation_required {
-            return self.format_handshake_initiation(dst, true);
+            return Ok(self.format_handshake_initiation(true).map(Into::into));
         }
 
         if keepalive_required {
-            return self.encapsulate(&[], dst);
+            return Ok(
+                self.handle_outgoing_packet(crate::packet::Packet::from_bytes(BytesMut::new()))
+            );
         }
 
-        TunnResult::Done
+        Ok(None)
     }
 
     pub fn time_since_last_handshake(&self) -> Option<Duration> {

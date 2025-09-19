@@ -7,7 +7,9 @@ use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 
 use crate::device::AllowedIps;
-use crate::noise::{Tunn, TunnResult};
+use crate::noise::Tunn;
+use crate::noise::errors::WireGuardError;
+use crate::packet::{Packet, Wg};
 
 #[derive(Default, Debug)]
 pub struct Endpoint {
@@ -65,8 +67,8 @@ impl Peer {
         }
     }
 
-    pub fn update_timers<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
-        self.tunnel.update_timers(dst)
+    pub fn update_timers(&mut self) -> Result<Option<Packet<Wg>>, WireGuardError> {
+        self.tunnel.update_timers()
     }
 
     pub fn endpoint(&self) -> parking_lot::RwLockReadGuard<'_, Endpoint> {

@@ -1,6 +1,7 @@
 use super::handshake::{b2s_hash, b2s_keyed_mac_16, b2s_keyed_mac_16_2, b2s_mac_24};
 use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
-use crate::noise::{HandshakeInit, HandshakeResponse, Packet, Tunn, TunnResult, WireGuardError};
+use crate::noise::{TunnResult, WireGuardError};
+use crate::packet::{Packet, Wg, WgCookieReply, WgHandshakeBase, WgKind};
 
 use constant_time_eq::constant_time_eq;
 #[cfg(feature = "mock-instant")]
@@ -113,83 +114,93 @@ impl RateLimiter {
         self.count.fetch_add(1, Ordering::SeqCst) >= self.limit
     }
 
-    pub(crate) fn format_cookie_reply<'a>(
+    pub(crate) fn format_cookie_reply(
         &self,
         idx: u32,
         cookie: Cookie,
         mac1: &[u8],
-        dst: &'a mut [u8],
-    ) -> Result<&'a mut [u8], WireGuardError> {
-        if dst.len() < super::COOKIE_REPLY_SZ {
-            return Err(WireGuardError::DestinationBufferTooSmall);
-        }
-
-        let (message_type, rest) = dst.split_at_mut(4);
-        let (receiver_index, rest) = rest.split_at_mut(4);
-        let (nonce, rest) = rest.split_at_mut(24);
-        let (encrypted_cookie, _) = rest.split_at_mut(16 + 16);
+    ) -> WgCookieReply {
+        let mut wg_cookie_reply = WgCookieReply::new();
 
         // msg.message_type = 3
         // msg.reserved_zero = { 0, 0, 0 }
-        message_type.copy_from_slice(&super::COOKIE_REPLY.to_le_bytes());
         // msg.receiver_index = little_endian(initiator.sender_index)
-        receiver_index.copy_from_slice(&idx.to_le_bytes());
-        nonce.copy_from_slice(&self.nonce()[..]);
+        wg_cookie_reply.receiver_idx.set(idx);
+        wg_cookie_reply.nonce = self.nonce();
 
         let cipher = XChaCha20Poly1305::new(&self.cookie_key);
 
-        let iv = GenericArray::from_slice(nonce);
+        let iv = GenericArray::from_slice(&wg_cookie_reply.nonce);
 
-        encrypted_cookie[..16].copy_from_slice(&cookie);
+        wg_cookie_reply.encrypted_cookie[..16].copy_from_slice(&cookie);
         let tag = cipher
-            .encrypt_in_place_detached(iv, mac1, &mut encrypted_cookie[..16])
-            .map_err(|_| WireGuardError::DestinationBufferTooSmall)?;
+            .encrypt_in_place_detached(iv, mac1, &mut wg_cookie_reply.encrypted_cookie[..16])
+            .expect("wg_cookie_reply is large enough");
 
-        encrypted_cookie[16..].copy_from_slice(&tag);
+        wg_cookie_reply.encrypted_cookie[16..].copy_from_slice(&tag);
 
-        Ok(&mut dst[..super::COOKIE_REPLY_SZ])
+        wg_cookie_reply
     }
 
-    /// Verify the MAC fields on the datagram, and apply rate limiting if needed
-    pub fn verify_packet<'a, 'b>(
+    /// Decode the packet as wireguard packet.
+    /// Then, verify the MAC fields on the packet (if any), and apply rate limiting if needed.
+    pub fn verify_packet(
         &self,
         src_addr: Option<IpAddr>,
-        src: &'a [u8],
-        dst: &'b mut [u8],
-    ) -> Result<Packet<'a>, TunnResult<'b>> {
-        let packet = Tunn::parse_incoming_packet(src)?;
+        packet: Packet,
+    ) -> Result<WgKind, TunnResult> {
+        let packet = packet
+            .try_into_wg()
+            .and_then(Packet::<Wg>::into_kind)
+            .map_err(|_err| TunnResult::Err(WireGuardError::InvalidPacket))?;
 
         // Verify and rate limit handshake messages only
-        if let Packet::HandshakeInit(HandshakeInit { sender_idx, .. })
-        | Packet::HandshakeResponse(HandshakeResponse { sender_idx, .. }) = packet
-        {
-            let (msg, macs) = src.split_at(src.len() - 32);
-            let (mac1, mac2) = macs.split_at(16);
+        match packet {
+            WgKind::HandshakeInit(packet) => self
+                .verify_handshake(src_addr, packet)
+                .map(WgKind::HandshakeInit),
+            WgKind::HandshakeResp(packet) => self
+                .verify_handshake(src_addr, packet)
+                .map(WgKind::HandshakeResp),
+            _ => Ok(packet),
+        }
+    }
 
-            let computed_mac1 = b2s_keyed_mac_16(&self.mac1_key, msg);
-            if !constant_time_eq(&computed_mac1[..16], mac1) {
-                return Err(TunnResult::Err(WireGuardError::InvalidMac));
-            }
+    /// Verify the MAC fields on the handshake, and apply rate limiting if needed.
+    fn verify_handshake<P: WgHandshakeBase>(
+        &self,
+        src_addr: Option<IpAddr>,
+        handshake: Packet<P>,
+    ) -> Result<Packet<P>, TunnResult> {
+        let sender_idx = handshake.sender_idx();
+        let mac1 = handshake.mac1();
+        let mac2 = handshake.mac2();
 
-            if self.is_under_load() {
-                let addr = match src_addr {
-                    None => return Err(TunnResult::Err(WireGuardError::UnderLoad)),
-                    Some(addr) => addr,
-                };
+        let len_without_mac: usize = P::LEN - P::MAC1_OFF;
+        let packet_until_mac = &handshake.as_bytes()[..len_without_mac];
 
-                // Only given an address can we validate mac2
-                let cookie = self.current_cookie(addr);
-                let computed_mac2 = b2s_keyed_mac_16_2(&cookie, msg, mac1);
+        let computed_mac1 = b2s_keyed_mac_16(&self.mac1_key, packet_until_mac);
+        if !constant_time_eq(&computed_mac1[..16], mac1) {
+            return Err(TunnResult::Err(WireGuardError::InvalidMac));
+        }
 
-                if !constant_time_eq(&computed_mac2[..16], mac2) {
-                    let cookie_packet = self
-                        .format_cookie_reply(sender_idx, cookie, mac1, dst)
-                        .map_err(TunnResult::Err)?;
-                    return Err(TunnResult::WriteToNetwork(cookie_packet));
-                }
+        if self.is_under_load() {
+            let addr = match src_addr {
+                None => return Err(TunnResult::Err(WireGuardError::UnderLoad)),
+                Some(addr) => addr,
+            };
+
+            // Only given an address can we validate mac2
+            let cookie = self.current_cookie(addr);
+            let computed_mac2 = b2s_keyed_mac_16_2(&cookie, packet_until_mac, mac1);
+
+            if !constant_time_eq(&computed_mac2[..16], mac2) {
+                let cookie_reply = self.format_cookie_reply(sender_idx, cookie, mac1);
+                let packet = handshake.overwrite_with(&cookie_reply);
+                return Err(TunnResult::WriteToNetwork(packet.into()));
             }
         }
 
-        Ok(packet)
+        Ok(handshake)
     }
 }
