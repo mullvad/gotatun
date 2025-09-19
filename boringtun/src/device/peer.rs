@@ -65,8 +65,8 @@ impl Peer {
         }
     }
 
-    pub fn update_timers<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
-        self.tunnel.update_timers(dst)
+    pub fn update_timers(&mut self) -> TunnResult {
+        self.tunnel.update_timers()
     }
 
     pub fn endpoint(&self) -> parking_lot::RwLockReadGuard<'_, Endpoint> {

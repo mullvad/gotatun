@@ -1,11 +1,15 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use super::PacketData;
-use crate::noise::errors::WireGuardError;
+use crate::{
+    noise::errors::WireGuardError,
+    packet::{Packet, Wg, WgData, WgPacketType},
+};
+use bytes::{Buf, BytesMut};
 use parking_lot::Mutex;
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use zerocopy::FromBytes;
 
 pub struct Session {
     pub(crate) receiving_index: u32,
@@ -193,40 +197,37 @@ impl Session {
     /// src - an IP packet from the interface
     /// dst - pre-allocated space to hold the encapsulating UDP packet to send over the network
     /// returns the size of the formatted packet
-    pub(super) fn format_packet_data<'a>(&self, src: &[u8], dst: &'a mut [u8]) -> &'a mut [u8] {
-        if dst.len() < src.len() + super::DATA_OVERHEAD_SZ {
-            panic!("The destination buffer is too small");
-        }
-
+    pub(super) fn format_packet_data(&self, packet: Packet) -> Packet<Wg> {
         let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
 
-        let (message_type, rest) = dst.split_at_mut(4);
-        let (receiver_index, rest) = rest.split_at_mut(4);
-        let (counter, data) = rest.split_at_mut(8);
+        let len = DATA_OFFSET + AEAD_SIZE + packet.len();
+        // TODO: don't allocate
+        let mut buf = Packet::from_bytes(BytesMut::zeroed(len));
 
-        message_type.copy_from_slice(&super::DATA.to_le_bytes());
-        receiver_index.copy_from_slice(&self.sending_index.to_le_bytes());
-        counter.copy_from_slice(&sending_key_counter.to_le_bytes());
+        let data = WgData::mut_from_bytes(buf.buf_mut()).unwrap();
+
+        data.packet_type = WgPacketType::Data;
+        data.receiver_idx.set(self.sending_index);
+        data.counter.set(sending_key_counter);
 
         // TODO: spec requires padding to 16 bytes, but actually works fine without it
-        let n = {
-            let mut nonce = [0u8; 12];
-            nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
-            data[..src.len()].copy_from_slice(src);
-            self.sender
-                .seal_in_place_separate_tag(
-                    Nonce::assume_unique_for_key(nonce),
-                    Aad::from(&[]),
-                    &mut data[..src.len()],
-                )
-                .map(|tag| {
-                    data[src.len()..src.len() + AEAD_SIZE].copy_from_slice(tag.as_ref());
-                    src.len() + AEAD_SIZE
-                })
-                .unwrap()
-        };
+        let mut nonce = [0u8; 12];
+        nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
+        data.encrypted_encapsulated_packet.copy_from_slice(&packet);
+        self.sender
+            .seal_in_place_separate_tag(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(&[]),
+                &mut data.encrypted_encapsulated_packet,
+            )
+            .map(|tag| {
+                data.encrypted_encapsulated_packet[packet.len()..packet.len() + AEAD_SIZE]
+                    .copy_from_slice(tag.as_ref());
+                packet.len() + AEAD_SIZE
+            })
+            .unwrap();
 
-        &mut dst[..DATA_OFFSET + n]
+        buf.try_into_wg().unwrap()
     }
 
     /// packet - a data packet we received from the network
@@ -235,36 +236,40 @@ impl Session {
     /// return the size of the encapsulated packet on success
     pub(super) fn receive_packet_data<'a>(
         &self,
-        packet: PacketData,
-        dst: &'a mut [u8],
-    ) -> Result<&'a mut [u8], WireGuardError> {
-        let ct_len = packet.encrypted_encapsulated_packet.len();
-        if dst.len() < ct_len {
-            // This is a very incorrect use of the library, therefore panic and not error
-            panic!("The destination buffer is too small");
-        }
+        mut packet: Packet<WgData>,
+    ) -> Result<Packet, WireGuardError> {
         if packet.receiver_idx != self.receiving_index {
             return Err(WireGuardError::WrongIndex);
         }
-        // Don't reuse counters, in case this is a replay attack we want to quickly check the counter without running expensive decryption
-        self.receiving_counter_quick_check(packet.counter)?;
 
-        let ret = {
-            let mut nonce = [0u8; 12];
-            nonce[4..12].copy_from_slice(&packet.counter.to_le_bytes());
-            dst[..ct_len].copy_from_slice(packet.encrypted_encapsulated_packet);
-            self.receiver
-                .open_in_place(
-                    Nonce::assume_unique_for_key(nonce),
-                    Aad::from(&[]),
-                    &mut dst[..ct_len],
-                )
-                .map_err(|_| WireGuardError::InvalidAeadTag)?
-        };
+        let counter = packet.counter.get();
+
+        // Don't reuse counters, in case this is a replay attack we want to quickly check the counter without running expensive decryption
+        self.receiving_counter_quick_check(counter)?;
+
+        let mut nonce = [0u8; 12];
+        nonce[4..12].copy_from_slice(&packet.counter.to_bytes());
+
+        // decrypt the data in-place
+        let decrypted_len = self
+            .receiver
+            .open_in_place(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(&[]),
+                &mut packet.encrypted_encapsulated_packet,
+            )
+            .map_err(|_| WireGuardError::InvalidAeadTag)?
+            .len();
+
+        // shift the packet buffer slice onto the decrypted data
+        let mut packet = packet.into_bytes();
+        let buf = packet.buf_mut();
+        buf.advance(16); // offset of WgData::encrypted_encapsulated_packet
+        buf.truncate(decrypted_len);
 
         // After decryption is done, check counter again, and mark as received
-        self.receiving_counter_mark(packet.counter)?;
-        Ok(ret)
+        self.receiving_counter_mark(counter)?;
+        Ok(packet)
     }
 
     /// Returns the estimated downstream packet loss for this session

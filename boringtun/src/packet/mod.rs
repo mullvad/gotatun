@@ -16,12 +16,14 @@ mod ipv6;
 mod pool;
 mod udp;
 mod util;
+mod wg;
 
 pub use ip::*;
 pub use ipv4::*;
 pub use ipv6::*;
 pub use pool::*;
 pub use udp::*;
+pub use wg::*;
 
 /// An owned packet of some type.
 ///
@@ -79,6 +81,11 @@ impl CheckedPayload for Ip {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv6<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv4<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Udp<P> {}
+impl CheckedPayload for Wg {}
+impl CheckedPayload for WgHandshakeInit {}
+impl CheckedPayload for WgHandshakeResp {}
+impl CheckedPayload for WgCookieReply {}
+impl CheckedPayload for WgData {}
 
 impl<T: CheckedPayload + ?Sized> Packet<T> {
     fn cast<Y: CheckedPayload + ?Sized>(self) -> Packet<Y> {
@@ -110,19 +117,28 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
 // Trivial From conversions between packet types
 #[duplicate_item(
     FromType ToType;
-    [Ipv4<Udp>] [Ipv4];
-    [Ipv6<Udp>] [Ipv6];
+    [Ipv4<Udp>]             [Ipv4];
+    [Ipv6<Udp>]             [Ipv6];
 
-    [Ipv4<Udp>] [Ip];
-    [Ipv6<Udp>] [Ip];
-    [Ipv4]      [Ip];
-    [Ipv6]      [Ip];
+    [Ipv4<Udp>]             [Ip];
+    [Ipv6<Udp>]             [Ip];
+    [Ipv4]                  [Ip];
+    [Ipv6]                  [Ip];
 
-    [Ipv4<Udp>] [[u8]];
-    [Ipv6<Udp>] [[u8]];
-    [Ipv4]      [[u8]];
-    [Ipv6]      [[u8]];
-    [Ip]        [[u8]];
+    [Ipv4<Udp>]             [[u8]];
+    [Ipv6<Udp>]             [[u8]];
+    [Ipv4]                  [[u8]];
+    [Ipv6]                  [[u8]];
+    [Ip]                    [[u8]];
+    [Wg]                    [[u8]];
+    [WgData]                [[u8]];
+    [WgHandshakeInit]       [[u8]];
+    [WgHandshakeResp]       [[u8]];
+    [WgCookieReply]         [[u8]];
+    [WgHandshakeInit]       [Wg];
+    [WgHandshakeResp]       [Wg];
+    [WgCookieReply]         [Wg];
+    [WgData]                [Wg];
 )]
 impl From<Packet<FromType>> for Packet<ToType> {
     fn from(value: Packet<FromType>) -> Packet<ToType> {
@@ -151,6 +167,12 @@ impl Packet<[u8]> {
             },
             _kind: PhantomData::<[u8]>,
         }
+    }
+
+    pub fn overwrite_with<T: CheckedPayload>(mut self, payload: &T) -> Packet<T> {
+        self.buf_mut().clear();
+        self.buf_mut().extend_from_slice(payload.as_bytes());
+        self.cast()
     }
 
     pub fn from_bytes(bytes: BytesMut) -> Self {

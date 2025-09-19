@@ -8,6 +8,7 @@ use std::ops::{Index, IndexMut};
 
 use std::time::Duration;
 
+use bytes::BytesMut;
 #[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
 
@@ -165,7 +166,7 @@ impl Tunn {
         }
     }
 
-    pub fn update_timers<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
+    pub fn update_timers(&mut self) -> TunnResult {
         let mut handshake_initiation_required = false;
         let mut keepalive_required = false;
 
@@ -301,11 +302,12 @@ impl Tunn {
         }
 
         if handshake_initiation_required {
-            return self.format_handshake_initiation(dst, true);
+            return self.format_handshake_initiation(true);
         }
 
         if keepalive_required {
-            return self.encapsulate(&[], dst);
+            // TODO: no
+            return self.handle_outgoing_packet(crate::packet::Packet::from_bytes(BytesMut::new()));
         }
 
         TunnResult::Done
