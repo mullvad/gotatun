@@ -152,7 +152,6 @@ impl RateLimiter {
         let parsed_packet = packet
             .try_into_wg()
             .and_then(Packet::<Wg>::into_kind)
-            // TODO: right error?
             .map_err(|_err| TunnResult::Err(WireGuardError::InvalidPacket))?;
 
         // Verify and rate limit handshake messages only
