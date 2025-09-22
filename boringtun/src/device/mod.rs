@@ -22,7 +22,7 @@ use tokio::join;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
-use crate::device::daita::DaitaHooks;
+use crate::device::hooks::Hooks;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
@@ -146,7 +146,7 @@ pub struct Device<T: DeviceTransports> {
     /// The task that responds to API requests.
     api: Option<Task>,
     // FIXME
-    hooks: Arc<DaitaHooks>,
+    hooks: Arc<dyn Hooks>,
 }
 
 pub(crate) struct Connection<T: DeviceTransports> {
@@ -437,6 +437,16 @@ impl<T: DeviceTransports> Device<T> {
         tun_rx: T::IpRecv,
         config: DeviceConfig,
     ) -> Arc<RwLock<Device<T>>> {
+        Device::new_with_hooks(udp_factory, tun_tx, tun_rx, config, ()).await
+    }
+
+    pub async fn new_with_hooks(
+        udp_factory: T::UdpTransportFactory,
+        tun_tx: T::IpSend,
+        tun_rx: T::IpRecv,
+        config: DeviceConfig,
+        hooks: impl Hooks,
+    ) -> Arc<RwLock<Device<T>>> {
         let device = Device {
             api: None,
             udp_factory,
@@ -451,6 +461,7 @@ impl<T: DeviceTransports> Device<T> {
             rate_limiter: None,
             port: 0,
             connection: None,
+            hooks: Arc::new(hooks),
         };
 
         let device = Arc::new(RwLock::new(device));
@@ -629,6 +640,8 @@ impl<T: DeviceTransports> Device<T> {
             device.hooks.clone()
         };
 
+        let hooks = &*hooks;
+
         while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
             let parsed_packet = match rate_limiter.verify_packet(Some(addr.ip()), src_buf) {
                 Ok(packet) => packet,
@@ -664,7 +677,7 @@ impl<T: DeviceTransports> Device<T> {
             let Some(peer) = peer else { continue };
             let mut peer = peer.lock().await;
 
-            match peer.tunnel.handle_incoming_packet(parsed_packet, &hooks) {
+            match peer.tunnel.handle_incoming_packet(parsed_packet, hooks) {
                 TunnResult::Done => (),
                 TunnResult::Err(_) => continue,
                 TunnResult::WriteToNetwork(packet) => {
