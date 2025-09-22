@@ -42,7 +42,7 @@ use std::{
 };
 
 use crate::{
-    packet::{self, Ipv6Header, Packet, Wg, WgPacketType},
+    packet::{self, Packet, Wg, WgPacketType},
     udp::UdpSend,
 };
 
@@ -191,7 +191,7 @@ impl DaitaHooks {
     }
 
     /// Should be called on incoming decapsulated *data* packets.
-    pub fn map_incoming_data(&self, mut packet: Packet) -> Option<Packet> {
+    pub fn map_incoming_data(&self, packet: Packet) -> Option<Packet> {
         if let Ok(padding) = PaddingPacket::ref_from_bytes(packet.as_bytes())
             && padding.header._daita_marker == DAITA_MARKER
         {
@@ -201,23 +201,6 @@ impl DaitaHooks {
             return None;
         }
 
-        let ip_packet = packet::Ip::ref_from_bytes(packet.as_bytes()).ok()?;
-
-        let original_total_len = match ip_packet.header.version() {
-            4 => {
-                let ipv4 = packet::Ipv4::<[u8]>::mut_from_bytes(packet.as_mut_bytes()).ok()?;
-                usize::from(ipv4.header.total_len.get())
-            }
-            6 => {
-                let ipv6 = packet::Ipv6::<[u8]>::mut_from_bytes(packet.as_mut_bytes()).ok()?;
-                let payload_len = usize::from(ipv6.header.payload_length.get());
-                payload_len + Ipv6Header::LEN
-            }
-            _ => return None,
-        };
-        debug_assert!(packet.len() >= original_total_len);
-        //self.rx_padding_bytes += packet.len() - original_total_len; // TODO
-        packet.truncate(original_total_len);
         let _ = self.event_tx.send(TriggerEvent::NormalRecv);
 
         Some(packet)
