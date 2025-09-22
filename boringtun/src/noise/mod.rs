@@ -9,6 +9,7 @@ mod timers;
 
 use zerocopy::IntoBytes;
 
+use crate::device::hooks::Hooks;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::rate_limiter::RateLimiter;
@@ -163,7 +164,7 @@ impl Tunn {
     pub(crate) fn handle_incoming_packet(
         &mut self,
         packet: WgKind,
-        hooks: &crate::device::daita::DaitaHooks,
+        hooks: &dyn Hooks,
     ) -> TunnResult {
         match packet {
             WgKind::HandshakeInit(p) => self.handle_handshake_init(p),
@@ -257,7 +258,7 @@ impl Tunn {
     fn handle_data(
         &mut self,
         packet: Packet<WgData>,
-        hooks: &crate::device::daita::DaitaHooks, // TODO
+        hooks: &dyn Hooks,
     ) -> Result<TunnResult, WireGuardError> {
         let decapsulated_packet = self.decapsulate_with_session(packet)?;
 

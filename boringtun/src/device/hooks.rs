@@ -5,31 +5,37 @@ use crate::{
     packet::{Ip, Packet, Wg},
 };
 
-pub trait Hooks {
+pub trait Hooks: Send + Sync {
     /// Called before a data packet is encapsulated
     #[inline(always)]
-    fn before_data_encapsulate(peer: &Peer, packet: Packet<Ip>) -> Packet {
+    fn before_data_encapsulate(&self, peer: &Peer, packet: Packet<Ip>) -> Packet {
         let _ = peer;
         packet.into() // noop
     }
 
     #[inline(always)]
-    fn before_wg_send(packet: Packet<Wg>, destination: SocketAddr) -> (Packet<Wg>, SocketAddr) {
+    fn before_wg_send(
+        &self,
+        packet: Packet<Wg>,
+        destination: SocketAddr,
+    ) -> (Packet<Wg>, SocketAddr) {
         (packet, destination) // noop
     }
 
     #[inline(always)]
-    fn after_wg_recv(packet: Packet<Wg>, destination: SocketAddr) -> (Packet<Wg>, SocketAddr) {
+    fn after_wg_recv(
+        &self,
+        packet: Packet<Wg>,
+        destination: SocketAddr,
+    ) -> (Packet<Wg>, SocketAddr) {
         (packet, destination) // noop
     }
 
     #[inline(always)]
-    fn after_data_decapsulate(
-        peer: &Peer,
-        packet: Packet,
-        source: SocketAddr,
-    ) -> (Packet, SocketAddr) {
+    fn after_data_decapsulate(&self, peer: &Peer, packet: Packet) -> Option<Packet> {
         let _ = peer;
-        (packet, source) // noop
+        Some(packet) // noop
     }
 }
+
+impl Hooks for () {}
