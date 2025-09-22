@@ -20,22 +20,12 @@ use crate::packet::{
 use crate::x25519;
 
 use std::collections::VecDeque;
-use std::convert::TryInto;
-use std::net::IpAddr;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
 /// The default value to use for rate limiting, when no other rate limiter is defined
 const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
-
-const IPV4_MIN_HEADER_SIZE: usize = 20;
-const IPV4_DST_IP_OFF: usize = 16;
-const IPV4_IP_SZ: usize = 4;
-
-const IPV6_MIN_HEADER_SIZE: usize = 40;
-const IPV6_DST_IP_OFF: usize = 24;
-const IPV6_IP_SZ: usize = 16;
 
 const MAX_QUEUE_DEPTH: usize = 256;
 /// number of sessions in the ring, better keep a PoT
@@ -66,6 +56,7 @@ pub struct Tunn {
     current: usize,
     /// Queue to store blocked packets
     packet_queue: VecDeque<Packet>,
+
     /// Keeps tabs on the expiring timers
     timers: timers::Timers,
     tx_bytes: usize,
@@ -76,30 +67,6 @@ pub struct Tunn {
 impl Tunn {
     pub fn is_expired(&self) -> bool {
         self.handshake.is_expired()
-    }
-
-    pub fn dst_address(packet: &[u8]) -> Option<IpAddr> {
-        if packet.is_empty() {
-            return None;
-        }
-
-        match packet[0] >> 4 {
-            4 if packet.len() >= IPV4_MIN_HEADER_SIZE => {
-                let addr_bytes: [u8; IPV4_IP_SZ] = packet
-                    [IPV4_DST_IP_OFF..IPV4_DST_IP_OFF + IPV4_IP_SZ]
-                    .try_into()
-                    .unwrap();
-                Some(IpAddr::from(addr_bytes))
-            }
-            6 if packet.len() >= IPV6_MIN_HEADER_SIZE => {
-                let addr_bytes: [u8; IPV6_IP_SZ] = packet
-                    [IPV6_DST_IP_OFF..IPV6_DST_IP_OFF + IPV6_IP_SZ]
-                    .try_into()
-                    .unwrap();
-                Some(IpAddr::from(addr_bytes))
-            }
-            _ => None,
-        }
     }
 
     /// Create a new tunnel using own private key and the peer public key
