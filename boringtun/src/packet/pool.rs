@@ -114,7 +114,7 @@ mod tests {
     /// Test buffer recycle semantics of [PacketBufPool].
     #[test]
     fn pool_buffer_recycle() {
-        let mut pool = PacketBufPool::<4096>::new(1);
+        let pool = PacketBufPool::<4096>::new(1);
 
         for i in 0..10 {
             // Get a packet and record its address.
