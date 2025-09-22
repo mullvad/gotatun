@@ -152,7 +152,7 @@ impl Tunn {
             let packet = session.format_packet_data(packet);
             self.timer_tick(TimerName::TimeLastPacketSent);
             // Exclude Keepalive packets from timer update.
-            if packet.as_bytes().is_empty() {
+            if !packet.as_bytes().is_empty() {
                 self.timer_tick(TimerName::TimeLastDataPacketSent);
             }
             self.tx_bytes += packet.as_bytes().len();
