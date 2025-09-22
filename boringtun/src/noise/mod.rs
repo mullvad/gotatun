@@ -317,9 +317,7 @@ impl Tunn {
     /// Returns the truncated packet and the source IP as [TunnResult::WriteToTunnelV4] (or `*V6`).
     pub fn validate_decapsulated_packet(&mut self, packet: Packet) -> TunnResult {
         // keepalive
-        // TODO: is this right?
         if packet.is_empty() {
-            self.timer_tick(TimerName::TimeLastDataPacketReceived);
             return TunnResult::Done;
         }
 
