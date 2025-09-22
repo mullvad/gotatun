@@ -3,7 +3,7 @@
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::session::Session;
-use crate::packet::{Packet, WgCookieReply, WgHandshakeInit, WgHandshakeResp};
+use crate::packet::{Packet, WgCookieReply, WgHandshakeBase, WgHandshakeInit, WgHandshakeResp};
 #[cfg(not(feature = "mock-instant"))]
 use crate::sleepyinstant::Instant;
 use crate::x25519;
@@ -15,9 +15,7 @@ use constant_time_eq::constant_time_eq_n;
 use rand_core::OsRng;
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use std::convert::TryInto;
-use std::mem::offset_of;
 use std::time::{Duration, SystemTime};
-use zerocopy::IntoBytes;
 
 #[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
@@ -686,56 +684,26 @@ impl Handshake {
     }
 
     // Compute and append mac1 and mac2 to a handshake message
-    fn init_mac1_and_mac2(
+    fn init_mac1_and_mac2<T: WgHandshakeBase>(
         &mut self,
-        packet: &mut WgHandshakeResp,
+        packet: &mut T,
         local_index: u32,
     ) -> Result<(), WireGuardError> {
-        const MAC1_OFF: usize = offset_of!(WgHandshakeResp, mac1);
-        const MAC2_OFF: usize = offset_of!(WgHandshakeResp, mac2);
-
         // msg.mac1 = MAC(HASH(LABEL_MAC1 || responder.static_public), msg[0:offsetof(msg.mac1)])
-        packet.mac1 = b2s_keyed_mac_16(
+        *packet.mac1_mut() = b2s_keyed_mac_16(
             &self.params.sending_mac1_key,
-            &packet.as_bytes()[..MAC1_OFF],
+            &packet.as_bytes()[..T::MAC1_OFF],
         );
 
         //msg.mac2 = MAC(initiator.last_received_cookie, msg[0:offsetof(msg.mac2)])
-        packet.mac2 = if let Some(cookie) = self.cookies.write_cookie {
-            b2s_keyed_mac_16(&cookie, &packet.as_bytes()[..MAC2_OFF])
+        *packet.mac2_mut() = if let Some(cookie) = self.cookies.write_cookie {
+            b2s_keyed_mac_16(&cookie, &packet.as_bytes()[..T::MAC2_OFF])
         } else {
             [0u8; 16]
         };
 
         self.cookies.index = local_index;
-        self.cookies.last_mac1 = Some(packet.mac1);
-        Ok(())
-    }
-
-    // TODO: same as init_mac1_and_mac2
-    fn init_mac1_and_mac2_to_init(
-        &mut self,
-        packet: &mut WgHandshakeInit,
-        local_index: u32,
-    ) -> Result<(), WireGuardError> {
-        const MAC1_OFF: usize = offset_of!(WgHandshakeInit, mac1);
-        const MAC2_OFF: usize = offset_of!(WgHandshakeInit, mac2);
-
-        // msg.mac1 = MAC(HASH(LABEL_MAC1 || responder.static_public), msg[0:offsetof(msg.mac1)])
-        packet.mac1 = b2s_keyed_mac_16(
-            &self.params.sending_mac1_key,
-            &packet.as_bytes()[..MAC1_OFF],
-        );
-
-        //msg.mac2 = MAC(initiator.last_received_cookie, msg[0:offsetof(msg.mac2)])
-        packet.mac2 = if let Some(cookie) = self.cookies.write_cookie {
-            b2s_keyed_mac_16(&cookie, &packet.as_bytes()[..MAC2_OFF])
-        } else {
-            [0u8; 16]
-        };
-
-        self.cookies.index = local_index;
-        self.cookies.last_mac1 = Some(packet.mac1);
+        self.cookies.last_mac1 = Some(*packet.mac1());
         Ok(())
     }
 
@@ -822,7 +790,7 @@ impl Handshake {
             }),
         );
 
-        self.init_mac1_and_mac2_to_init(&mut handshake, local_index)?;
+        self.init_mac1_and_mac2(&mut handshake, local_index)?;
 
         // TODO: don't allocate
         Ok(Packet::copy_from(&handshake))

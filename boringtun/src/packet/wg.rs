@@ -1,4 +1,5 @@
 use std::fmt::{self, Debug};
+use std::mem::offset_of;
 
 use eyre::{bail, eyre};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, Unaligned, little_endian};
@@ -83,6 +84,24 @@ impl WgData {
     }
 }
 
+/// Trait for common handshake fields
+pub trait WgHandshakeBase: FromBytes + IntoBytes + KnownLayout + Unaligned + Immutable {
+    const MAC1_OFF: usize;
+    const MAC2_OFF: usize;
+
+    /// Get a mutable reference to MAC1
+    fn mac1_mut(&mut self) -> &mut [u8; 16];
+
+    /// Get a mutable reference to MAC2
+    fn mac2_mut(&mut self) -> &mut [u8; 16];
+
+    /// Get MAC1
+    fn mac1(&self) -> &[u8; 16];
+
+    /// Get MAC2
+    fn mac2(&self) -> &[u8; 16];
+}
+
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 pub struct WgHandshakeInit {
@@ -103,6 +122,27 @@ impl WgHandshakeInit {
             packet_type: WgPacketType::HandshakeInit,
             ..WgHandshakeInit::new_zeroed()
         }
+    }
+}
+
+impl WgHandshakeBase for WgHandshakeInit {
+    const MAC1_OFF: usize = offset_of!(Self, mac1);
+    const MAC2_OFF: usize = offset_of!(Self, mac2);
+
+    fn mac1_mut(&mut self) -> &mut [u8; 16] {
+        &mut self.mac1
+    }
+
+    fn mac2_mut(&mut self) -> &mut [u8; 16] {
+        &mut self.mac2
+    }
+
+    fn mac1(&self) -> &[u8; 16] {
+        &self.mac1
+    }
+
+    fn mac2(&self) -> &[u8; 16] {
+        &self.mac2
     }
 }
 
@@ -137,6 +177,27 @@ impl WgHandshakeResp {
             mac1: [0u8; 16],
             mac2: [0u8; 16],
         }
+    }
+}
+
+impl WgHandshakeBase for WgHandshakeResp {
+    const MAC1_OFF: usize = offset_of!(Self, mac1);
+    const MAC2_OFF: usize = offset_of!(Self, mac2);
+
+    fn mac1_mut(&mut self) -> &mut [u8; 16] {
+        &mut self.mac1
+    }
+
+    fn mac2_mut(&mut self) -> &mut [u8; 16] {
+        &mut self.mac2
+    }
+
+    fn mac1(&self) -> &[u8; 16] {
+        &self.mac1
+    }
+
+    fn mac2(&self) -> &[u8; 16] {
+        &self.mac2
     }
 }
 
