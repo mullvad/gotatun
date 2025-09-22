@@ -160,12 +160,16 @@ impl Tunn {
         }
     }
 
-    pub(crate) fn handle_incoming_packet(&mut self, packet: WgKind) -> TunnResult {
+    pub(crate) fn handle_incoming_packet(
+        &mut self,
+        packet: WgKind,
+        hooks: &crate::device::daita::DaitaHooks,
+    ) -> TunnResult {
         match packet {
             WgKind::HandshakeInit(p) => self.handle_handshake_init(p),
             WgKind::HandshakeResp(p) => self.handle_handshake_response(p),
             WgKind::CookieReply(p) => self.handle_cookie_reply(&p),
-            WgKind::Data(p) => self.handle_data(p),
+            WgKind::Data(p) => self.handle_data(p, hooks),
         }
         .unwrap_or_else(TunnResult::from)
     }
@@ -250,8 +254,19 @@ impl Tunn {
     }
 
     /// Decrypt a data packet, and return a [TunnResult::WriteToTunnelV4] (or `*V6`) if successful.
-    fn handle_data(&mut self, packet: Packet<WgData>) -> Result<TunnResult, WireGuardError> {
+    fn handle_data(
+        &mut self,
+        packet: Packet<WgData>,
+        hooks: &crate::device::daita::DaitaHooks, // TODO
+    ) -> Result<TunnResult, WireGuardError> {
         let decapsulated_packet = self.decapsulate_with_session(packet)?;
+
+        // TODO: daita goes here?
+        let Some(decapsulated_packet) = hooks.map_incoming_data(decapsulated_packet) else {
+            // TODO: it was a padding packet, do we do this?
+            // self.timer_tick(TimerName::TimeLastDataPacketReceived);
+            return Ok(TunnResult::Done);
+        };
 
         Ok(self.validate_decapsulated_packet(decapsulated_packet))
     }

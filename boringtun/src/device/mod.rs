@@ -22,6 +22,7 @@ use tokio::join;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
+use crate::device::daita::DaitaHooks;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
@@ -145,7 +146,7 @@ pub struct Device<T: DeviceTransports> {
     /// The task that responds to API requests.
     api: Option<Task>,
     // FIXME
-    //hooks: Arc<DaitaHooks>,
+    hooks: Arc<DaitaHooks>,
 }
 
 pub(crate) struct Connection<T: DeviceTransports> {
@@ -619,14 +620,14 @@ impl<T: DeviceTransports> Device<T> {
             let rate_limiter = device.rate_limiter.clone().unwrap();
             (private_key, public_key, rate_limiter)
         };
-        /*let hooks = {
+        let hooks = {
             let Some(device) = device.upgrade() else {
                 return Ok(());
             };
 
             let device = device.read().await;
             device.hooks.clone()
-        };*/
+        };
 
         while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
             let parsed_packet = match rate_limiter.verify_packet(Some(addr.ip()), src_buf) {
@@ -641,9 +642,10 @@ impl<T: DeviceTransports> Device<T> {
                 Err(_) => continue,
             };
 
-            /*if let WgKind::Data(_) = &parsed_packet {
+            // TODO: what about keepalives?
+            if let WgKind::Data(_) = &parsed_packet {
                 hooks.on_incoming_encapsulated();
-            };*/
+            };
 
             let Some(device) = device.upgrade() else {
                 return Ok(());
@@ -659,12 +661,10 @@ impl<T: DeviceTransports> Device<T> {
                 WgKind::CookieReply(p) => peers_by_idx.get(&(p.receiver_idx.get() >> 8)),
                 WgKind::Data(p) => peers_by_idx.get(&(p.header.receiver_idx.get() >> 8)),
             };
-            let Some(peer) = peer else {
-                continue;
-            };
+            let Some(peer) = peer else { continue };
             let mut peer = peer.lock().await;
 
-            match peer.tunnel.handle_incoming_packet(parsed_packet) {
+            match peer.tunnel.handle_incoming_packet(parsed_packet, &hooks) {
                 TunnResult::Done => (),
                 TunnResult::Err(_) => continue,
                 TunnResult::WriteToNetwork(packet) => {
