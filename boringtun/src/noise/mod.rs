@@ -263,7 +263,7 @@ impl Tunn {
         let decapsulated_packet = self.decapsulate_with_session(packet)?;
 
         // TODO: daita goes here?
-        let Some(decapsulated_packet) = hooks.map_incoming_data(decapsulated_packet) else {
+        let Some(decapsulated_packet) = hooks.after_data_decapsulate(decapsulated_packet) else {
             // TODO: it was a padding packet, do we do this?
             // self.timer_tick(TimerName::TimeLastDataPacketReceived);
             return Ok(TunnResult::Done);
