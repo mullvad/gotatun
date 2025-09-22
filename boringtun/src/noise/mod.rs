@@ -455,12 +455,12 @@ mod tests {
         let handshake_init = tun.format_handshake_initiation(false);
         assert!(matches!(handshake_init, TunnResult::WriteToNetwork(_)));
         let TunnResult::WriteToNetwork(handshake_init) = handshake_init else {
-            unreachable!();
+            unreachable!("expected WriteToNetwork");
         };
 
         let packet_type = handshake_init.packet_type;
         let Ok(WgKind::HandshakeInit(handshake_init)) = handshake_init.into_kind() else {
-            panic!("expected WgHandshakeInit, got {packet_type:?}");
+            unreachable!("expected WgHandshakeInit, got {packet_type:?}");
         };
 
         handshake_init
@@ -474,12 +474,12 @@ mod tests {
         assert!(matches!(handshake_resp, TunnResult::WriteToNetwork(_)));
 
         let TunnResult::WriteToNetwork(handshake_resp) = handshake_resp else {
-            unreachable!();
+            unreachable!("expected WriteToNetwork");
         };
 
         let packet_type = handshake_resp.packet_type;
         let Ok(WgKind::HandshakeResp(handshake_resp)) = handshake_resp.into_kind() else {
-            panic!("expected WgHandshakeResp, got {packet_type:?}");
+            unreachable!("expected WgHandshakeResp, got {packet_type:?}");
         };
 
         handshake_resp
@@ -493,12 +493,12 @@ mod tests {
         assert!(matches!(keepalive, TunnResult::WriteToNetwork(_)));
 
         let TunnResult::WriteToNetwork(keepalive) = keepalive else {
-            unreachable!()
+            unreachable!("expected WriteToNetwork")
         };
 
         let packet_type = keepalive.packet_type;
         let Ok(WgKind::Data(keepalive)) = keepalive.into_kind() else {
-            panic!("expected WgData, got {packet_type:?}");
+            unreachable!("expected WgData, got {packet_type:?}");
         };
 
         keepalive
@@ -535,7 +535,7 @@ mod tests {
         let result = tun.update_timers();
         assert!(matches!(result, TunnResult::WriteToNetwork(_)));
         let TunnResult::WriteToNetwork(packet) = result else {
-            unreachable!();
+            unreachable!("expected WriteToNetwork");
         };
         let packet = packet.into_kind().unwrap();
         assert!(matches!(packet, WgKind::HandshakeInit(..)));
@@ -615,7 +615,7 @@ mod tests {
         let data = my_tun.handle_outgoing_packet(sent_packet_buf.clone().into_bytes());
         assert!(matches!(data, TunnResult::WriteToNetwork(_)));
         let TunnResult::WriteToNetwork(data) = data else {
-            unreachable!();
+            unreachable!("expected WriteToNetwork");
         };
 
         let data = data.into_kind().unwrap();
@@ -626,7 +626,7 @@ mod tests {
         let recv_packet_buf = if let TunnResult::WriteToTunnelV4(recv) = data {
             recv
         } else {
-            unreachable!();
+            unreachable!("expected WritetoTunnelV4");
         };
         assert_eq!(sent_packet_buf.as_bytes(), recv_packet_buf.as_bytes());
     }
