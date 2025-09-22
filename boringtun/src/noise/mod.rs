@@ -527,9 +527,8 @@ mod tests {
     #[cfg(feature = "mock-instant")]
     fn update_timer_results_in_handshake(tun: &mut Tunn) {
         let result = tun.update_timers();
-        assert!(matches!(result, TunnResult::WriteToNetwork(_)));
         let TunnResult::WriteToNetwork(packet) = result else {
-            unreachable!("expected WriteToNetwork");
+            unreachable!("expected WriteToNetwork, found {result:?}");
         };
         let packet = packet.into_kind().unwrap();
         assert!(matches!(packet, WgKind::HandshakeInit(..)));
@@ -581,7 +580,12 @@ mod tests {
         assert!(matches!(my_tun.update_timers(), TunnResult::Done));
         let sent_packet_buf = create_ipv4_udp_packet();
         let data = my_tun.handle_outgoing_packet(sent_packet_buf.into_bytes());
-        assert!(matches!(data, TunnResult::WriteToNetwork(_)));
+        let TunnResult::WriteToNetwork(data) = data else {
+            unreachable!("expected WritetoNetwork");
+        };
+        let WgKind::Data(_data) = data.into_kind().unwrap() else {
+            unreachable!("expected WgData");
+        };
 
         //Advance to timeout
         mock_instant::MockClock::advance(REKEY_AFTER_TIME);
