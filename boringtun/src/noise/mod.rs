@@ -122,7 +122,9 @@ impl Tunn {
 
     /// Encapsulate a single packet.
     ///
-    /// Returns a [TunnResult::WriteToNetwork] if there's an active session.
+    /// If there's an active session, return the encapsulated packet as a
+    /// [TunnResult::WriteToNetwork]. Otherwise, if needed, return a [TunnResult::WriteToNetwork]
+    /// with a handshake initiation.
     pub fn handle_outgoing_packet(&mut self, packet: Packet) -> TunnResult {
         let current = self.current;
 
