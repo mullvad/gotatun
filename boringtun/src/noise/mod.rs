@@ -130,7 +130,7 @@ impl Tunn {
         let current = self.current;
 
         match self.encapsulate_with_session(packet, current) {
-            Ok(encapsulated_packet) => TunnResult::WriteToNetwork(encapsulated_packet),
+            Ok(encapsulated_packet) => TunnResult::WriteToNetwork(encapsulated_packet.into()),
             Err(packet) => {
                 // If there is no session, queue the packet for future retry
                 self.queue_packet(packet);
@@ -140,11 +140,14 @@ impl Tunn {
         }
     }
 
+    /// Encapsulate a single packet into a [WgData].
+    ///
+    /// Returns `Err(original_packet)` if `current` does not refer to an active session.
     fn encapsulate_with_session(
         &mut self,
         packet: Packet,
         current: usize,
-    ) -> Result<Packet<Wg>, Packet> {
+    ) -> Result<Packet<WgData>, Packet> {
         if let Some(ref session) = self.sessions[current % N_SESSIONS] {
             // Send the packet using an established session
             let packet = session.format_packet_data(packet);
@@ -218,7 +221,7 @@ impl Tunn {
 
         log::debug!("Sending keepalive");
 
-        Ok(TunnResult::WriteToNetwork(keepalive_packet)) // Send a keepalive as a response
+        Ok(TunnResult::WriteToNetwork(keepalive_packet.into())) // Send a keepalive as a response
     }
 
     fn handle_cookie_reply(&mut self, p: &WgCookieReply) -> Result<TunnResult, WireGuardError> {

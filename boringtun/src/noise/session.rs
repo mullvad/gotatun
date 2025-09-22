@@ -3,7 +3,7 @@
 
 use crate::{
     noise::errors::WireGuardError,
-    packet::{Packet, Wg, WgData, WgPacketType},
+    packet::{Packet, WgData, WgKind, WgPacketType},
 };
 use bytes::{Buf, BytesMut};
 use parking_lot::Mutex;
@@ -197,7 +197,7 @@ impl Session {
     /// src - an IP packet from the interface
     /// dst - pre-allocated space to hold the encapsulating UDP packet to send over the network
     /// returns the size of the formatted packet
-    pub(super) fn format_packet_data(&self, packet: Packet) -> Packet<Wg> {
+    pub(super) fn format_packet_data(&self, packet: Packet) -> Packet<WgData> {
         let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
 
         let len = DATA_OFFSET + AEAD_SIZE + packet.len();
@@ -227,7 +227,13 @@ impl Session {
             })
             .unwrap();
 
-        buf.try_into_wg().unwrap(/* TODO */)
+        // this won't panic since we've correctly initialized a WgData packet
+        let packet = buf.try_into_wg().expect("is a wireguard packet");
+        let Ok(WgKind::Data(packet)) = packet.into_kind() else {
+            unreachable!("is a wireguard data packet");
+        };
+
+        packet
     }
 
     /// packet - a data packet we received from the network
