@@ -120,12 +120,9 @@ impl Tunn {
         }
     }
 
-    /// Encapsulate a single packet from the tunnel interface.
-    /// Returns TunnResult.
+    /// Encapsulate a single packet.
     ///
-    /// # Panics
-    /// Panics if dst buffer is too small.
-    /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
+    /// Returns a [TunnResult::WriteToNetwork] if there's an active session.
     pub fn handle_outgoing_packet(&mut self, packet: Packet) -> TunnResult {
         let current = self.current;
 
@@ -252,7 +249,7 @@ impl Tunn {
         }
     }
 
-    /// Decrypts a data packet, and stores the decapsulated packet in dst.
+    /// Decrypt a data packet, and return a [TunnResult::WriteToTunnelV4] (or `*V6`) if successful.
     fn handle_data(&mut self, packet: Packet<WgData>) -> Result<TunnResult, WireGuardError> {
         let decapsulated_packet = self.decapsulate_with_session(packet)?;
 
@@ -284,8 +281,12 @@ impl Tunn {
         Ok(decapsulated_packet)
     }
 
-    /// Formats a new handshake initiation message and store it in dst. If force_resend is true will send
-    /// a new handshake, even if a handshake is already in progress (for example when a handshake times out)
+    /// Return a new [WgHandshakeInit] if appropriate, or [TunnResult::Done] otherwise.
+    ///
+    /// The handshake will be wrapped in a [TunnResult::WriteToNetwork].
+    ///
+    /// If force_resend is true will send a new handshake, even if a handshake
+    /// is already in progress (for example when a handshake times out)
     pub fn format_handshake_initiation(&mut self, force_resend: bool) -> TunnResult {
         if self.handshake.is_in_progress() && !force_resend {
             return TunnResult::Done;
@@ -311,8 +312,11 @@ impl Tunn {
         }
     }
 
-    /// Check if an IP packet is v4 or v6, truncate to the length indicated by the length field
-    /// Returns the truncated packet and the source IP as TunnResult
+    /// Check that packet is an IP packet,
+    /// then truncate to [Ipv4Header::total_len](crate::packet::Ipv4Header::total_len)
+    /// or [Ipv6Header::payload_length](crate::packet::Ipv6Header::payload_length).
+    ///
+    /// Returns the truncated packet and the source IP as [TunnResult::WriteToTunnelV4] (or `*V6`).
     pub fn validate_decapsulated_packet(&mut self, packet: Packet) -> TunnResult {
         // keepalive
         // TODO: is this right?
@@ -339,11 +343,12 @@ impl Tunn {
         }
     }
 
-    /// Get a packet from the queue, and try to encapsulate it
+    /// Get the first packet from [Self::packet_queue], and try to encapsulate it.
     pub fn send_queued_packet(&mut self) -> TunnResult {
         if let Some(packet) = self.dequeue_packet() {
             let packet2 = Packet::copy_from(packet.deref());
             match self.handle_outgoing_packet(packet) {
+                // TODO: an `Err` shouldn't be possible here.
                 TunnResult::Err(_) => {
                     // On error, return packet to the queue
                     self.requeue_packet(packet2);
