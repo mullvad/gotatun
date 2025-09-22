@@ -194,9 +194,7 @@ impl Session {
         ret
     }
 
-    /// src - an IP packet from the interface
-    /// dst - pre-allocated space to hold the encapsulating UDP packet to send over the network
-    /// returns the size of the formatted packet
+    /// Encapsulate `packet` into a [WgData].
     pub(super) fn format_packet_data(&self, packet: Packet) -> Packet<WgData> {
         let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
 
@@ -236,10 +234,7 @@ impl Session {
         packet
     }
 
-    /// packet - a data packet we received from the network
-    /// dst - pre-allocated space to hold the encapsulated IP packet, to send to the interface
-    ///       dst will always take less space than src
-    /// return the size of the encapsulated packet on success
+    /// Decapsulate `packet` and return the decrypted data.
     pub(super) fn receive_packet_data(
         &self,
         mut packet: Packet<WgData>,
