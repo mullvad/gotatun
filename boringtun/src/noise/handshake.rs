@@ -710,12 +710,6 @@ impl Handshake {
     pub(super) fn format_handshake_initiation(
         &mut self,
     ) -> Result<crate::packet::Packet<WgHandshakeInit>, WireGuardError> {
-        /*let (message_type, rest) = packet.split_at_mut(4);
-        let (sender_index, rest) = rest.split_at_mut(4);
-        let (unencrypted_ephemeral, rest) = rest.split_at_mut(32);
-        let (encrypted_static, rest) = rest.split_at_mut(32 + 16);
-        let (encrypted_timestamp, _) = rest.split_at_mut(12 + 16);*/
-
         let mut handshake = WgHandshakeInit::new();
 
         let local_index = self.inc_index();
