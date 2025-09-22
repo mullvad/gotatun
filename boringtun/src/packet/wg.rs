@@ -5,6 +5,7 @@ use eyre::{bail, eyre};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, Unaligned, little_endian};
 
 use crate::packet::Packet;
+use crate::packet::util::size_must_be;
 
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
@@ -54,13 +55,26 @@ impl WgPacketType {
 
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
-pub struct WgData {
+pub struct WgDataHeader {
     // INVARIANT: Must be WgPacketType::Data
     // TODO: make private
     pub packet_type: WgPacketType,
 
     pub receiver_idx: little_endian::U32,
     pub counter: little_endian::U64,
+}
+
+impl WgDataHeader {
+    /// Header length
+    pub const LEN: usize = size_must_be::<Self>(16);
+    /// Data packet overhead: header and tag (16 bytes)
+    pub const OVERHEAD: usize = Self::LEN + 16;
+}
+
+#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C, packed)]
+pub struct WgData {
+    pub header: WgDataHeader,
     pub encrypted_encapsulated_packet_and_tag: [u8],
 }
 
@@ -117,6 +131,8 @@ pub struct WgHandshakeInit {
 }
 
 impl WgHandshakeInit {
+    pub const LEN: usize = size_must_be::<Self>(148);
+
     pub fn new() -> Self {
         Self {
             packet_type: WgPacketType::HandshakeInit,
@@ -167,6 +183,8 @@ pub struct WgHandshakeResp {
 }
 
 impl WgHandshakeResp {
+    pub const LEN: usize = size_must_be::<Self>(92);
+
     pub fn new(sender_idx: u32, receiver_idx: u32, unencrypted_ephemeral: [u8; 32]) -> Self {
         Self {
             packet_type: WgPacketType::HandshakeResp,
@@ -213,6 +231,8 @@ pub struct WgCookieReply {
 }
 
 impl WgCookieReply {
+    const LEN: usize = size_must_be::<Self>(64);
+
     pub fn new() -> Self {
         Self {
             packet_type: WgPacketType::CookieReply,
@@ -226,12 +246,6 @@ impl Default for WgCookieReply {
         Self::new()
     }
 }
-
-// TODO: DRY
-const HANDSHAKE_INIT_SZ: usize = 148;
-const HANDSHAKE_RESP_SZ: usize = 92;
-const COOKIE_REPLY_SZ: usize = 64;
-const DATA_OVERHEAD_SZ: usize = 32;
 
 impl Packet {
     /// Convert into a wireguard packet while sanity-checking packet type and size.
@@ -247,14 +261,14 @@ impl Packet<Wg> {
     pub fn into_kind(self) -> eyre::Result<WgKind> {
         let len = self.as_bytes().len();
         match (self.packet_type, len) {
-            (WgPacketType::HandshakeInit, HANDSHAKE_INIT_SZ) => {
+            (WgPacketType::HandshakeInit, WgHandshakeInit::LEN) => {
                 Ok(WgKind::HandshakeInit(self.cast()))
             }
-            (WgPacketType::HandshakeResp, HANDSHAKE_RESP_SZ) => {
+            (WgPacketType::HandshakeResp, WgHandshakeResp::LEN) => {
                 Ok(WgKind::HandshakeResp(self.cast()))
             }
-            (WgPacketType::CookieReply, COOKIE_REPLY_SZ) => Ok(WgKind::CookieReply(self.cast())),
-            (WgPacketType::Data, DATA_OVERHEAD_SZ..) => Ok(WgKind::Data(self.cast())),
+            (WgPacketType::CookieReply, WgCookieReply::LEN) => Ok(WgKind::CookieReply(self.cast())),
+            (WgPacketType::Data, WgDataHeader::OVERHEAD..) => Ok(WgKind::Data(self.cast())),
             _ => bail!("Not a wireguard packet, bad type/size."),
         }
     }

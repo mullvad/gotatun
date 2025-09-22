@@ -642,7 +642,7 @@ impl<T: DeviceTransports> Device<T> {
                     .and_then(|hh| peers.get(&x25519::PublicKey::from(hh.peer_static_public))),
                 WgKind::HandshakeResp(p) => peers_by_idx.get(&(p.receiver_idx.get() >> 8)),
                 WgKind::CookieReply(p) => peers_by_idx.get(&(p.receiver_idx.get() >> 8)),
-                WgKind::Data(p) => peers_by_idx.get(&(p.receiver_idx.get() >> 8)),
+                WgKind::Data(p) => peers_by_idx.get(&(p.header.receiver_idx.get() >> 8)),
             };
             let Some(peer) = peer else {
                 continue;

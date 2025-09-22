@@ -293,7 +293,7 @@ impl Tunn {
         &mut self,
         packet: Packet<WgData>,
     ) -> Result<Packet, WireGuardError> {
-        let r_idx = packet.receiver_idx.get() as usize;
+        let r_idx = packet.header.receiver_idx.get() as usize;
         let idx = r_idx % N_SESSIONS;
 
         // Get the (probably) right session

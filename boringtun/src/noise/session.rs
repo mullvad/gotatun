@@ -206,9 +206,9 @@ impl Session {
 
         let data = WgData::mut_from_bytes(buf.buf_mut()).unwrap();
 
-        data.packet_type = WgPacketType::Data;
-        data.receiver_idx.set(self.sending_index);
-        data.counter.set(sending_key_counter);
+        data.header.packet_type = WgPacketType::Data;
+        data.header.receiver_idx.set(self.sending_index);
+        data.header.counter.set(sending_key_counter);
 
         // TODO: spec requires padding to 16 bytes, but actually works fine without it
         let mut nonce = [0u8; 12];
@@ -238,17 +238,17 @@ impl Session {
         &self,
         mut packet: Packet<WgData>,
     ) -> Result<Packet, WireGuardError> {
-        if packet.receiver_idx != self.receiving_index {
+        if packet.header.receiver_idx != self.receiving_index {
             return Err(WireGuardError::WrongIndex);
         }
 
-        let counter = packet.counter.get();
+        let counter = packet.header.counter.get();
 
         // Don't reuse counters, in case this is a replay attack we want to quickly check the counter without running expensive decryption
         self.receiving_counter_quick_check(counter)?;
 
         let mut nonce = [0u8; 12];
-        nonce[4..12].copy_from_slice(&packet.counter.to_bytes());
+        nonce[4..12].copy_from_slice(&packet.header.counter.to_bytes());
 
         // decrypt the data in-place
         let decrypted_len = self
