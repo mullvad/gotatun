@@ -657,7 +657,7 @@ impl<T: DeviceTransports> Device<T> {
 
             // TODO: what about keepalives?
             if let WgKind::Data(_) = &parsed_packet {
-                hooks.on_incoming_encapsulated();
+                hooks.before_data_decapsulate();
             };
 
             let Some(device) = device.upgrade() else {

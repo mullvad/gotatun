@@ -42,7 +42,8 @@ use std::{
 };
 
 use crate::{
-    packet::{self, Packet, Wg, WgPacketType},
+    device::hooks::Hooks,
+    packet::{self, Ipv6Header, Packet, Wg, WgPacketType},
     udp::UdpSend,
 };
 
@@ -136,7 +137,7 @@ impl DaitaHooks {
     }
 
     /// Should be called on outgoing data packets, before encapsulation
-    pub fn map_outgoing_data(&self, mut packet: Packet) -> Packet {
+    pub fn before_data_encapsulate(&self, mut packet: Packet) -> Packet {
         let _ = self.event_tx.send(TriggerEvent::NormalSent);
         self.packet_count.inc_outbound(1);
 
@@ -149,17 +150,17 @@ impl DaitaHooks {
     }
 
     /// Should be called on packets, before they are sent to the network.
-    pub fn map_outgoing_encapsulated(
+    pub fn after_data_encapsulate(
         &self,
         packet: Packet<Wg>,
         addr: SocketAddr,
-    ) -> Option<Packet> {
+    ) -> Option<(Packet<Wg>, SocketAddr)> {
         let packet_type = packet.packet_type;
         let packet = packet.into();
 
         // DAITA only cares about data packets.
         if packet_type != WgPacketType::Data {
-            return Some(packet);
+            return Some((packet, addr));
         }
 
         if let Ok(blocking) = self.blocking_state.try_read()
@@ -170,28 +171,28 @@ impl DaitaHooks {
             // We should probably trigger the blocking the end here and flush
             // the queue (don't forget to send `TriggerEvent::BlockingEnd`)
             // before sending the packet
-            if let Err(TrySendError::Full((packet, _addr))) =
-                self.blocking_queue_tx.try_send((packet, addr))
+            if let Err(TrySendError::Full((returned_packet, _addr))) =
+                self.blocking_queue_tx.try_send((packet.into_bytes(), addr))
             {
                 let _ = self.event_tx.send(TriggerEvent::TunnelSent);
                 self.packet_count.dec(1);
-                return Some(packet);
+                return Some((returned_packet.try_into_wg().unwrap(), addr));
             }
             None
         } else {
             let _ = self.event_tx.send(TriggerEvent::TunnelSent);
             self.packet_count.dec(1);
-            Some(packet)
+            Some((packet, addr))
         }
     }
 
     /// Should be called on incoming validated encapsulated packets.
-    pub fn on_incoming_encapsulated(&self) {
+    pub fn before_data_decapsulate(&self) {
         let _ = self.event_tx.send(TriggerEvent::TunnelRecv);
     }
 
     /// Should be called on incoming decapsulated *data* packets.
-    pub fn map_incoming_data(&self, packet: Packet) -> Option<Packet> {
+    pub fn after_data_decapsulate(&self, mut packet: Packet) -> Option<Packet> {
         if let Ok(padding) = PaddingPacket::ref_from_bytes(packet.as_bytes())
             && padding.header._daita_marker == DAITA_MARKER
         {
@@ -204,6 +205,32 @@ impl DaitaHooks {
         let _ = self.event_tx.send(TriggerEvent::NormalRecv);
 
         Some(packet)
+    }
+}
+
+impl Hooks for DaitaHooks {
+    fn before_data_encapsulate(&self, packet: Packet) -> Packet {
+        // TODO: check peer
+        DaitaHooks::before_data_encapsulate(self, packet)
+    }
+
+    fn after_data_encapsulate(
+        &self,
+        packet: Packet<packet::Wg>,
+        destination: SocketAddr,
+    ) -> Option<(Packet<Wg>, SocketAddr)> {
+        // TODO: check peer
+        DaitaHooks::after_data_encapsulate(self, packet, destination)
+    }
+
+    fn before_data_decapsulate(&self) {
+        // TODO: check peer
+        self.before_data_decapsulate();
+    }
+
+    fn after_data_decapsulate(&self, packet: Packet) -> Option<Packet> {
+        // TODO: check peer
+        self.after_data_decapsulate(packet)
     }
 }
 
@@ -593,7 +620,10 @@ where
         match (blocking_with_bypass, replace) {
             (Some(true), true) => {
                 if let Ok((packet, destination)) = self.blocking_queue_rx.try_recv() {
-                    self.udp_send.send_to(packet, destination).await.unwrap();
+                    self.udp_send
+                        .send_to(packet.into_bytes(), destination)
+                        .await
+                        .unwrap();
                 }
                 self.send_padding(event_buf, machine).await
             }
