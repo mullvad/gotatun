@@ -1,4 +1,4 @@
-// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+/// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 pub mod allowed_ips;
@@ -22,7 +22,6 @@ use tokio::join;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
-use crate::device::daita::DaitaHooks;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
@@ -138,8 +137,6 @@ pub struct Device<T: DeviceTransports> {
     next_index: IndexLfsr,
 
     rate_limiter: Option<Arc<RateLimiter>>,
-
-    daita: Option<Arc<Mutex<DaitaHooks>>>,
 
     port: u16,
     udp_factory: T::UdpTransportFactory,
@@ -453,7 +450,6 @@ impl<T: DeviceTransports> Device<T> {
             rate_limiter: None,
             port: 0,
             connection: None,
-            daita: None,
         };
 
         let device = Arc::new(RwLock::new(device));
