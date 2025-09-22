@@ -4,8 +4,8 @@ use std::mem::offset_of;
 use eyre::{bail, eyre};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, Unaligned, little_endian};
 
-use crate::packet::Packet;
 use crate::packet::util::size_must_be;
+use crate::packet::{CheckedPayload, Packet};
 
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
@@ -99,9 +99,15 @@ impl WgData {
 }
 
 /// Trait for common handshake fields
-pub trait WgHandshakeBase: FromBytes + IntoBytes + KnownLayout + Unaligned + Immutable {
+pub trait WgHandshakeBase:
+    FromBytes + IntoBytes + KnownLayout + Unaligned + Immutable + CheckedPayload
+{
+    const LEN: usize;
     const MAC1_OFF: usize;
     const MAC2_OFF: usize;
+
+    /// Get sender_id
+    fn sender_idx(&self) -> u32;
 
     /// Get a mutable reference to MAC1
     fn mac1_mut(&mut self) -> &mut [u8; 16];
@@ -142,8 +148,13 @@ impl WgHandshakeInit {
 }
 
 impl WgHandshakeBase for WgHandshakeInit {
+    const LEN: usize = Self::LEN;
     const MAC1_OFF: usize = offset_of!(Self, mac1);
     const MAC2_OFF: usize = offset_of!(Self, mac2);
+
+    fn sender_idx(&self) -> u32 {
+        self.sender_idx.get()
+    }
 
     fn mac1_mut(&mut self) -> &mut [u8; 16] {
         &mut self.mac1
@@ -199,8 +210,13 @@ impl WgHandshakeResp {
 }
 
 impl WgHandshakeBase for WgHandshakeResp {
+    const LEN: usize = Self::LEN;
     const MAC1_OFF: usize = offset_of!(Self, mac1);
     const MAC2_OFF: usize = offset_of!(Self, mac2);
+
+    fn sender_idx(&self) -> u32 {
+        self.sender_idx.get()
+    }
 
     fn mac1_mut(&mut self) -> &mut [u8; 16] {
         &mut self.mac1

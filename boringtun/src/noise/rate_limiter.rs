@@ -1,14 +1,13 @@
 use super::handshake::{b2s_hash, b2s_keyed_mac_16, b2s_keyed_mac_16_2, b2s_mac_24};
 use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
 use crate::noise::{TunnResult, WireGuardError};
-use crate::packet::{Packet, Wg, WgCookieReply, WgKind};
+use crate::packet::{Packet, Wg, WgCookieReply, WgHandshakeBase, WgKind};
 
 use constant_time_eq::constant_time_eq;
 #[cfg(feature = "mock-instant")]
 use mock_instant::Instant;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use zerocopy::IntoBytes;
 
 #[cfg(not(feature = "mock-instant"))]
 use crate::sleepyinstant::Instant;
@@ -143,28 +142,44 @@ impl RateLimiter {
         wg_cookie_reply
     }
 
-    /// Verify the MAC fields on the datagram, and apply rate limiting if needed
+    /// Decode the packet as wireguard packet.
+    /// Then, verify the MAC fields on the packet (if any), and apply rate limiting if needed.
     pub fn verify_packet(
         &self,
         src_addr: Option<IpAddr>,
         packet: Packet,
     ) -> Result<WgKind, TunnResult> {
-        let parsed_packet = packet
+        let packet = packet
             .try_into_wg()
             .and_then(Packet::<Wg>::into_kind)
             .map_err(|_err| TunnResult::Err(WireGuardError::InvalidPacket))?;
 
         // Verify and rate limit handshake messages only
+        match packet {
+            WgKind::HandshakeInit(packet) => self
+                .verify_handshake(src_addr, packet)
+                .map(WgKind::HandshakeInit),
+            WgKind::HandshakeResp(packet) => self
+                .verify_handshake(src_addr, packet)
+                .map(WgKind::HandshakeResp),
+            _ => Ok(packet),
+        }
+    }
 
-        let (sender_idx, mac1, mac2, pkt_bytes) = match &parsed_packet {
-            WgKind::HandshakeInit(pkt) => (pkt.sender_idx, &pkt.mac1, &pkt.mac2, pkt.as_bytes()),
-            WgKind::HandshakeResp(pkt) => (pkt.sender_idx, &pkt.mac1, &pkt.mac2, pkt.as_bytes()),
-            _ => return Ok(parsed_packet),
-        };
+    /// Verify the MAC fields on the handshake, and apply rate limiting if needed.
+    fn verify_handshake<P: WgHandshakeBase>(
+        &self,
+        src_addr: Option<IpAddr>,
+        handshake: Packet<P>,
+    ) -> Result<Packet<P>, TunnResult> {
+        let sender_idx = handshake.sender_idx();
+        let mac1 = handshake.mac1();
+        let mac2 = handshake.mac2();
 
-        let msg = &pkt_bytes[..pkt_bytes.len() - 32];
+        let len_without_mac: usize = P::LEN - P::MAC1_OFF;
+        let packet_until_mac = &handshake.as_bytes()[..len_without_mac];
 
-        let computed_mac1 = b2s_keyed_mac_16(&self.mac1_key, msg);
+        let computed_mac1 = b2s_keyed_mac_16(&self.mac1_key, packet_until_mac);
         if !constant_time_eq(&computed_mac1[..16], mac1) {
             return Err(TunnResult::Err(WireGuardError::InvalidMac));
         }
@@ -177,15 +192,15 @@ impl RateLimiter {
 
             // Only given an address can we validate mac2
             let cookie = self.current_cookie(addr);
-            let computed_mac2 = b2s_keyed_mac_16_2(&cookie, msg, mac1);
+            let computed_mac2 = b2s_keyed_mac_16_2(&cookie, packet_until_mac, mac1);
 
             if !constant_time_eq(&computed_mac2[..16], mac2) {
-                let cookie_reply = self.format_cookie_reply(sender_idx.get(), cookie, mac1);
-                let packet = Packet::from(parsed_packet).overwrite_with(&cookie_reply);
+                let cookie_reply = self.format_cookie_reply(sender_idx, cookie, mac1);
+                let packet = handshake.overwrite_with(&cookie_reply);
                 return Err(TunnResult::WriteToNetwork(packet.into()));
             }
         }
 
-        Ok(parsed_packet)
+        Ok(handshake)
     }
 }
