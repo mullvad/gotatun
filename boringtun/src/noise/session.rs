@@ -199,7 +199,9 @@ impl Session {
         let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
 
         let len = DATA_OFFSET + AEAD_SIZE + packet.len();
-        // TODO: don't allocate
+
+        // TODO: we can remove this allocation by pre-allocating some extra
+        // space at the beginning of `packet`s allocation, and using that.
         let mut buf = Packet::from_bytes(BytesMut::zeroed(len));
 
         let data = WgData::mut_from_bytes(buf.buf_mut()).unwrap();
@@ -223,7 +225,7 @@ impl Session {
                 data.tag_mut().copy_from_slice(tag.as_ref());
                 packet.len() + AEAD_SIZE
             })
-            .unwrap();
+            .expect("encryption must succeed");
 
         // this won't panic since we've correctly initialized a WgData packet
         let packet = buf.try_into_wg().expect("is a wireguard packet");
