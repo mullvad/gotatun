@@ -494,7 +494,6 @@ mod tests {
         handshake_init: Packet<WgHandshakeInit>,
     ) -> Packet<WgHandshakeResp> {
         let handshake_resp = tun.handle_incoming_packet(WgKind::HandshakeInit(handshake_init));
-        //let handshake_resp = tun.verify_and_handle_incoming_packet(None, handshake_init, &mut dst);
         assert!(matches!(handshake_resp, TunnResult::WriteToNetwork(_)));
 
         let TunnResult::WriteToNetwork(handshake_resp) = handshake_resp else {
@@ -513,7 +512,6 @@ mod tests {
         tun: &mut Tunn,
         handshake_resp: Packet<WgHandshakeResp>,
     ) -> Packet<WgData> {
-        //let keepalive = tun.verify_and_handle_incoming_packet(None, handshake_resp, &mut dst);
         let keepalive = tun.handle_incoming_packet(WgKind::HandshakeResp(handshake_resp));
         assert!(matches!(keepalive, TunnResult::WriteToNetwork(_)));
 
