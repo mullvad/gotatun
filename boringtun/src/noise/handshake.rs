@@ -684,11 +684,7 @@ impl Handshake {
     }
 
     // Compute and append mac1 and mac2 to a handshake message
-    fn init_mac1_and_mac2<T: WgHandshakeBase>(
-        &mut self,
-        packet: &mut T,
-        local_index: u32,
-    ) -> Result<(), WireGuardError> {
+    fn init_mac1_and_mac2<T: WgHandshakeBase>(&mut self, packet: &mut T, local_index: u32) {
         // msg.mac1 = MAC(HASH(LABEL_MAC1 || responder.static_public), msg[0:offsetof(msg.mac1)])
         *packet.mac1_mut() = b2s_keyed_mac_16(
             &self.params.sending_mac1_key,
@@ -704,12 +700,9 @@ impl Handshake {
 
         self.cookies.index = local_index;
         self.cookies.last_mac1 = Some(*packet.mac1());
-        Ok(())
     }
 
-    pub(super) fn format_handshake_initiation(
-        &mut self,
-    ) -> Result<crate::packet::Packet<WgHandshakeInit>, WireGuardError> {
+    pub(super) fn format_handshake_initiation(&mut self) -> crate::packet::Packet<WgHandshakeInit> {
         let mut handshake = WgHandshakeInit::new();
 
         let local_index = self.inc_index();
@@ -784,9 +777,9 @@ impl Handshake {
             }),
         );
 
-        self.init_mac1_and_mac2(&mut handshake, local_index)?;
+        self.init_mac1_and_mac2(&mut handshake, local_index);
 
-        Ok(Packet::copy_from(&handshake))
+        Packet::copy_from(&handshake)
     }
 
     fn format_handshake_response(
@@ -867,7 +860,7 @@ impl Handshake {
         let temp2 = b2s_hmac(&temp1, &[0x01]);
         let temp3 = b2s_hmac2(&temp1, &temp2, &[0x02]);
 
-        self.init_mac1_and_mac2(&mut resp, local_index)?;
+        self.init_mac1_and_mac2(&mut resp, local_index);
 
         let packet = buf.overwrite_with(&resp);
 

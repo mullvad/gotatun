@@ -300,18 +300,14 @@ impl Tunn {
 
         let starting_new_handshake = !self.handshake.is_in_progress();
 
-        match self.handshake.format_handshake_initiation() {
-            Ok(packet) => {
-                log::debug!("Sending handshake_initiation");
+        let packet = self.handshake.format_handshake_initiation();
+        log::debug!("Sending handshake_initiation");
 
-                if starting_new_handshake {
-                    self.timer_tick(TimerName::TimeLastHandshakeStarted);
-                }
-                self.timer_tick(TimerName::TimeLastPacketSent);
-                TunnResult::WriteToNetwork(packet.into())
-            }
-            Err(e) => TunnResult::Err(e),
+        if starting_new_handshake {
+            self.timer_tick(TimerName::TimeLastHandshakeStarted);
         }
+        self.timer_tick(TimerName::TimeLastPacketSent);
+        TunnResult::WriteToNetwork(packet.into())
     }
 
     /// Check that packet is an IP packet,
