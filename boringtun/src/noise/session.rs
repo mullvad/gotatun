@@ -3,7 +3,7 @@
 
 use crate::{
     noise::errors::WireGuardError,
-    packet::{Packet, WgData, WgKind, WgPacketType},
+    packet::{Packet, WgData, WgDataHeader, WgKind, WgPacketType},
 };
 use bytes::{Buf, BytesMut};
 use parking_lot::Mutex;
@@ -265,7 +265,7 @@ impl Session {
         // shift the packet buffer slice onto the decrypted data
         let mut packet = packet.into_bytes();
         let buf = packet.buf_mut();
-        buf.advance(16); // offset of WgData::encrypted_encapsulated_packet
+        buf.advance(WgDataHeader::LEN);
         buf.truncate(decrypted_len);
 
         // After decryption is done, check counter again, and mark as received
