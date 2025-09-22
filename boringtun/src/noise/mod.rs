@@ -193,43 +193,6 @@ impl Tunn {
         }
     }
 
-    /*
-    /// Receives a UDP datagram from the network and parses it.
-    /// Returns TunnResult.
-    ///
-    /// If the result is of type TunnResult::WriteToNetwork, should repeat the call with empty datagram,
-    /// until TunnResult::Done is returned. If batch processing packets, it is OK to defer until last
-    /// packet is processed.
-    // TODO: Remove this? It's not used anymore outside of tests
-    pub fn verify_and_handle_incoming_packet<'a>(
-        &mut self,
-        src_addr: Option<IpAddr>,
-        datagram: &[u8],
-        dst: &'a mut [u8],
-    ) -> TunnResult<'a> {
-        if datagram.is_empty() {
-            // Indicates a repeated call
-            return self.send_queued_packet(dst);
-        }
-
-        let mut cookie = [0u8; COOKIE_REPLY_SZ];
-        let packet = match self
-            .rate_limiter
-            .verify_packet(src_addr, datagram, &mut cookie)
-        {
-            Ok(packet) => packet,
-            Err(TunnResult::WriteToNetwork(cookie)) => {
-                dst[..cookie.len()].copy_from_slice(cookie);
-                return TunnResult::WriteToNetwork(&mut dst[..cookie.len()]);
-            }
-            Err(TunnResult::Err(e)) => return TunnResult::Err(e),
-            _ => unreachable!(),
-        };
-
-        Ok(decapsulated_packet)
-    }
-    */
-
     pub(crate) fn handle_incoming_packet(&mut self, packet: WgKind) -> TunnResult {
         match packet {
             WgKind::HandshakeInit(p) => self.handle_handshake_init(p),
