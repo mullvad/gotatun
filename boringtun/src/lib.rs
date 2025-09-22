@@ -10,10 +10,6 @@ pub mod device;
 
 pub mod udp;
 
-#[cfg(feature = "ffi-bindings")]
-pub mod ffi;
-#[cfg(feature = "jni-bindings")]
-pub mod jni;
 pub mod noise;
 pub mod packet;
 pub mod tun;
