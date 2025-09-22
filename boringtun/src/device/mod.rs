@@ -677,12 +677,11 @@ impl<T: DeviceTransports> Device<T> {
                     }
                 }
                 TunnResult::WriteToTunnelV4(packet) => {
-                    if peer.is_allowed_ip(packet.header.destination()) {
-                        if let Err(_err) = tun_tx.send(packet.into()).await {
+                    if peer.is_allowed_ip(packet.header.destination())
+                        && let Err(_err) = tun_tx.send(packet.into()).await {
                             log::trace!("buffered_tun_send.send failed");
                             break;
                         }
-                    }
                 }
                 TunnResult::WriteToTunnelV6(packet) => {
                     if peer.is_allowed_ip(packet.header.destination())
