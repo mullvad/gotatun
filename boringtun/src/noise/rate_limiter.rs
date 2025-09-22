@@ -120,7 +120,7 @@ impl RateLimiter {
         idx: u32,
         cookie: Cookie,
         mac1: &[u8],
-    ) -> Result<WgCookieReply, WireGuardError> {
+    ) -> WgCookieReply {
         let mut wg_cookie_reply = WgCookieReply::new();
 
         // msg.message_type = 3
@@ -136,11 +136,11 @@ impl RateLimiter {
         wg_cookie_reply.encrypted_cookie[..16].copy_from_slice(&cookie);
         let tag = cipher
             .encrypt_in_place_detached(iv, mac1, &mut wg_cookie_reply.encrypted_cookie[..16])
-            .map_err(|_| WireGuardError::DestinationBufferTooSmall)?;
+            .expect("wg_cookie_reply is large enough");
 
         wg_cookie_reply.encrypted_cookie[16..].copy_from_slice(&tag);
 
-        Ok(wg_cookie_reply)
+        wg_cookie_reply
     }
 
     /// Verify the MAC fields on the datagram, and apply rate limiting if needed
@@ -180,9 +180,7 @@ impl RateLimiter {
             let computed_mac2 = b2s_keyed_mac_16_2(&cookie, msg, mac1);
 
             if !constant_time_eq(&computed_mac2[..16], mac2) {
-                let cookie_reply = self
-                    .format_cookie_reply(sender_idx.get(), cookie, mac1)
-                    .map_err(TunnResult::Err)?;
+                let cookie_reply = self.format_cookie_reply(sender_idx.get(), cookie, mac1);
                 let packet = Packet::from(parsed_packet).overwrite_with(&cookie_reply);
                 return Err(TunnResult::WriteToNetwork(packet.into()));
             }
