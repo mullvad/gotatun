@@ -16,12 +16,14 @@ mod ipv6;
 mod pool;
 mod udp;
 mod util;
+mod wg;
 
 pub use ip::*;
 pub use ipv4::*;
 pub use ipv6::*;
 pub use pool::*;
 pub use udp::*;
+pub use wg::*;
 
 /// An owned packet of some type.
 ///
@@ -79,6 +81,11 @@ impl CheckedPayload for Ip {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv6<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv4<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Udp<P> {}
+impl CheckedPayload for Wg {}
+impl CheckedPayload for WgHandshakeInit {}
+impl CheckedPayload for WgHandshakeResp {}
+impl CheckedPayload for WgCookieReply {}
+impl CheckedPayload for WgData {}
 
 impl<T: CheckedPayload + ?Sized> Packet<T> {
     fn cast<Y: CheckedPayload + ?Sized>(self) -> Packet<Y> {
@@ -96,6 +103,7 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
         &self.inner.buf
     }
 
+    /// Create a `Packet<T>` from a `&T`.
     pub fn copy_from(payload: &T) -> Self {
         Self {
             inner: PacketInner {
@@ -105,24 +113,40 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
             _kind: PhantomData::<T>,
         }
     }
+
+    /// Overwrite the contents of the backing buffer with new value of an new type.
+    pub fn overwrite_with<Y: CheckedPayload>(mut self, payload: &Y) -> Packet<Y> {
+        self.inner.buf.clear();
+        self.inner.buf.extend_from_slice(payload.as_bytes());
+        self.cast()
+    }
 }
 
 // Trivial From conversions between packet types
 #[duplicate_item(
     FromType ToType;
-    [Ipv4<Udp>] [Ipv4];
-    [Ipv6<Udp>] [Ipv6];
+    [Ipv4<Udp>]             [Ipv4];
+    [Ipv6<Udp>]             [Ipv6];
 
-    [Ipv4<Udp>] [Ip];
-    [Ipv6<Udp>] [Ip];
-    [Ipv4]      [Ip];
-    [Ipv6]      [Ip];
+    [Ipv4<Udp>]             [Ip];
+    [Ipv6<Udp>]             [Ip];
+    [Ipv4]                  [Ip];
+    [Ipv6]                  [Ip];
 
-    [Ipv4<Udp>] [[u8]];
-    [Ipv6<Udp>] [[u8]];
-    [Ipv4]      [[u8]];
-    [Ipv6]      [[u8]];
-    [Ip]        [[u8]];
+    [Ipv4<Udp>]             [[u8]];
+    [Ipv6<Udp>]             [[u8]];
+    [Ipv4]                  [[u8]];
+    [Ipv6]                  [[u8]];
+    [Ip]                    [[u8]];
+    [Wg]                    [[u8]];
+    [WgData]                [[u8]];
+    [WgHandshakeInit]       [[u8]];
+    [WgHandshakeResp]       [[u8]];
+    [WgCookieReply]         [[u8]];
+    [WgHandshakeInit]       [Wg];
+    [WgHandshakeResp]       [Wg];
+    [WgCookieReply]         [Wg];
+    [WgData]                [Wg];
 )]
 impl From<Packet<FromType>> for Packet<ToType> {
     fn from(value: Packet<FromType>) -> Packet<ToType> {
@@ -190,7 +214,7 @@ impl Packet<[u8]> {
 }
 
 impl Packet<Ip> {
-    pub fn try_into_ipvx(self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
+    pub fn try_into_ipvx(mut self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
         match self.header.version() {
             4 => {
                 let buf_len = self.buf().len();
@@ -199,9 +223,17 @@ impl Packet<Ip> {
                     .map_err(|e| eyre!("Bad IPv4 packet: {e:?}"))?;
 
                 let ip_len = usize::from(ipv4.header.total_len.get());
-                if ip_len != buf_len {
-                    bail!("IPv4 `total_len` did not match packet length: {ip_len} != {buf_len}");
+                if ip_len > buf_len {
+                    bail!("IPv4 `total_len` exceeded actual packet length: {ip_len} > {buf_len}");
                 }
+                if ip_len < Ipv4Header::LEN {
+                    bail!(
+                        "IPv4 `total_len` less than packet header len: {ip_len} < {}",
+                        Ipv4Header::LEN
+                    );
+                }
+
+                self.inner.buf.truncate(ip_len);
 
                 // TODO: validate checksum
 
@@ -214,12 +246,14 @@ impl Packet<Ip> {
                     .map_err(|e| eyre!("Bad IPv6 packet: {e:?}"))?;
 
                 let payload_len = usize::from(ipv6.header.payload_length.get());
-                if payload_len != ipv6.payload.len() {
+                if payload_len > ipv6.payload.len() {
                     bail!(
-                        "IPv6 `payload_len` did not match packet length: {payload_len} != {}",
+                        "IPv6 `payload_len` exceeded actual payload length: {payload_len} > {}",
                         ipv6.payload.len()
                     );
                 }
+
+                self.inner.buf.truncate(payload_len + Ipv6Header::LEN);
 
                 // TODO: validate checksum
 

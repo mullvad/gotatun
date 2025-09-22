@@ -8,20 +8,16 @@ use crate::{
     udp::{UdpRecv, UdpSend},
 };
 
-use super::UdpTransport;
-
-impl UdpTransport for super::UdpSocket {
-    fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
-        super::UdpSocket::local_addr(self).map(Some)
-    }
-}
-
 impl UdpSend for super::UdpSocket {
     type SendManyBuf = ();
 
     async fn send_to(&self, packet: Packet, target: SocketAddr) -> io::Result<()> {
         self.inner.send_to(&packet, target).await?;
         Ok(())
+    }
+
+    fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
+        super::UdpSocket::local_addr(self).map(Some)
     }
 }
 

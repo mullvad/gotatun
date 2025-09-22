@@ -8,50 +8,39 @@ pub mod rate_limiter;
 mod session;
 mod timers;
 
+use zerocopy::IntoBytes;
+
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
+use crate::packet::{
+    Ipv4, Ipv6, Packet, Wg, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind,
+};
 use crate::x25519;
 
 use std::collections::VecDeque;
-use std::convert::{TryFrom, TryInto};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::Duration;
 
 /// The default value to use for rate limiting, when no other rate limiter is defined
 const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
 
-const IPV4_MIN_HEADER_SIZE: usize = 20;
-const IPV4_LEN_OFF: usize = 2;
-const IPV4_SRC_IP_OFF: usize = 12;
-const IPV4_DST_IP_OFF: usize = 16;
-const IPV4_IP_SZ: usize = 4;
-
-const IPV6_MIN_HEADER_SIZE: usize = 40;
-const IPV6_LEN_OFF: usize = 4;
-const IPV6_SRC_IP_OFF: usize = 8;
-const IPV6_DST_IP_OFF: usize = 24;
-const IPV6_IP_SZ: usize = 16;
-
-const IP_LEN_SZ: usize = 2;
-
 const MAX_QUEUE_DEPTH: usize = 256;
 /// number of sessions in the ring, better keep a PoT
 const N_SESSIONS: usize = 8;
 
 #[derive(Debug)]
-pub enum TunnResult<'a> {
+pub enum TunnResult {
     Done,
     Err(WireGuardError),
-    WriteToNetwork(&'a mut [u8]),
-    WriteToTunnelV4(&'a mut [u8], Ipv4Addr),
-    WriteToTunnelV6(&'a mut [u8], Ipv6Addr),
+    WriteToNetwork(Packet<Wg>),
+    WriteToTunnelV4(Packet<Ipv4>),
+    WriteToTunnelV6(Packet<Ipv6>),
 }
 
-impl<'a> From<WireGuardError> for TunnResult<'a> {
-    fn from(err: WireGuardError) -> TunnResult<'a> {
+impl From<WireGuardError> for TunnResult {
+    fn from(err: WireGuardError) -> TunnResult {
         TunnResult::Err(err)
     }
 }
@@ -65,7 +54,8 @@ pub struct Tunn {
     /// Index of most recently used session
     current: usize,
     /// Queue to store blocked packets
-    packet_queue: VecDeque<Vec<u8>>,
+    packet_queue: VecDeque<Packet>,
+
     /// Keeps tabs on the expiring timers
     timers: timers::Timers,
     tx_bytes: usize,
@@ -73,121 +63,9 @@ pub struct Tunn {
     rate_limiter: Arc<RateLimiter>,
 }
 
-type MessageType = u32;
-const HANDSHAKE_INIT: MessageType = 1;
-const HANDSHAKE_RESP: MessageType = 2;
-const COOKIE_REPLY: MessageType = 3;
-const DATA: MessageType = 4;
-
-const HANDSHAKE_INIT_SZ: usize = 148;
-const HANDSHAKE_RESP_SZ: usize = 92;
-const COOKIE_REPLY_SZ: usize = 64;
-const DATA_OVERHEAD_SZ: usize = 32;
-
-#[derive(Debug)]
-pub struct HandshakeInit<'a> {
-    sender_idx: u32,
-    unencrypted_ephemeral: &'a [u8; 32],
-    encrypted_static: &'a [u8],
-    encrypted_timestamp: &'a [u8],
-}
-
-#[derive(Debug)]
-pub struct HandshakeResponse<'a> {
-    sender_idx: u32,
-    pub receiver_idx: u32,
-    unencrypted_ephemeral: &'a [u8; 32],
-    encrypted_nothing: &'a [u8],
-}
-
-#[derive(Debug)]
-pub struct PacketCookieReply<'a> {
-    pub receiver_idx: u32,
-    nonce: &'a [u8],
-    encrypted_cookie: &'a [u8],
-}
-
-#[derive(Debug)]
-pub struct PacketData<'a> {
-    pub receiver_idx: u32,
-    counter: u64,
-    encrypted_encapsulated_packet: &'a [u8],
-}
-
-/// Describes a packet from network
-#[derive(Debug)]
-pub enum Packet<'a> {
-    HandshakeInit(HandshakeInit<'a>),
-    HandshakeResponse(HandshakeResponse<'a>),
-    PacketCookieReply(PacketCookieReply<'a>),
-    PacketData(PacketData<'a>),
-}
-
 impl Tunn {
-    #[inline(always)]
-    pub fn parse_incoming_packet(src: &'_ [u8]) -> Result<Packet<'_>, WireGuardError> {
-        if src.len() < 4 {
-            return Err(WireGuardError::InvalidPacket);
-        }
-
-        // Checks the type, as well as the reserved zero fields
-        let packet_type = u32::from_le_bytes(src[0..4].try_into().unwrap());
-
-        Ok(match (packet_type, src.len()) {
-            (HANDSHAKE_INIT, HANDSHAKE_INIT_SZ) => Packet::HandshakeInit(HandshakeInit {
-                sender_idx: u32::from_le_bytes(src[4..8].try_into().unwrap()),
-                unencrypted_ephemeral: <&[u8; 32] as TryFrom<&[u8]>>::try_from(&src[8..40])
-                    .expect("length already checked above"),
-                encrypted_static: &src[40..88],
-                encrypted_timestamp: &src[88..116],
-            }),
-            (HANDSHAKE_RESP, HANDSHAKE_RESP_SZ) => Packet::HandshakeResponse(HandshakeResponse {
-                sender_idx: u32::from_le_bytes(src[4..8].try_into().unwrap()),
-                receiver_idx: u32::from_le_bytes(src[8..12].try_into().unwrap()),
-                unencrypted_ephemeral: <&[u8; 32] as TryFrom<&[u8]>>::try_from(&src[12..44])
-                    .expect("length already checked above"),
-                encrypted_nothing: &src[44..60],
-            }),
-            (COOKIE_REPLY, COOKIE_REPLY_SZ) => Packet::PacketCookieReply(PacketCookieReply {
-                receiver_idx: u32::from_le_bytes(src[4..8].try_into().unwrap()),
-                nonce: &src[8..32],
-                encrypted_cookie: &src[32..64],
-            }),
-            (DATA, DATA_OVERHEAD_SZ..=usize::MAX) => Packet::PacketData(PacketData {
-                receiver_idx: u32::from_le_bytes(src[4..8].try_into().unwrap()),
-                counter: u64::from_le_bytes(src[8..16].try_into().unwrap()),
-                encrypted_encapsulated_packet: &src[16..],
-            }),
-            _ => return Err(WireGuardError::InvalidPacket),
-        })
-    }
-
     pub fn is_expired(&self) -> bool {
         self.handshake.is_expired()
-    }
-
-    pub fn dst_address(packet: &[u8]) -> Option<IpAddr> {
-        if packet.is_empty() {
-            return None;
-        }
-
-        match packet[0] >> 4 {
-            4 if packet.len() >= IPV4_MIN_HEADER_SIZE => {
-                let addr_bytes: [u8; IPV4_IP_SZ] = packet
-                    [IPV4_DST_IP_OFF..IPV4_DST_IP_OFF + IPV4_IP_SZ]
-                    .try_into()
-                    .unwrap();
-                Some(IpAddr::from(addr_bytes))
-            }
-            6 if packet.len() >= IPV6_MIN_HEADER_SIZE => {
-                let addr_bytes: [u8; IPV6_IP_SZ] = packet
-                    [IPV6_DST_IP_OFF..IPV6_DST_IP_OFF + IPV6_IP_SZ]
-                    .try_into()
-                    .unwrap();
-                Some(IpAddr::from(addr_bytes))
-            }
-            _ => None,
-        }
     }
 
     /// Create a new tunnel using own private key and the peer public key
@@ -241,88 +119,65 @@ impl Tunn {
         }
     }
 
-    /// Encapsulate a single packet from the tunnel interface.
-    /// Returns TunnResult.
+    /// Encapsulate a single packet.
     ///
-    /// # Panics
-    /// Panics if dst buffer is too small.
-    /// Size of dst should be at least src.len() + 32, and no less than 148 bytes.
-    pub fn encapsulate<'a>(&mut self, src: &[u8], dst: &'a mut [u8]) -> TunnResult<'a> {
+    /// If there's an active session, return the encapsulated packet. Otherwise, if needed, return
+    /// a handshake initiation. `None` is returned if a handshake is already in progress. In that
+    /// case, the packet is added to a queue.
+    pub fn handle_outgoing_packet(&mut self, packet: Packet) -> Option<Packet<Wg>> {
         let current = self.current;
-        if let Some(ref session) = self.sessions[current % N_SESSIONS] {
-            // Send the packet using an established session
-            let packet = session.format_packet_data(src, dst);
-            self.timer_tick(TimerName::TimeLastPacketSent);
-            // Exclude Keepalive packets from timer update.
-            if !src.is_empty() {
-                self.timer_tick(TimerName::TimeLastDataPacketSent);
-            }
-            self.tx_bytes += src.len();
-            return TunnResult::WriteToNetwork(packet);
-        }
 
-        // If there is no session, queue the packet for future retry
-        self.queue_packet(src);
-        // Initiate a new handshake if none is in progress
-        self.format_handshake_initiation(dst, false)
+        match self.encapsulate_with_session(packet, current) {
+            Ok(encapsulated_packet) => Some(encapsulated_packet.into()),
+            Err(packet) => {
+                // If there is no session, queue the packet for future retry
+                self.queue_packet(packet);
+                // Initiate a new handshake if none is in progress
+                self.format_handshake_initiation(false).map(Into::into)
+            }
+        }
     }
 
-    /// Receives a UDP datagram from the network and parses it.
-    /// Returns TunnResult.
+    /// Encapsulate a single packet into a [WgData].
     ///
-    /// If the result is of type TunnResult::WriteToNetwork, should repeat the call with empty datagram,
-    /// until TunnResult::Done is returned. If batch processing packets, it is OK to defer until last
-    /// packet is processed.
-    pub fn decapsulate<'a>(
-        &mut self,
-        src_addr: Option<IpAddr>,
-        datagram: &[u8],
-        dst: &'a mut [u8],
-    ) -> TunnResult<'a> {
-        if datagram.is_empty() {
-            // Indicates a repeated call
-            return self.send_queued_packet(dst);
-        }
-
-        let mut cookie = [0u8; COOKIE_REPLY_SZ];
-        let packet = match self
-            .rate_limiter
-            .verify_packet(src_addr, datagram, &mut cookie)
-        {
-            Ok(packet) => packet,
-            Err(TunnResult::WriteToNetwork(cookie)) => {
-                dst[..cookie.len()].copy_from_slice(cookie);
-                return TunnResult::WriteToNetwork(&mut dst[..cookie.len()]);
-            }
-            Err(TunnResult::Err(e)) => return TunnResult::Err(e),
-            _ => unreachable!(),
-        };
-
-        self.handle_verified_packet(packet, dst)
-    }
-
-    pub(crate) fn handle_verified_packet<'a>(
+    /// Returns `Err(original_packet)` if `current` does not refer to an active session.
+    fn encapsulate_with_session(
         &mut self,
         packet: Packet,
-        dst: &'a mut [u8],
-    ) -> TunnResult<'a> {
+        current: usize,
+    ) -> Result<Packet<WgData>, Packet> {
+        if let Some(ref session) = self.sessions[current % N_SESSIONS] {
+            // Send the packet using an established session
+            let packet = session.format_packet_data(packet);
+            self.timer_tick(TimerName::TimeLastPacketSent);
+            // Exclude Keepalive packets from timer update.
+            if !packet.as_bytes().is_empty() {
+                self.timer_tick(TimerName::TimeLastDataPacketSent);
+            }
+            self.tx_bytes += packet.as_bytes().len();
+            Ok(packet)
+        } else {
+            Err(packet)
+        }
+    }
+
+    pub(crate) fn handle_incoming_packet(&mut self, packet: WgKind) -> TunnResult {
         match packet {
-            Packet::HandshakeInit(p) => self.handle_handshake_init(p, dst),
-            Packet::HandshakeResponse(p) => self.handle_handshake_response(p, dst),
-            Packet::PacketCookieReply(p) => self.handle_cookie_reply(p),
-            Packet::PacketData(p) => self.handle_data(p, dst),
+            WgKind::HandshakeInit(p) => self.handle_handshake_init(p),
+            WgKind::HandshakeResp(p) => self.handle_handshake_response(p),
+            WgKind::CookieReply(p) => self.handle_cookie_reply(&p),
+            WgKind::Data(p) => self.handle_data(p),
         }
         .unwrap_or_else(TunnResult::from)
     }
 
-    fn handle_handshake_init<'a>(
+    fn handle_handshake_init(
         &mut self,
-        p: HandshakeInit,
-        dst: &'a mut [u8],
-    ) -> Result<TunnResult<'a>, WireGuardError> {
+        p: Packet<WgHandshakeInit>,
+    ) -> Result<TunnResult, WireGuardError> {
         log::debug!("Received handshake_initiation: {}", p.sender_idx);
 
-        let (packet, session) = self.handshake.receive_handshake_initialization(p, dst)?;
+        let (packet, session) = self.handshake.receive_handshake_initialization(p)?;
 
         // Store new session in ring buffer
         let index = session.local_index();
@@ -334,23 +189,25 @@ impl Tunn {
 
         log::debug!("Sending handshake_response: {index}");
 
-        Ok(TunnResult::WriteToNetwork(packet))
+        Ok(TunnResult::WriteToNetwork(packet.into()))
     }
 
-    fn handle_handshake_response<'a>(
+    fn handle_handshake_response(
         &mut self,
-        p: HandshakeResponse,
-        dst: &'a mut [u8],
-    ) -> Result<TunnResult<'a>, WireGuardError> {
+        p: Packet<WgHandshakeResp>,
+    ) -> Result<TunnResult, WireGuardError> {
         log::debug!(
             "Received handshake_response: {} {}",
             p.receiver_idx,
             p.sender_idx,
         );
 
-        let session = self.handshake.receive_handshake_response(p)?;
+        let session = self.handshake.receive_handshake_response(&p)?;
 
-        let keepalive_packet = session.format_packet_data(&[], dst);
+        let mut p = p.into_bytes();
+        p.truncate(0);
+
+        let keepalive_packet = session.format_packet_data(p);
         // Store new session in ring buffer
         let l_idx = session.local_index();
         let index = l_idx % N_SESSIONS;
@@ -362,13 +219,10 @@ impl Tunn {
 
         log::debug!("Sending keepalive");
 
-        Ok(TunnResult::WriteToNetwork(keepalive_packet)) // Send a keepalive as a response
+        Ok(TunnResult::WriteToNetwork(keepalive_packet.into())) // Send a keepalive as a response
     }
 
-    fn handle_cookie_reply<'a>(
-        &mut self,
-        p: PacketCookieReply,
-    ) -> Result<TunnResult<'a>, WireGuardError> {
+    fn handle_cookie_reply(&mut self, p: &WgCookieReply) -> Result<TunnResult, WireGuardError> {
         log::debug!("Received cookie_reply: {}", p.receiver_idx);
 
         self.handshake.receive_cookie_reply(p)?;
@@ -396,13 +250,18 @@ impl Tunn {
         }
     }
 
-    /// Decrypts a data packet, and stores the decapsulated packet in dst.
-    fn handle_data<'a>(
+    /// Decrypt a data packet, and return a [TunnResult::WriteToTunnelV4] (or `*V6`) if successful.
+    fn handle_data(&mut self, packet: Packet<WgData>) -> Result<TunnResult, WireGuardError> {
+        let decapsulated_packet = self.decapsulate_with_session(packet)?;
+
+        Ok(self.validate_decapsulated_packet(decapsulated_packet))
+    }
+
+    pub fn decapsulate_with_session(
         &mut self,
-        packet: PacketData,
-        dst: &'a mut [u8],
-    ) -> Result<TunnResult<'a>, WireGuardError> {
-        let r_idx = packet.receiver_idx as usize;
+        packet: Packet<WgData>,
+    ) -> Result<Packet, WireGuardError> {
+        let r_idx = packet.header.receiver_idx.get() as usize;
         let idx = r_idx % N_SESSIONS;
 
         // Get the (probably) right session
@@ -413,25 +272,26 @@ impl Tunn {
                 log::trace!("No current session available: {r_idx}");
                 WireGuardError::NoCurrentSession
             })?;
-            session.receive_packet_data(packet, dst)?
+            session.receive_packet_data(packet)?
         };
 
         self.set_current_session(r_idx);
 
         self.timer_tick(TimerName::TimeLastPacketReceived);
 
-        Ok(self.validate_decapsulated_packet(decapsulated_packet))
+        Ok(decapsulated_packet)
     }
 
-    /// Formats a new handshake initiation message and store it in dst. If force_resend is true will send
-    /// a new handshake, even if a handshake is already in progress (for example when a handshake times out)
-    pub fn format_handshake_initiation<'a>(
+    /// Return a new handshake if appropriate, or `None` otherwise.
+    ///
+    /// If force_resend is true will send a new handshake, even if a handshake
+    /// is already in progress (for example when a handshake times out)
+    pub fn format_handshake_initiation(
         &mut self,
-        dst: &'a mut [u8],
         force_resend: bool,
-    ) -> TunnResult<'a> {
+    ) -> Option<Packet<WgHandshakeInit>> {
         if self.handshake.is_in_progress() && !force_resend {
-            return TunnResult::Done;
+            return None;
         }
 
         if self.handshake.is_expired() {
@@ -440,98 +300,60 @@ impl Tunn {
 
         let starting_new_handshake = !self.handshake.is_in_progress();
 
-        match self.handshake.format_handshake_initiation(dst) {
-            Ok(packet) => {
-                log::debug!("Sending handshake_initiation");
+        let packet = self.handshake.format_handshake_initiation();
+        log::debug!("Sending handshake_initiation");
 
-                if starting_new_handshake {
-                    self.timer_tick(TimerName::TimeLastHandshakeStarted);
-                }
-                self.timer_tick(TimerName::TimeLastPacketSent);
-                TunnResult::WriteToNetwork(packet)
-            }
-            Err(e) => TunnResult::Err(e),
+        if starting_new_handshake {
+            self.timer_tick(TimerName::TimeLastHandshakeStarted);
         }
+        self.timer_tick(TimerName::TimeLastPacketSent);
+        Some(packet)
     }
 
-    /// Check if an IP packet is v4 or v6, truncate to the length indicated by the length field
-    /// Returns the truncated packet and the source IP as TunnResult
-    fn validate_decapsulated_packet<'a>(&mut self, packet: &'a mut [u8]) -> TunnResult<'a> {
-        let (computed_len, src_ip_address) = match packet.len() {
-            0 => return TunnResult::Done, // This is keepalive, and not an error
-            _ if packet[0] >> 4 == 4 && packet.len() >= IPV4_MIN_HEADER_SIZE => {
-                let len_bytes: [u8; IP_LEN_SZ] = packet[IPV4_LEN_OFF..IPV4_LEN_OFF + IP_LEN_SZ]
-                    .try_into()
-                    .unwrap();
-                let addr_bytes: [u8; IPV4_IP_SZ] = packet
-                    [IPV4_SRC_IP_OFF..IPV4_SRC_IP_OFF + IPV4_IP_SZ]
-                    .try_into()
-                    .unwrap();
-                (
-                    u16::from_be_bytes(len_bytes) as usize,
-                    IpAddr::from(addr_bytes),
-                )
-            }
-            _ if packet[0] >> 4 == 6 && packet.len() >= IPV6_MIN_HEADER_SIZE => {
-                let len_bytes: [u8; IP_LEN_SZ] = packet[IPV6_LEN_OFF..IPV6_LEN_OFF + IP_LEN_SZ]
-                    .try_into()
-                    .unwrap();
-                let addr_bytes: [u8; IPV6_IP_SZ] = packet
-                    [IPV6_SRC_IP_OFF..IPV6_SRC_IP_OFF + IPV6_IP_SZ]
-                    .try_into()
-                    .unwrap();
-                (
-                    u16::from_be_bytes(len_bytes) as usize + IPV6_MIN_HEADER_SIZE,
-                    IpAddr::from(addr_bytes),
-                )
-            }
-            _ => return TunnResult::Err(WireGuardError::InvalidPacket),
+    /// Check that packet is an IP packet,
+    /// then truncate to [Ipv4Header::total_len](crate::packet::Ipv4Header::total_len)
+    /// or [Ipv6Header::payload_length](crate::packet::Ipv6Header::payload_length).
+    ///
+    /// Returns the truncated packet and the source IP as [TunnResult::WriteToTunnelV4] (or `*V6`).
+    pub fn validate_decapsulated_packet(&mut self, packet: Packet) -> TunnResult {
+        // keepalive
+        if packet.is_empty() {
+            return TunnResult::Done;
+        }
+
+        let Ok(packet) = packet.try_into_ipvx() else {
+            return TunnResult::Err(WireGuardError::InvalidPacket);
         };
 
-        if computed_len > packet.len() {
-            return TunnResult::Err(WireGuardError::InvalidPacket);
-        }
-
         self.timer_tick(TimerName::TimeLastDataPacketReceived);
-        self.rx_bytes += computed_len;
 
-        match src_ip_address {
-            IpAddr::V4(addr) => TunnResult::WriteToTunnelV4(&mut packet[..computed_len], addr),
-            IpAddr::V6(addr) => TunnResult::WriteToTunnelV6(&mut packet[..computed_len], addr),
+        match packet {
+            either::Either::Left(ipv4) => {
+                self.rx_bytes += ipv4.as_bytes().len();
+                TunnResult::WriteToTunnelV4(ipv4)
+            }
+            either::Either::Right(ipv6) => {
+                self.rx_bytes += ipv6.as_bytes().len();
+                TunnResult::WriteToTunnelV6(ipv6)
+            }
         }
     }
 
-    /// Get a packet from the queue, and try to encapsulate it
-    fn send_queued_packet<'a>(&mut self, dst: &'a mut [u8]) -> TunnResult<'a> {
-        if let Some(packet) = self.dequeue_packet() {
-            match self.encapsulate(&packet, dst) {
-                TunnResult::Err(_) => {
-                    // On error, return packet to the queue
-                    self.requeue_packet(packet);
-                }
-                r => return r,
-            }
-        }
-        TunnResult::Done
+    /// Get the first packet from [Self::packet_queue], and try to encapsulate it.
+    pub fn next_queued_packet(&mut self) -> Option<Packet<Wg>> {
+        self.dequeue_packet()
+            .and_then(|packet| self.handle_outgoing_packet(packet))
     }
 
     /// Push packet to the back of the queue
-    fn queue_packet(&mut self, packet: &[u8]) {
+    fn queue_packet(&mut self, packet: Packet) {
         if self.packet_queue.len() < MAX_QUEUE_DEPTH {
             // Drop if too many are already in queue
-            self.packet_queue.push_back(packet.to_vec());
+            self.packet_queue.push_back(packet);
         }
     }
 
-    /// Push packet to the front of the queue
-    fn requeue_packet(&mut self, packet: Vec<u8>) {
-        if self.packet_queue.len() < MAX_QUEUE_DEPTH {
-            // Drop if too many are already in queue
-            self.packet_queue.push_front(packet);
-        }
-    }
-
-    fn dequeue_packet(&mut self) -> Option<Vec<u8>> {
+    fn dequeue_packet(&mut self) -> Option<Packet> {
         self.packet_queue.pop_front()
     }
 
@@ -586,6 +408,7 @@ mod tests {
     use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT};
 
     use super::*;
+    use bytes::BytesMut;
     use rand_core::{OsRng, RngCore};
 
     fn create_two_tuns() -> (Tunn, Tunn) {
@@ -604,84 +427,83 @@ mod tests {
         (my_tun, their_tun)
     }
 
-    fn create_handshake_init(tun: &mut Tunn) -> Vec<u8> {
-        let mut dst = vec![0u8; 2048];
-        let handshake_init = tun.format_handshake_initiation(&mut dst, false);
-        assert!(matches!(handshake_init, TunnResult::WriteToNetwork(_)));
-        let handshake_init = if let TunnResult::WriteToNetwork(sent) = handshake_init {
-            sent
-        } else {
-            unreachable!();
-        };
-
-        handshake_init.into()
+    fn create_handshake_init(tun: &mut Tunn) -> Packet<WgHandshakeInit> {
+        tun.format_handshake_initiation(false)
+            .expect("expected handshake init")
     }
 
-    fn create_handshake_response(tun: &mut Tunn, handshake_init: &[u8]) -> Vec<u8> {
-        let mut dst = vec![0u8; 2048];
-        let handshake_resp = tun.decapsulate(None, handshake_init, &mut dst);
+    fn create_handshake_response(
+        tun: &mut Tunn,
+        handshake_init: Packet<WgHandshakeInit>,
+    ) -> Packet<WgHandshakeResp> {
+        let handshake_resp = tun.handle_incoming_packet(WgKind::HandshakeInit(handshake_init));
         assert!(matches!(handshake_resp, TunnResult::WriteToNetwork(_)));
 
-        let handshake_resp = if let TunnResult::WriteToNetwork(sent) = handshake_resp {
-            sent
-        } else {
-            unreachable!();
+        let TunnResult::WriteToNetwork(handshake_resp) = handshake_resp else {
+            unreachable!("expected WriteToNetwork");
         };
 
-        handshake_resp.into()
+        let packet_type = handshake_resp.packet_type;
+        let Ok(WgKind::HandshakeResp(handshake_resp)) = handshake_resp.into_kind() else {
+            unreachable!("expected WgHandshakeResp, got {packet_type:?}");
+        };
+
+        handshake_resp
     }
 
-    fn parse_handshake_resp(tun: &mut Tunn, handshake_resp: &[u8]) -> Vec<u8> {
-        let mut dst = vec![0u8; 2048];
-        let keepalive = tun.decapsulate(None, handshake_resp, &mut dst);
+    fn parse_handshake_resp(
+        tun: &mut Tunn,
+        handshake_resp: Packet<WgHandshakeResp>,
+    ) -> Packet<WgData> {
+        let keepalive = tun.handle_incoming_packet(WgKind::HandshakeResp(handshake_resp));
         assert!(matches!(keepalive, TunnResult::WriteToNetwork(_)));
 
-        let keepalive = if let TunnResult::WriteToNetwork(sent) = keepalive {
-            sent
-        } else {
-            unreachable!();
+        let TunnResult::WriteToNetwork(keepalive) = keepalive else {
+            unreachable!("expected WriteToNetwork")
         };
 
-        keepalive.into()
+        let packet_type = keepalive.packet_type;
+        let Ok(WgKind::Data(keepalive)) = keepalive.into_kind() else {
+            unreachable!("expected WgData, got {packet_type:?}");
+        };
+
+        keepalive
     }
 
-    fn parse_keepalive(tun: &mut Tunn, keepalive: &[u8]) {
-        let mut dst = vec![0u8; 2048];
-        let keepalive = tun.decapsulate(None, keepalive, &mut dst);
-        assert!(matches!(keepalive, TunnResult::Done));
+    fn parse_keepalive(tun: &mut Tunn, keepalive: Packet<WgData>) {
+        let result = tun.handle_incoming_packet(WgKind::Data(keepalive));
+        assert!(matches!(result, TunnResult::Done));
     }
 
     fn create_two_tuns_and_handshake() -> (Tunn, Tunn) {
         let (mut my_tun, mut their_tun) = create_two_tuns();
         let init = create_handshake_init(&mut my_tun);
-        let resp = create_handshake_response(&mut their_tun, &init);
-        let keepalive = parse_handshake_resp(&mut my_tun, &resp);
-        parse_keepalive(&mut their_tun, &keepalive);
+        let resp = create_handshake_response(&mut their_tun, init);
+        let keepalive = parse_handshake_resp(&mut my_tun, resp);
+        parse_keepalive(&mut their_tun, keepalive);
 
         (my_tun, their_tun)
     }
 
-    fn create_ipv4_udp_packet() -> Vec<u8> {
+    fn create_ipv4_udp_packet() -> Packet<Ipv4> {
         let header =
             etherparse::PacketBuilder::ipv4([192, 168, 1, 2], [192, 168, 1, 3], 5).udp(5678, 23);
         let payload = [0, 1, 2, 3];
         let mut packet = Vec::<u8>::with_capacity(header.size(payload.len()));
         header.write(&mut packet, &payload).unwrap();
-        packet
+        let packet = Packet::from_bytes(BytesMut::from(&packet[..]));
+
+        packet.try_into_ipvx().unwrap().unwrap_left()
     }
 
     #[cfg(feature = "mock-instant")]
     fn update_timer_results_in_handshake(tun: &mut Tunn) {
-        let mut dst = vec![0u8; 2048];
-        let result = tun.update_timers(&mut dst);
-        assert!(matches!(result, TunnResult::WriteToNetwork(_)));
-        let packet_data = if let TunnResult::WriteToNetwork(data) = result {
-            data
-        } else {
-            unreachable!();
-        };
-        let packet = Tunn::parse_incoming_packet(packet_data).unwrap();
-        assert!(matches!(packet, Packet::HandshakeInit(_)));
+        let packet = tun
+            .update_timers()
+            .expect("update_timers should succeed")
+            .unwrap();
+        let packet = packet.into_kind().unwrap();
+        assert!(matches!(packet, WgKind::HandshakeInit(..)));
     }
 
     #[test]
@@ -692,59 +514,50 @@ mod tests {
     #[test]
     fn handshake_init() {
         let (mut my_tun, _their_tun) = create_two_tuns();
-        let init = create_handshake_init(&mut my_tun);
-        let packet = Tunn::parse_incoming_packet(&init).unwrap();
-        assert!(matches!(packet, Packet::HandshakeInit(_)));
+        let _init = create_handshake_init(&mut my_tun);
     }
 
     #[test]
     fn handshake_init_and_response() {
         let (mut my_tun, mut their_tun) = create_two_tuns();
         let init = create_handshake_init(&mut my_tun);
-        let resp = create_handshake_response(&mut their_tun, &init);
-        let packet = Tunn::parse_incoming_packet(&resp).unwrap();
-        assert!(matches!(packet, Packet::HandshakeResponse(_)));
+        let _resp = create_handshake_response(&mut their_tun, init);
     }
 
     #[test]
     fn full_handshake() {
         let (mut my_tun, mut their_tun) = create_two_tuns();
         let init = create_handshake_init(&mut my_tun);
-        let resp = create_handshake_response(&mut their_tun, &init);
-        let keepalive = parse_handshake_resp(&mut my_tun, &resp);
-        let packet = Tunn::parse_incoming_packet(&keepalive).unwrap();
-        assert!(matches!(packet, Packet::PacketData(_)));
+        let resp = create_handshake_response(&mut their_tun, init);
+        let _keepalive = parse_handshake_resp(&mut my_tun, resp);
     }
 
     #[test]
     fn full_handshake_plus_timers() {
         let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
         // Time has not yet advanced so their is nothing to do
-        assert!(matches!(my_tun.update_timers(&mut []), TunnResult::Done));
-        assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
+        assert!(matches!(my_tun.update_timers(), Ok(None)));
+        assert!(matches!(their_tun.update_timers(), Ok(None)));
     }
 
     #[test]
     #[cfg(feature = "mock-instant")]
     fn new_handshake_after_two_mins() {
         let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
-        let mut my_dst = [0u8; 1024];
 
         // Advance time 1 second and "send" 1 packet so that we send a handshake
         // after the timeout
         mock_instant::MockClock::advance(Duration::from_secs(1));
-        assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
-        assert!(matches!(
-            my_tun.update_timers(&mut my_dst),
-            TunnResult::Done
-        ));
+        assert!(matches!(their_tun.update_timers(), Ok(None)));
+        assert!(matches!(my_tun.update_timers(), Ok(None)));
         let sent_packet_buf = create_ipv4_udp_packet();
-        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst);
-        assert!(matches!(data, TunnResult::WriteToNetwork(_)));
+        let _data = my_tun
+            .handle_outgoing_packet(sent_packet_buf.into_bytes())
+            .expect("expected encapsulated packet");
 
         //Advance to timeout
         mock_instant::MockClock::advance(REKEY_AFTER_TIME);
-        assert!(matches!(their_tun.update_timers(&mut []), TunnResult::Done));
+        assert!(matches!(their_tun.update_timers(), Ok(None)));
         update_timer_results_in_handshake(&mut my_tun);
     }
 
@@ -753,9 +566,7 @@ mod tests {
     fn handshake_no_resp_rekey_timeout() {
         let (mut my_tun, _their_tun) = create_two_tuns();
 
-        let init = create_handshake_init(&mut my_tun);
-        let packet = Tunn::parse_incoming_packet(&init).unwrap();
-        assert!(matches!(packet, Packet::HandshakeInit(_)));
+        let _init = create_handshake_init(&mut my_tun);
 
         mock_instant::MockClock::advance(REKEY_TIMEOUT);
         update_timer_results_in_handshake(&mut my_tun)
@@ -764,26 +575,22 @@ mod tests {
     #[test]
     fn one_ip_packet() {
         let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
-        let mut my_dst = [0u8; 1024];
-        let mut their_dst = [0u8; 1024];
 
         let sent_packet_buf = create_ipv4_udp_packet();
 
-        let data = my_tun.encapsulate(&sent_packet_buf, &mut my_dst);
-        assert!(matches!(data, TunnResult::WriteToNetwork(_)));
-        let data = if let TunnResult::WriteToNetwork(sent) = data {
-            sent
-        } else {
-            unreachable!();
-        };
+        let data = my_tun
+            .handle_outgoing_packet(sent_packet_buf.clone().into_bytes())
+            .unwrap();
 
-        let data = their_tun.decapsulate(None, data, &mut their_dst);
-        assert!(matches!(data, TunnResult::WriteToTunnelV4(..)));
-        let recv_packet_buf = if let TunnResult::WriteToTunnelV4(recv, _addr) = data {
+        let data = data.into_kind().unwrap();
+        assert!(matches!(data, WgKind::Data(..)));
+
+        let data = their_tun.handle_incoming_packet(data);
+        let recv_packet_buf = if let TunnResult::WriteToTunnelV4(recv) = data {
             recv
         } else {
-            unreachable!();
+            unreachable!("expected WritetoTunnelV4");
         };
-        assert_eq!(sent_packet_buf, recv_packet_buf);
+        assert_eq!(sent_packet_buf.as_bytes(), recv_packet_buf.as_bytes());
     }
 }

@@ -10,7 +10,6 @@ pub mod drop_privileges;
 mod integration_tests;
 pub mod peer;
 
-use bytes::BytesMut;
 use std::collections::HashMap;
 use std::io::{self};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -25,7 +24,7 @@ use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::{Tunn, TunnResult};
-use crate::packet::PacketBufPool;
+use crate::packet::{PacketBufPool, WgKind};
 use crate::task::Task;
 use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
 use crate::tun::{IpRecv, IpSend};
@@ -560,8 +559,6 @@ impl<T: DeviceTransports> Device<T> {
         )?;
         */
 
-        use crate::packet::Packet;
-
         loop {
             tokio::time::sleep(Duration::from_millis(250)).await;
 
@@ -574,28 +571,27 @@ impl<T: DeviceTransports> Device<T> {
 
             // Go over each peer and invoke the timer function
             for peer in peer_map.values() {
-                let mut dst_buf = Packet::from_bytes(BytesMut::zeroed(4096));
-
                 let mut p = peer.lock().await;
                 let endpoint_addr = match p.endpoint().addr {
                     Some(addr) => addr,
                     None => continue,
                 };
 
-                match p.update_timers(&mut dst_buf[..]) {
-                    TunnResult::Done => {}
-                    TunnResult::Err(WireGuardError::ConnectionExpired) => {}
-                    TunnResult::Err(e) => log::error!("Timer error = {e:?}: {e:?}"),
-                    TunnResult::WriteToNetwork(packet) => {
+                match p.update_timers() {
+                    Ok(Some(packet)) => {
                         drop(p);
-                        let len = packet.len();
-                        dst_buf.truncate(len);
                         match endpoint_addr {
-                            SocketAddr::V4(_) => udp4.send_to(dst_buf, endpoint_addr).await.ok(),
-                            SocketAddr::V6(_) => udp6.send_to(dst_buf, endpoint_addr).await.ok(),
+                            SocketAddr::V4(_) => {
+                                udp4.send_to(packet.into_bytes(), endpoint_addr).await.ok()
+                            }
+                            SocketAddr::V6(_) => {
+                                udp6.send_to(packet.into_bytes(), endpoint_addr).await.ok()
+                            }
                         };
                     }
-                    _ => unreachable!("unexpected result from update_timers"),
+                    Ok(None) => {}
+                    Err(WireGuardError::ConnectionExpired) => {}
+                    Err(e) => log::error!("Timer error = {e:?}: {e:?}"),
                 };
             }
         }
@@ -621,22 +617,17 @@ impl<T: DeviceTransports> Device<T> {
         };
 
         while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
-            let mut dst_buf = packet_pool.get();
-
-            let parsed_packet =
-                match rate_limiter.verify_packet(Some(addr.ip()), &src_buf, &mut dst_buf[..]) {
-                    Ok(packet) => packet,
-                    Err(TunnResult::WriteToNetwork(cookie)) => {
-                        let len = cookie.len();
-                        dst_buf.truncate(len);
-                        if let Err(_err) = udp_tx.send_to(dst_buf, addr).await {
-                            log::trace!("udp.send_to failed");
-                            break;
-                        }
-                        continue;
+            let parsed_packet = match rate_limiter.verify_packet(Some(addr.ip()), src_buf) {
+                Ok(packet) => packet,
+                Err(TunnResult::WriteToNetwork(cookie)) => {
+                    if let Err(_err) = udp_tx.send_to(cookie.into_bytes(), addr).await {
+                        log::trace!("udp.send_to failed");
+                        break;
                     }
-                    Err(_) => continue,
-                };
+                    continue;
+                }
+                Err(_) => continue,
+            };
 
             let Some(device) = device.upgrade() else {
                 return Ok(());
@@ -644,77 +635,46 @@ impl<T: DeviceTransports> Device<T> {
             let device_guard = &device.read().await;
             let peers = &device_guard.peers;
             let peers_by_idx = &device_guard.peers_by_idx;
-            use crate::noise::Packet;
             let peer = match &parsed_packet {
-                Packet::HandshakeInit(p) => parse_handshake_anon(&private_key, &public_key, p)
+                WgKind::HandshakeInit(p) => parse_handshake_anon(&private_key, &public_key, p)
                     .ok()
                     .and_then(|hh| peers.get(&x25519::PublicKey::from(hh.peer_static_public))),
-                Packet::HandshakeResponse(p) => peers_by_idx.get(&(p.receiver_idx >> 8)),
-                Packet::PacketCookieReply(p) => peers_by_idx.get(&(p.receiver_idx >> 8)),
-                Packet::PacketData(p) => peers_by_idx.get(&(p.receiver_idx >> 8)),
+                WgKind::HandshakeResp(p) => peers_by_idx.get(&(p.receiver_idx.get() >> 8)),
+                WgKind::CookieReply(p) => peers_by_idx.get(&(p.receiver_idx.get() >> 8)),
+                WgKind::Data(p) => peers_by_idx.get(&(p.header.receiver_idx.get() >> 8)),
             };
             let Some(peer) = peer else {
                 continue;
             };
             let mut peer = peer.lock().await;
-            match peer
-                .tunnel
-                .handle_verified_packet(parsed_packet, &mut dst_buf[..])
-            {
+
+            match peer.tunnel.handle_incoming_packet(parsed_packet) {
                 TunnResult::Done => (),
                 TunnResult::Err(_) => continue,
                 TunnResult::WriteToNetwork(packet) => {
-                    let len = packet.len();
-                    dst_buf.truncate(len);
-                    if let Err(_err) = udp_tx.send_to(dst_buf, addr).await {
+                    if let Err(_err) = udp_tx.send_to(packet.into_bytes(), addr).await {
                         log::trace!("udp.send_to failed");
                         break;
                     }
 
                     // Flush pending queue
-                    loop {
-                        let mut dst_buf = packet_pool.get();
-                        match peer.tunnel.decapsulate(None, &[], &mut dst_buf[..]) {
-                            TunnResult::WriteToNetwork(packet) => {
-                                let len = packet.len();
-                                dst_buf.truncate(len);
-                                if let Err(_err) = udp_tx.send_to(dst_buf, addr).await {
-                                    log::trace!("udp.send_to failed");
-                                    break;
-                                }
-                            }
-                            TunnResult::Done => break,
-                            // TODO: why do we ignore this error?
-                            TunnResult::Err(_) => continue,
-
-                            // TODO: fix the types so we can't end up here.
-                            _ => panic!("unexpected TunnResult"),
+                    while let Some(packet) = peer.tunnel.next_queued_packet() {
+                        if let Err(_err) = udp_tx.send_to(packet.into_bytes(), addr).await {
+                            log::trace!("udp.send_to failed");
+                            break;
                         }
                     }
                 }
-                TunnResult::WriteToTunnelV4(packet, addr) => {
-                    let len = packet.len();
-                    dst_buf.truncate(len); // hacky but works
-                    let Ok(dst_buf) = dst_buf.try_into_ip() else {
-                        log::trace!("Invalid packet");
-                        continue;
-                    };
-                    if peer.is_allowed_ip(addr)
-                        && let Err(_err) = tun_tx.send(dst_buf).await
-                    {
-                        log::trace!("buffered_tun_send.send failed");
-                        break;
-                    }
+                TunnResult::WriteToTunnelV4(packet) => {
+                    if peer.is_allowed_ip(packet.header.destination())
+                        && let Err(_err) = tun_tx.send(packet.into()).await {
+                            log::trace!("buffered_tun_send.send failed");
+                            break;
+                        }
                 }
-                TunnResult::WriteToTunnelV6(packet, addr) => {
-                    let len = packet.len();
-                    dst_buf.truncate(len); // hacky but works
-                    let Ok(dst_buf) = dst_buf.try_into_ip() else {
-                        log::trace!("Invalid packet");
-                        continue;
-                    };
-                    if peer.is_allowed_ip(addr)
-                        && let Err(_err) = tun_tx.send(dst_buf).await
+                TunnResult::WriteToTunnelV6(packet) => {
+                    if peer.is_allowed_ip(packet.header.destination())
+                        && let Err(_err) = tun_tx.send(packet.into()).await
                     {
                         log::trace!("buffered_tun_send.send failed");
                         break;
@@ -748,43 +708,42 @@ impl<T: DeviceTransports> Device<T> {
                 let Some(dst_addr) = packet.destination() else {
                     continue;
                 };
+
+                let packet = packet.into_bytes();
+
                 let Some(device) = device.upgrade() else {
                     return;
                 };
-                let peers = &device.read().await.peers_by_ip;
-                let mut peer = match peers.find(dst_addr) {
-                    Some(peer) => peer.lock().await,
-                    // Drop packet if no peer has allowed IPs for destination
-                    None => continue,
+
+                let peer = {
+                    let device = device.read().await;
+                    let Some(peer) = device.peers_by_ip.find(dst_addr).cloned() else {
+                        // Drop packet if no peer has allowed IPs for destination
+                        continue;
+                    };
+                    peer
                 };
 
-                let mut dst_buf = packet_pool.get();
-                match peer
-                    .tunnel
-                    .encapsulate(&packet.into_bytes(), &mut dst_buf[..])
-                {
-                    TunnResult::Done => {}
-                    TunnResult::Err(e) => {
-                        log::error!("Encapsulate error={e:?}: {e:?}");
-                    }
-                    TunnResult::WriteToNetwork(packet) => {
-                        let len = packet.len();
-                        dst_buf.truncate(len);
-                        let endpoint_addr = peer.endpoint().addr;
-                        if let Some(SocketAddr::V4(addr)) = endpoint_addr {
-                            if udp4.send_to(dst_buf, addr.into()).await.is_err() {
-                                break;
-                            }
-                        } else if let Some(SocketAddr::V6(addr)) = endpoint_addr {
-                            if udp6.send_to(dst_buf, addr.into()).await.is_err() {
-                                break;
-                            }
-                        } else {
-                            log::error!("No endpoint");
-                        }
-                    }
-                    _ => panic!("Unexpected result from encapsulate"),
+                let mut peer = peer.lock().await;
+                let Some(peer_addr) = peer.endpoint().addr else {
+                    log::error!("No endpoint");
+                    continue;
                 };
+
+                let Some(packet) = peer.tunnel.handle_outgoing_packet(packet) else {
+                    continue;
+                };
+
+                drop(peer); // release lock
+
+                let result = match peer_addr {
+                    SocketAddr::V4(..) => udp4.send_to(packet.into(), peer_addr).await,
+                    SocketAddr::V6(..) => udp6.send_to(packet.into(), peer_addr).await,
+                };
+
+                if result.is_err() {
+                    break;
+                }
             }
         }
     }
