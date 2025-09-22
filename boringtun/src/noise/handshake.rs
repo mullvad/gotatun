@@ -481,7 +481,7 @@ impl Handshake {
         self.params.set_static_private(private_key, public_key)
     }
 
-    pub(super) fn receive_handshake_initialization<'a>(
+    pub(super) fn receive_handshake_initialization(
         &mut self,
         packet: crate::packet::Packet<WgHandshakeInit>,
     ) -> Result<(crate::packet::Packet<WgHandshakeResp>, Session), WireGuardError> {
@@ -686,7 +686,7 @@ impl Handshake {
     }
 
     // Compute and append mac1 and mac2 to a handshake message
-    fn init_mac1_and_mac2<'a>(
+    fn init_mac1_and_mac2(
         &mut self,
         packet: &mut WgHandshakeResp,
         local_index: u32,
@@ -713,7 +713,7 @@ impl Handshake {
     }
 
     // TODO: same as init_mac1_and_mac2
-    fn init_mac1_and_mac2_to_init<'a>(
+    fn init_mac1_and_mac2_to_init(
         &mut self,
         packet: &mut WgHandshakeInit,
         local_index: u32,
@@ -739,7 +739,7 @@ impl Handshake {
         Ok(())
     }
 
-    pub(super) fn format_handshake_initiation<'a>(
+    pub(super) fn format_handshake_initiation(
         &mut self,
     ) -> Result<crate::packet::Packet<WgHandshakeInit>, WireGuardError> {
         /*let (message_type, rest) = packet.split_at_mut(4);
@@ -791,7 +791,7 @@ impl Handshake {
             &hash,
         );
         // initiator.hash = HASH(initiator.hash || msg.encrypted_static)
-        hash = b2s_hash(&hash, &mut handshake.encrypted_static);
+        hash = b2s_hash(&hash, &handshake.encrypted_static);
         // temp = HMAC(initiator.chaining_key, DH(initiator.static_private, responder.static_public))
         let temp = b2s_hmac(&chaining_key, self.params.static_shared.as_bytes());
         // initiator.chaining_key = HMAC(temp, 0x1)
@@ -859,9 +859,9 @@ impl Handshake {
         // msg.receiver_index = little_endian(initiator.sender_index)
         // msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
         // responder.hash = HASH(responder.hash || msg.unencrypted_ephemeral)
-        hash = b2s_hash(&hash, &mut resp.unencrypted_ephemeral);
+        hash = b2s_hash(&hash, &resp.unencrypted_ephemeral);
         // temp = HMAC(responder.chaining_key, msg.unencrypted_ephemeral)
-        let temp = b2s_hmac(&chaining_key, &mut resp.unencrypted_ephemeral);
+        let temp = b2s_hmac(&chaining_key, &resp.unencrypted_ephemeral);
         // responder.chaining_key = HMAC(temp, 0x1)
         chaining_key = b2s_hmac(&temp, &[0x01]);
         // temp = HMAC(responder.chaining_key, DH(responder.ephemeral_private, initiator.ephemeral_public))

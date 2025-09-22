@@ -173,7 +173,7 @@ impl Tunn {
         }
     }
 
-    fn encapsulate_with_session<'a>(
+    fn encapsulate_with_session(
         &mut self,
         packet: Packet,
         current: usize,
@@ -261,7 +261,7 @@ impl Tunn {
         Ok(TunnResult::WriteToNetwork(packet.into()))
     }
 
-    fn handle_handshake_response<'a>(
+    fn handle_handshake_response(
         &mut self,
         p: Packet<WgHandshakeResp>,
     ) -> Result<TunnResult, WireGuardError> {
@@ -326,7 +326,7 @@ impl Tunn {
         Ok(self.validate_decapsulated_packet(decapsulated_packet))
     }
 
-    pub fn decapsulate_with_session<'a>(
+    pub fn decapsulate_with_session(
         &mut self,
         packet: Packet<WgData>,
     ) -> Result<Packet, WireGuardError> {

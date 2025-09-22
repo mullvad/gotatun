@@ -115,7 +115,7 @@ impl RateLimiter {
         self.count.fetch_add(1, Ordering::SeqCst) >= self.limit
     }
 
-    pub(crate) fn format_cookie_reply<'a>(
+    pub(crate) fn format_cookie_reply(
         &self,
         idx: u32,
         cookie: Cookie,
@@ -144,7 +144,7 @@ impl RateLimiter {
     }
 
     /// Verify the MAC fields on the datagram, and apply rate limiting if needed
-    pub fn verify_packet<'a, 'b>(
+    pub fn verify_packet(
         &self,
         src_addr: Option<IpAddr>,
         packet: Packet,

@@ -234,7 +234,7 @@ impl Session {
     /// dst - pre-allocated space to hold the encapsulated IP packet, to send to the interface
     ///       dst will always take less space than src
     /// return the size of the encapsulated packet on success
-    pub(super) fn receive_packet_data<'a>(
+    pub(super) fn receive_packet_data(
         &self,
         mut packet: Packet<WgData>,
     ) -> Result<Packet, WireGuardError> {

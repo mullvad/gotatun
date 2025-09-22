@@ -106,6 +106,12 @@ impl WgHandshakeInit {
     }
 }
 
+impl Default for WgHandshakeInit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 pub struct WgHandshakeResp {
@@ -151,6 +157,12 @@ impl WgCookieReply {
             packet_type: WgPacketType::CookieReply,
             ..Self::new_zeroed()
         }
+    }
+}
+
+impl Default for WgCookieReply {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
