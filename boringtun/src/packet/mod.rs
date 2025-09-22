@@ -103,6 +103,7 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
         &self.inner.buf
     }
 
+    /// Create a `Packet<T>` from a `&T`.
     pub fn copy_from(payload: &T) -> Self {
         Self {
             inner: PacketInner {
@@ -111,6 +112,13 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
             },
             _kind: PhantomData::<T>,
         }
+    }
+
+    /// Overwrite the contents of the backing buffer with new value of an new type.
+    pub fn overwrite_with<Y: CheckedPayload>(mut self, payload: &Y) -> Packet<Y> {
+        self.inner.buf.clear();
+        self.inner.buf.extend_from_slice(payload.as_bytes());
+        self.cast()
     }
 }
 
@@ -167,12 +175,6 @@ impl Packet<[u8]> {
             },
             _kind: PhantomData::<[u8]>,
         }
-    }
-
-    pub fn overwrite_with<T: CheckedPayload>(mut self, payload: &T) -> Packet<T> {
-        self.buf_mut().clear();
-        self.buf_mut().extend_from_slice(payload.as_bytes());
-        self.cast()
     }
 
     pub fn from_bytes(bytes: BytesMut) -> Self {
