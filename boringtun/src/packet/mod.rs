@@ -248,7 +248,7 @@ impl Packet<Ip> {
                 let payload_len = usize::from(ipv6.header.payload_length.get());
                 if payload_len > ipv6.payload.len() {
                     bail!(
-                        "IPv6 `payload_len` exceeded packet length: {payload_len} > {}",
+                        "IPv6 `payload_len` exceeded actual payload length: {payload_len} > {}",
                         ipv6.payload.len()
                     );
                 }
