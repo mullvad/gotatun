@@ -786,7 +786,6 @@ impl Handshake {
 
         self.init_mac1_and_mac2(&mut handshake, local_index)?;
 
-        // TODO: don't allocate
         Ok(Packet::copy_from(&handshake))
     }
 
