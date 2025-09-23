@@ -6,7 +6,6 @@ pub mod command;
 use super::peer::AllowedIP;
 use super::{Connection, Device, Reconfigure};
 use crate::device::DeviceTransports;
-use crate::device::Hooks;
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
 use eyre::{Context, bail, eyre};
