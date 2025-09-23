@@ -518,6 +518,48 @@ mod tests {
     }
 
     #[test]
+    // Verify that a valid hanshake is accepted by two linked peers when rate limiting is not
+    // applied.
+    fn verify_handshake() {
+        let (mut my_tun, mut their_tun) = create_two_tuns();
+        let init = create_handshake_init(&mut my_tun);
+        let resp = create_handshake_response(&mut their_tun, init.clone());
+
+        their_tun
+            .rate_limiter
+            .verify_handshake(None, init)
+            .expect("Handshake init to be valid");
+
+        my_tun
+            .rate_limiter
+            .verify_handshake(None, resp)
+            .expect("Handshake response to be valid");
+    }
+
+    #[test]
+    // Verify that an invalid hanshake is rejected by both linked peers.
+    fn reject_handshake() {
+        let (mut my_tun, mut their_tun) = create_two_tuns();
+        let mut init = create_handshake_init(&mut my_tun);
+        let mut resp = create_handshake_response(&mut their_tun, init.clone());
+
+        // Mess with the mac of both the handshake init & handshake response packets.
+        std::mem::swap(&mut init.mac1, &mut resp.mac1);
+
+        their_tun
+            .rate_limiter
+            .verify_handshake(None, init.clone())
+            .map(|packet| packet.mac1)
+            .expect_err("Handshake init to be invalid");
+
+        my_tun
+            .rate_limiter
+            .verify_handshake(None, resp)
+            .map(|packet| packet.mac1)
+            .expect_err("Handshake response to be invalid");
+    }
+
+    #[test]
     fn handshake_init_and_response() {
         let (mut my_tun, mut their_tun) = create_two_tuns();
         let init = create_handshake_init(&mut my_tun);
