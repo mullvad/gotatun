@@ -669,7 +669,7 @@ where
                         break; // channel closed
                     }
                 },
-                complete => break, // No more packets to receive
+                default => break, // Packet queue is empty
             }
 
             let mut send_many_bufs = US::SendManyBuf::default();
