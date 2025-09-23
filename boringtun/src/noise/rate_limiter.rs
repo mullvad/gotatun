@@ -167,7 +167,7 @@ impl RateLimiter {
     }
 
     /// Verify the MAC fields on the handshake, and apply rate limiting if needed.
-    fn verify_handshake<P: WgHandshakeBase>(
+    pub(crate) fn verify_handshake<P: WgHandshakeBase>(
         &self,
         src_addr: Option<IpAddr>,
         handshake: Packet<P>,
