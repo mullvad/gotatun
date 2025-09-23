@@ -145,8 +145,6 @@ pub struct Device<T: DeviceTransports> {
 
     /// The task that responds to API requests.
     api: Option<Task>,
-    // FIXME
-    hooks: Arc<dyn Hooks>,
 }
 
 pub(crate) struct Connection<T: DeviceTransports> {
@@ -461,7 +459,6 @@ impl<T: DeviceTransports> Device<T> {
             rate_limiter: None,
             port: 0,
             connection: None,
-            hooks: Arc::new(hooks),
         };
 
         let device = Arc::new(RwLock::new(device));
@@ -631,16 +628,6 @@ impl<T: DeviceTransports> Device<T> {
             let rate_limiter = device.rate_limiter.clone().unwrap();
             (private_key, public_key, rate_limiter)
         };
-        let hooks = {
-            let Some(device) = device.upgrade() else {
-                return Ok(());
-            };
-
-            let device = device.read().await;
-            device.hooks.clone()
-        };
-
-        let hooks = &*hooks;
 
         while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
             let parsed_packet = match rate_limiter.verify_packet(Some(addr.ip()), src_buf) {
@@ -653,11 +640,6 @@ impl<T: DeviceTransports> Device<T> {
                     continue;
                 }
                 Err(_) => continue,
-            };
-
-            // TODO: what about keepalives?
-            if let WgKind::Data(_) = &parsed_packet {
-                hooks.before_data_decapsulate();
             };
 
             let Some(device) = device.upgrade() else {
@@ -687,7 +669,14 @@ impl<T: DeviceTransports> Device<T> {
             let Some(peer) = peer else { continue };
             let mut peer = peer.lock().await;
 
-            match peer.tunnel.handle_incoming_packet(parsed_packet, hooks) {
+            let Peer { tunnel, hooks, .. } = &mut *peer;
+
+            // TODO: what about keepalives?
+            if let WgKind::Data(_) = &parsed_packet {
+                hooks.before_data_decapsulate();
+            };
+
+            match tunnel.handle_incoming_packet(parsed_packet, hooks.as_ref()) {
                 TunnResult::Done => (),
                 TunnResult::Err(_) => continue,
                 TunnResult::WriteToNetwork(packet) => {
@@ -697,7 +686,7 @@ impl<T: DeviceTransports> Device<T> {
                     }
 
                     // Flush pending queue
-                    while let Some(packet) = peer.tunnel.next_queued_packet() {
+                    while let Some(packet) = tunnel.next_queued_packet() {
                         if let Err(_err) = udp_tx.send_to(packet.into_bytes(), addr).await {
                             log::trace!("udp.send_to failed");
                             break;
@@ -786,15 +775,18 @@ impl<T: DeviceTransports> Device<T> {
                     continue;
                 };
 
-                let Some(packet) = peer.tunnel.handle_outgoing_packet(packet) else {
+                let Peer { tunnel, hooks, .. } = &mut *peer;
+                let packet = hooks.before_data_encapsulate(packet);
+
+                let Some(packet) = tunnel.handle_outgoing_packet(packet) else {
+                    continue;
+                };
+
+                let Some(packet) = hooks.after_data_encapsulate(packet) else {
                     continue;
                 };
 
                 drop(peer); // release lock
-
-                /*let Some(packet) = hooks.map_outgoing_encapsulated(packet, peer_addr) else {
-                    continue;
-                };*/
 
                 let result = match peer_addr {
                     SocketAddr::V4(..) => udp4.send_to(packet.into(), peer_addr).await,
