@@ -3,7 +3,7 @@
 
 use crate::{
     noise::errors::WireGuardError,
-    packet::{Packet, WgData, WgDataHeader, WgKind, WgPacketType},
+    packet::{Packet, WgData, WgDataHeader, WgKind},
 };
 use bytes::{Buf, BytesMut};
 use parking_lot::Mutex;
@@ -205,10 +205,12 @@ impl Session {
         let mut buf = Packet::from_bytes(BytesMut::zeroed(len));
 
         let data = WgData::mut_from_bytes(buf.buf_mut()).unwrap();
-
-        data.header.packet_type = WgPacketType::Data;
-        data.header.receiver_idx.set(self.sending_index);
-        data.header.counter.set(sending_key_counter);
+        data.header = {
+            let mut header = WgDataHeader::new();
+            header.receiver_idx.set(self.sending_index);
+            header.counter.set(sending_key_counter);
+            header
+        };
 
         // TODO: spec requires padding to 16 bytes, but actually works fine without it
         let mut nonce = [0u8; 12];

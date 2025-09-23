@@ -57,8 +57,7 @@ impl WgPacketType {
 #[repr(C, packed)]
 pub struct WgDataHeader {
     // INVARIANT: Must be WgPacketType::Data
-    // TODO: make private
-    pub packet_type: WgPacketType,
+    packet_type: WgPacketType,
 
     pub receiver_idx: little_endian::U32,
     pub counter: little_endian::U64,
@@ -69,6 +68,19 @@ impl WgDataHeader {
     pub const LEN: usize = size_must_be::<Self>(16);
     /// Data packet overhead: header and tag (16 bytes)
     pub const OVERHEAD: usize = Self::LEN + 16;
+
+    pub fn new() -> Self {
+        Self {
+            packet_type: WgPacketType::Data,
+            ..WgDataHeader::new_zeroed()
+        }
+    }
+}
+
+impl Default for WgDataHeader {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
