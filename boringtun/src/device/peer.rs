@@ -75,6 +75,10 @@ impl Peer {
         self.endpoint.read()
     }
 
+    pub fn set_endpoint(&self, addr: SocketAddr) {
+        self.endpoint.write().addr = Some(addr);
+    }
+
     pub fn is_allowed_ip<I: Into<IpAddr>>(&self, addr: I) -> bool {
         self.allowed_ips.find(addr.into()).is_some()
     }

@@ -632,13 +632,23 @@ impl<T: DeviceTransports> Device<T> {
             let Some(device) = device.upgrade() else {
                 return Ok(());
             };
-            let device_guard = &device.read().await;
+
+            let device_guard = device.read().await;
             let peers = &device_guard.peers;
             let peers_by_idx = &device_guard.peers_by_idx;
             let peer = match &parsed_packet {
-                WgKind::HandshakeInit(p) => parse_handshake_anon(&private_key, &public_key, p)
-                    .ok()
-                    .and_then(|hh| peers.get(&x25519::PublicKey::from(hh.peer_static_public))),
+                WgKind::HandshakeInit(p) => {
+                    let peer = parse_handshake_anon(&private_key, &public_key, p)
+                        .ok()
+                        .and_then(|hh| peers.get(&x25519::PublicKey::from(hh.peer_static_public)));
+
+                    if let Some(peer) = peer {
+                        // Remember peer endpoint
+                        peer.lock().await.set_endpoint(addr);
+                    }
+
+                    peer
+                }
                 WgKind::HandshakeResp(p) => peers_by_idx.get(&(p.receiver_idx.get() >> 8)),
                 WgKind::CookieReply(p) => peers_by_idx.get(&(p.receiver_idx.get() >> 8)),
                 WgKind::Data(p) => peers_by_idx.get(&(p.header.receiver_idx.get() >> 8)),
