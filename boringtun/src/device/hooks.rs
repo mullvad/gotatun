@@ -1,24 +1,18 @@
-use std::net::SocketAddr;
-
 use crate::packet::{Packet, Wg};
 
 pub trait Hooks: Send + Sync + 'static {
     /// Called before a data packet is encapsulated
     #[inline(always)]
     fn before_data_encapsulate(&self, packet: Packet) -> Packet {
-        packet.into() // noop
+        packet
     }
 
     /// Called after a data packet is encapsulated
     ///
     /// Return `None` to drop/ignore the packet
     #[inline(always)]
-    fn after_data_encapsulate(
-        &self,
-        packet: Packet<Wg>,
-        destination: SocketAddr,
-    ) -> Option<(Packet<Wg>, SocketAddr)> {
-        Some((packet, destination)) // noop
+    fn after_data_encapsulate(&self, packet: Packet<Wg>) -> Option<Packet<Wg>> {
+        Some(packet) // noop
     }
 
     /// Called before a data packet is decapsulated
@@ -35,4 +29,5 @@ pub trait Hooks: Send + Sync + 'static {
     }
 }
 
+// TODO: `NoopHooks`
 impl Hooks for () {}
