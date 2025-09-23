@@ -364,6 +364,7 @@ impl<T: DeviceTransports> Device<T> {
         new_allowed_ips: &[AllowedIP],
         keepalive: Option<u16>,
         preshared_key: Option<[u8; 32]>,
+        hooks: Option<Box<dyn Hooks>>,
     ) {
         if remove {
             // Completely remove a peer
@@ -415,7 +416,10 @@ impl<T: DeviceTransports> Device<T> {
             new_allowed_ips.to_vec()
         };
 
-        let peer = Peer::new(tunn, index, endpoint, &allowed_ips, preshared_key);
+        let mut peer = Peer::new(tunn, index, endpoint, &allowed_ips, preshared_key);
+        if let Some(hooks) = hooks {
+            peer.hooks = hooks;
+        }
         let peer = Arc::new(Mutex::new(peer));
 
         self.peers_by_idx.insert(index, Arc::clone(&peer));
@@ -663,7 +667,7 @@ impl<T: DeviceTransports> Device<T> {
                 hooks.before_data_decapsulate();
             };
 
-            match tunnel.handle_incoming_packet(parsed_packet, hooks.as_ref()) {
+            match tunnel.handle_incoming_packet(parsed_packet, hooks.as_mut()) {
                 TunnResult::Done => (),
                 TunnResult::Err(_) => continue,
                 TunnResult::WriteToNetwork(packet) => {

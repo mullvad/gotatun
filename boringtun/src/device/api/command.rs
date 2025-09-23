@@ -10,7 +10,10 @@ use std::{
 use eyre::{bail, ensure, eyre};
 use typed_builder::TypedBuilder;
 
-use crate::{device::peer::AllowedIP, serialization::KeyBytes};
+use crate::{
+    device::{hooks::Hooks, peer::AllowedIP},
+    serialization::KeyBytes,
+};
 
 #[derive(Debug)]
 pub enum Request {
@@ -104,7 +107,7 @@ pub struct Set {
     pub peers: Vec<SetPeer>,
 }
 
-#[derive(TypedBuilder, Debug)]
+#[derive(TypedBuilder)]
 #[non_exhaustive]
 pub struct SetPeer {
     pub peer: Peer,
@@ -120,6 +123,21 @@ pub struct SetPeer {
     /// This key/value combo indicates that the allowed IPs (perhaps an empty list) should replace any existing ones of the previously added peer entry, rather than append to the existing allowed IPs list.
     #[builder(setter(strip_bool))]
     pub replace_allowed_ips: bool,
+
+    #[builder(default, setter(strip_option, into))]
+    pub hooks: Option<Box<dyn Hooks>>,
+}
+
+impl fmt::Debug for SetPeer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SetPeer")
+            .field("peer", &self.peer)
+            .field("remove", &self.remove)
+            .field("update_only", &self.update_only)
+            .field("replace_allowed_ips", &self.replace_allowed_ips)
+            .field("hooks", &self.hooks.is_some())
+            .finish()
+    }
 }
 
 #[derive(Debug)]
@@ -211,6 +229,7 @@ impl SetPeer {
             remove: false,
             update_only: false,
             replace_allowed_ips: false,
+            hooks: None,
         }
     }
 
@@ -468,6 +487,7 @@ impl SetPeer {
             remove,
             update_only,
             replace_allowed_ips,
+            hooks: _,
         } = &mut set_peer;
 
         loop {

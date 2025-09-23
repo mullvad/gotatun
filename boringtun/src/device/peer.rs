@@ -5,7 +5,6 @@ use parking_lot::RwLock;
 
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
-use std::sync::Arc;
 
 use crate::device::AllowedIps;
 use crate::device::hooks::Hooks;
@@ -27,7 +26,7 @@ pub struct Peer {
     allowed_ips: AllowedIps<()>,
     preshared_key: Option<[u8; 32]>,
     // FIXME
-    pub hooks: Arc<dyn Hooks>,
+    pub hooks: Box<dyn Hooks>,
 }
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
@@ -68,7 +67,7 @@ impl Peer {
             endpoint: RwLock::new(Endpoint { addr: endpoint }),
             allowed_ips: allowed_ips.iter().map(|ip| (ip, ())).collect(),
             preshared_key,
-            hooks: Arc::new(()),
+            hooks: Box::new(()),
         }
     }
 
@@ -86,7 +85,7 @@ impl Peer {
             endpoint: RwLock::new(Endpoint { addr: endpoint }),
             allowed_ips: allowed_ips.iter().map(|ip| (ip, ())).collect(),
             preshared_key,
-            hooks: Arc::new(hooks),
+            hooks: Box::new(hooks),
         }
     }
 

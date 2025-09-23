@@ -164,7 +164,7 @@ impl Tunn {
     pub(crate) fn handle_incoming_packet(
         &mut self,
         packet: WgKind,
-        hooks: &dyn Hooks,
+        hooks: &mut dyn Hooks,
     ) -> TunnResult {
         match packet {
             WgKind::HandshakeInit(p) => self.handle_handshake_init(p),
@@ -258,7 +258,7 @@ impl Tunn {
     fn handle_data(
         &mut self,
         packet: Packet<WgData>,
-        hooks: &dyn Hooks,
+        hooks: &mut dyn Hooks,
     ) -> Result<TunnResult, WireGuardError> {
         let decapsulated_packet = self.decapsulate_with_session(packet)?;
 
@@ -453,7 +453,8 @@ mod tests {
         tun: &mut Tunn,
         handshake_init: Packet<WgHandshakeInit>,
     ) -> Packet<WgHandshakeResp> {
-        let handshake_resp = tun.handle_incoming_packet(WgKind::HandshakeInit(handshake_init), &());
+        let handshake_resp =
+            tun.handle_incoming_packet(WgKind::HandshakeInit(handshake_init), &mut ());
         assert!(matches!(handshake_resp, TunnResult::WriteToNetwork(_)));
 
         let TunnResult::WriteToNetwork(handshake_resp) = handshake_resp else {
@@ -472,7 +473,7 @@ mod tests {
         tun: &mut Tunn,
         handshake_resp: Packet<WgHandshakeResp>,
     ) -> Packet<WgData> {
-        let keepalive = tun.handle_incoming_packet(WgKind::HandshakeResp(handshake_resp), &());
+        let keepalive = tun.handle_incoming_packet(WgKind::HandshakeResp(handshake_resp), &mut ());
         assert!(matches!(keepalive, TunnResult::WriteToNetwork(_)));
 
         let TunnResult::WriteToNetwork(keepalive) = keepalive else {
@@ -488,7 +489,7 @@ mod tests {
     }
 
     fn parse_keepalive(tun: &mut Tunn, keepalive: Packet<WgData>) {
-        let result = tun.handle_incoming_packet(WgKind::Data(keepalive), &());
+        let result = tun.handle_incoming_packet(WgKind::Data(keepalive), &mut ());
         assert!(matches!(result, TunnResult::Done));
     }
 
@@ -644,7 +645,7 @@ mod tests {
         let data = data.into_kind().unwrap();
         assert!(matches!(data, WgKind::Data(..)));
 
-        let data = their_tun.handle_incoming_packet(data, &());
+        let data = their_tun.handle_incoming_packet(data, &mut ());
         let recv_packet_buf = if let TunnResult::WriteToTunnelV4(recv) = data {
             recv
         } else {
