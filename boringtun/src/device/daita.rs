@@ -76,7 +76,7 @@ type Result<T> = std::result::Result<T, ErrorAction>;
 pub struct DaitaHooks {
     event_tx: mpsc::UnboundedSender<TriggerEvent>,
     packet_count: Arc<PacketCount>,
-    blocking_queue_tx: mpsc::Sender<(Packet, SocketAddr)>,
+    blocking_queue_tx: mpsc::Sender<Packet<Wg>>,
     blocking_state: Arc<RwLock<BlockingState>>, // TODO: Replace with `tokio::sync::watch`?
     // TODO: Export to metrics sink
     /// Total extra bytes added due to constant-size padding of data packets.
@@ -150,17 +150,13 @@ impl DaitaHooks {
     }
 
     /// Should be called on packets, before they are sent to the network.
-    pub fn after_data_encapsulate(
-        &self,
-        packet: Packet<Wg>,
-        addr: SocketAddr,
-    ) -> Option<(Packet<Wg>, SocketAddr)> {
+    pub fn after_data_encapsulate(&self, packet: Packet<Wg>) -> Option<Packet<Wg>> {
         let packet_type = packet.packet_type;
-        let packet = packet.into();
+        // let packet = packet.into();
 
         // DAITA only cares about data packets.
         if packet_type != WgPacketType::Data {
-            return Some((packet, addr));
+            return Some(packet);
         }
 
         if let Ok(blocking) = self.blocking_state.try_read()
@@ -171,18 +167,18 @@ impl DaitaHooks {
             // We should probably trigger the blocking the end here and flush
             // the queue (don't forget to send `TriggerEvent::BlockingEnd`)
             // before sending the packet
-            if let Err(TrySendError::Full((returned_packet, _addr))) =
-                self.blocking_queue_tx.try_send((packet.into_bytes(), addr))
+            if let Err(TrySendError::Full(returned_packet)) =
+                self.blocking_queue_tx.try_send(packet)
             {
                 let _ = self.event_tx.send(TriggerEvent::TunnelSent);
                 self.packet_count.dec(1);
-                return Some((returned_packet.try_into_wg().unwrap(), addr));
+                return Some(returned_packet);
             }
             None
         } else {
             let _ = self.event_tx.send(TriggerEvent::TunnelSent);
             self.packet_count.dec(1);
-            Some((packet, addr))
+            Some(packet)
         }
     }
 
@@ -192,7 +188,7 @@ impl DaitaHooks {
     }
 
     /// Should be called on incoming decapsulated *data* packets.
-    pub fn after_data_decapsulate(&self, mut packet: Packet) -> Option<Packet> {
+    pub fn after_data_decapsulate(&self, packet: Packet) -> Option<Packet> {
         if let Ok(padding) = PaddingPacket::ref_from_bytes(packet.as_bytes())
             && padding.header._daita_marker == DAITA_MARKER
         {
@@ -214,13 +210,9 @@ impl Hooks for DaitaHooks {
         DaitaHooks::before_data_encapsulate(self, packet)
     }
 
-    fn after_data_encapsulate(
-        &self,
-        packet: Packet<packet::Wg>,
-        destination: SocketAddr,
-    ) -> Option<(Packet<Wg>, SocketAddr)> {
+    fn after_data_encapsulate(&self, packet: Packet<packet::Wg>) -> Option<Packet<Wg>> {
         // TODO: check peer
-        DaitaHooks::after_data_encapsulate(self, packet, destination)
+        DaitaHooks::after_data_encapsulate(self, packet)
     }
 
     fn before_data_decapsulate(&self) {
@@ -462,8 +454,8 @@ where
 {
     maybenot: Framework<M, R>,
     packet_count: Arc<PacketCount>,
-    blocking_queue_rx: mpsc::Receiver<(Packet, SocketAddr)>,
-    blocking_queue_tx: mpsc::Sender<(Packet, SocketAddr)>,
+    blocking_queue_rx: mpsc::Receiver<Packet<Wg>>,
+    blocking_queue_tx: mpsc::Sender<Packet<Wg>>,
     blocking: Arc<RwLock<BlockingState>>,
     peer: Weak<Mutex<Peer>>,
     packet_pool: packet::PacketBufPool,
@@ -619,7 +611,20 @@ where
         };
         match (blocking_with_bypass, replace) {
             (Some(true), true) => {
-                if let Ok((packet, destination)) = self.blocking_queue_rx.try_recv() {
+                if let Ok(packet) = self.blocking_queue_rx.try_recv() {
+                    // TODO: Fix (and maybe don't wait for peer lock)
+                    let Some(destination) = self
+                        .peer
+                        .upgrade()
+                        .ok_or(ErrorAction::Close)?
+                        .lock()
+                        .await
+                        .endpoint()
+                        .addr
+                    else {
+                        log::error!("No endpoint");
+                        return Err(ErrorAction::Ignore);
+                    };
                     self.udp_send
                         .send_to(packet.into_bytes(), destination)
                         .await
@@ -638,11 +643,9 @@ where
             }
             // Padding packet should or cannot replace any blocked packet
             (Some(false), _) => {
-                let (padding_packet, addr) = self.encapsulate_padding(event_buf, machine).await?;
+                let padding_packet = self.encapsulate_padding(event_buf, machine).await?;
                 //  Drop the padding packet if blocking queue is full
-                let _ = self
-                    .blocking_queue_tx
-                    .try_send((padding_packet.into_bytes(), addr));
+                let _ = self.blocking_queue_tx.try_send(padding_packet);
                 Ok(())
             }
             (None, true) if self.packet_count.replaced() < self.packet_count.outbound() => {
@@ -656,7 +659,7 @@ where
 
     async fn end_blocking(
         &mut self,
-        packets: &mut Vec<(Packet, SocketAddr)>,
+        packets: &mut Vec<Packet<Wg>>,
         event_buf: &mut Vec<TriggerEvent>,
     ) {
         *self.blocking.write().await = BlockingState::Inactive;
@@ -673,10 +676,20 @@ where
             }
 
             let mut send_many_bufs = US::SendManyBuf::default();
+            let Some(peer) = self.peer.upgrade() else {
+                log::error!("Peer gone");
+                return;
+            };
+            let Some(addr) = peer.lock().await.endpoint().addr else {
+                log::error!("No endpoint");
+                return;
+            };
+            // TODO: don't allocate
+            let mut packets: Vec<_> = packets.drain(..).map(|p| (p.into_bytes(), addr)).collect();
             let count = packets.len();
             if let Ok(()) = self
                 .udp_send
-                .send_many_to(&mut send_many_bufs, packets)
+                .send_many_to(&mut send_many_bufs, &mut packets)
                 .await
             {
                 // Trigger a TunnelSent for each packet sent
@@ -691,7 +704,17 @@ where
         event_buf: &mut Vec<TriggerEvent>,
         machine: MachineId,
     ) -> Result<()> {
-        let (packet, addr) = self.encapsulate_padding(event_buf, machine).await?;
+        let packet = self.encapsulate_padding(event_buf, machine).await?;
+        let Some(peer) = self.peer.upgrade() else {
+            return Err(ErrorAction::Close);
+        };
+        // TODO: don't lock twice
+        let peer = peer.lock().await;
+        let endpoint_addr = peer.endpoint().addr;
+        let Some(addr) = endpoint_addr else {
+            log::error!("No endpoint");
+            return Err(ErrorAction::Ignore);
+        };
 
         self.udp_send
             .send_to(packet.into_bytes(), addr)
@@ -710,7 +733,7 @@ where
         &self,
         event_buf: &mut Vec<TriggerEvent>,
         machine: MachineId,
-    ) -> Result<(Packet<Wg>, SocketAddr)> {
+    ) -> Result<Packet<Wg>> {
         let Some(peer) = self.peer.upgrade() else {
             return Err(ErrorAction::Close);
         };
@@ -723,14 +746,7 @@ where
             .handle_outgoing_packet(self.create_padding_packet(MTU))
         {
             None => Err(ErrorAction::Ignore), // TODO: error?
-            Some(packet) => {
-                let endpoint_addr = peer.endpoint().addr;
-                let Some(addr) = endpoint_addr else {
-                    log::error!("No endpoint");
-                    return Err(ErrorAction::Ignore);
-                };
-                Ok((packet, addr))
-            }
+            Some(packet) => Ok(packet),
         }
     }
 
