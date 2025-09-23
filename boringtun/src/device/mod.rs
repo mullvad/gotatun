@@ -435,16 +435,6 @@ impl<T: DeviceTransports> Device<T> {
         tun_rx: T::IpRecv,
         config: DeviceConfig,
     ) -> Arc<RwLock<Device<T>>> {
-        Device::new_with_hooks(udp_factory, tun_tx, tun_rx, config, ()).await
-    }
-
-    pub async fn new_with_hooks(
-        udp_factory: T::UdpTransportFactory,
-        tun_tx: T::IpSend,
-        tun_rx: T::IpRecv,
-        config: DeviceConfig,
-        hooks: impl Hooks,
-    ) -> Arc<RwLock<Device<T>>> {
         let device = Device {
             api: None,
             udp_factory,
@@ -460,16 +450,13 @@ impl<T: DeviceTransports> Device<T> {
             port: 0,
             connection: None,
         };
-
         let device = Arc::new(RwLock::new(device));
-
         if let Some(channel) = config.api {
             device.write().await.api = Some(Task::spawn(
                 "handle_api",
                 Device::handle_api(Arc::downgrade(&device), channel),
             ));
         }
-
         device
     }
 
