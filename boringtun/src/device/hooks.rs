@@ -3,7 +3,7 @@ use crate::packet::{Packet, Wg};
 pub trait Hooks: Send + Sync + 'static {
     /// Called before a data packet is encapsulated
     #[inline(always)]
-    fn before_data_encapsulate(&self, packet: Packet) -> Packet {
+    fn before_data_encapsulate(&mut self, packet: Packet) -> Packet {
         packet
     }
 
@@ -24,7 +24,7 @@ pub trait Hooks: Send + Sync + 'static {
     ///
     /// Return `None` to drop/ignore the packet
     #[inline(always)]
-    fn after_data_decapsulate(&self, packet: Packet) -> Option<Packet> {
+    fn after_data_decapsulate(&mut self, packet: Packet) -> Option<Packet> {
         Some(packet) // noop
     }
 }

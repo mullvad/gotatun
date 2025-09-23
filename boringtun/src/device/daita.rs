@@ -33,7 +33,6 @@
 
 use std::{
     collections::VecDeque,
-    net::SocketAddr,
     pin::pin,
     sync::{
         Arc, Weak,
@@ -43,7 +42,7 @@ use std::{
 
 use crate::{
     device::hooks::Hooks,
-    packet::{self, Ipv6Header, Packet, Wg, WgPacketType},
+    packet::{self, Packet, Wg, WgPacketType},
     udp::UdpSend,
 };
 
@@ -137,13 +136,13 @@ impl DaitaHooks {
     }
 
     /// Should be called on outgoing data packets, before encapsulation
-    pub fn before_data_encapsulate(&self, mut packet: Packet) -> Packet {
+    pub fn before_data_encapsulate(&mut self, mut packet: Packet) -> Packet {
         let _ = self.event_tx.send(TriggerEvent::NormalSent);
         self.packet_count.inc_outbound(1);
 
         // Pad to constant size
         debug_assert!(packet.len() <= MTU as usize);
-        // self.tx_padding_bytes += MTU as usize - packet.len(); // TODO
+        self.tx_padding_bytes += MTU as usize - packet.len(); // TODO
 
         packet.buf_mut().resize(MTU as usize, 0);
         packet
@@ -152,7 +151,6 @@ impl DaitaHooks {
     /// Should be called on packets, before they are sent to the network.
     pub fn after_data_encapsulate(&self, packet: Packet<Wg>) -> Option<Packet<Wg>> {
         let packet_type = packet.packet_type;
-        // let packet = packet.into();
 
         // DAITA only cares about data packets.
         if packet_type != WgPacketType::Data {
@@ -188,13 +186,13 @@ impl DaitaHooks {
     }
 
     /// Should be called on incoming decapsulated *data* packets.
-    pub fn after_data_decapsulate(&self, packet: Packet) -> Option<Packet> {
+    pub fn after_data_decapsulate(&mut self, packet: Packet) -> Option<Packet> {
         if let Ok(padding) = PaddingPacket::ref_from_bytes(packet.as_bytes())
             && padding.header._daita_marker == DAITA_MARKER
         {
             let _ = self.event_tx.send(TriggerEvent::PaddingRecv);
             // Count received padding
-            // self.rx_padding_packet_bytes += u16::from(padding.header.length) as usize; // TODO
+            self.rx_padding_packet_bytes += u16::from(padding.header.length) as usize; // TODO
             return None;
         }
 
@@ -205,7 +203,7 @@ impl DaitaHooks {
 }
 
 impl Hooks for DaitaHooks {
-    fn before_data_encapsulate(&self, packet: Packet) -> Packet {
+    fn before_data_encapsulate(&mut self, packet: Packet) -> Packet {
         // TODO: check peer
         DaitaHooks::before_data_encapsulate(self, packet)
     }
@@ -217,12 +215,12 @@ impl Hooks for DaitaHooks {
 
     fn before_data_decapsulate(&self) {
         // TODO: check peer
-        self.before_data_decapsulate();
+        DaitaHooks::before_data_decapsulate(self);
     }
 
-    fn after_data_decapsulate(&self, packet: Packet) -> Option<Packet> {
+    fn after_data_decapsulate(&mut self, packet: Packet) -> Option<Packet> {
         // TODO: check peer
-        self.after_data_decapsulate(packet)
+        DaitaHooks::after_data_decapsulate(self, packet)
     }
 }
 
