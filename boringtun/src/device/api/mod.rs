@@ -400,7 +400,7 @@ async fn on_api_set(
             remove,
             update_only,
             replace_allowed_ips,
-            hooks,
+            maybenot_machines,
         } = peer;
 
         let public_key = x25519_dalek::PublicKey::from(public_key.0);
@@ -422,7 +422,7 @@ async fn on_api_set(
             allowed_ip.as_slice(),
             persistent_keepalive_interval,
             preshared_key,
-            hooks,
+            maybenot_machines,
         );
     }
 
