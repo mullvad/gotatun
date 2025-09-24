@@ -91,7 +91,7 @@ pub struct DaitaHooks {
 
 impl DaitaHooks {
     pub fn new<US>(
-        maybenot_machines: String,
+        maybenot_machines: Vec<String>,
         peer: Weak<Mutex<Peer>>,
         udp_send: US,
         packet_pool: packet::PacketBufPool,
@@ -111,7 +111,8 @@ impl DaitaHooks {
         let tx_padding_packet_bytes = Arc::new(AtomicUsize::new(0));
 
         let machines = maybenot_machines
-            .lines()
+            .iter()
+            .map(AsRef::as_ref)
             .map(Machine::from_str)
             .collect::<::core::result::Result<Vec<_>, _>>()
             .unwrap_or_else(|_| panic!("bad machines: {maybenot_machines:?}")); // TODO
@@ -160,10 +161,11 @@ impl DaitaHooks {
         self.packet_count.inc_outbound(1);
 
         // Pad to constant size
-        debug_assert!(packet.len() <= MTU as usize);
-        self.tx_padding_bytes += MTU as usize - packet.len(); // TODO
+        // // FIXME: mtu
+        // debug_assert!(packet.len() <= MTU as usize);
+        // self.tx_padding_bytes += MTU as usize - packet.len(); // TODO
 
-        packet.buf_mut().resize(MTU as usize, 0);
+        // packet.buf_mut().resize(MTU as usize, 0);
         packet
     }
 

@@ -122,7 +122,7 @@ pub struct SetPeer {
     pub replace_allowed_ips: bool,
 
     #[builder(default, setter(strip_option, into))]
-    pub maybenot_machines: Option<String>,
+    pub maybenot_machines: Option<Vec<String>>,
 }
 
 #[derive(Debug)]
