@@ -113,9 +113,8 @@ fn bench_assemble_ipv4_fragment_reverse_order(c: &mut Criterion) {
             |b, frags| {
                 b.iter(|| {
                     for frag in frags {
-                        black_box(
-                            fragments.assemble_ipv4_fragment(black_box(Packet::copy_from(frag))),
-                        );
+                        let packet = black_box(pool.get().overwrite_with(&**frag));
+                        black_box(fragments.assemble_ipv4_fragment(packet));
                     }
                     assert_eq!(fragments.incomplete_packet_count(), 0);
                 })

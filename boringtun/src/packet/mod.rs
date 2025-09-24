@@ -115,7 +115,7 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
     }
 
     /// Overwrite the contents of the backing buffer with new value of an new type.
-    pub fn overwrite_with<Y: CheckedPayload>(mut self, payload: &Y) -> Packet<Y> {
+    pub fn overwrite_with<Y: CheckedPayload + ?Sized>(mut self, payload: &Y) -> Packet<Y> {
         self.inner.buf.clear();
         self.inner.buf.extend_from_slice(payload.as_bytes());
         self.cast()
