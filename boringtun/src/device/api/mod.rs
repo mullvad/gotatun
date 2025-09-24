@@ -16,6 +16,7 @@ use std::str::FromStr;
 use std::sync::Weak;
 use tokio::sync::{RwLock, mpsc, oneshot};
 
+#[cfg(unix)]
 const SOCK_DIR: &str = "/var/run/wireguard/";
 
 /// A server that receives [Request]s. Should be passed a [Device] when created.
