@@ -432,6 +432,7 @@ impl<T: DeviceTransports> Device<T> {
         };
 
         let mut peer = Peer::new(tunn, index, endpoint, &allowed_ips, preshared_key);
+        peer.maybenot_machines = maybenot_machines;
         let peer = Arc::new(Mutex::new(peer));
 
         self.peers_by_idx.insert(index, Arc::clone(&peer));
