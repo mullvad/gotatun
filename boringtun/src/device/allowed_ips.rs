@@ -11,6 +11,7 @@ use std::iter::FromIterator;
 use std::net::IpAddr;
 
 /// A trie of IP/cidr addresses
+// TODO: delete me
 #[derive(Default)]
 pub struct AllowedIps<D> {
     ips: IpNetworkTable<D>,
@@ -54,6 +55,10 @@ impl<D> AllowedIps<D> {
 
     pub fn remove(&mut self, predicate: &dyn Fn(&D) -> bool) {
         self.ips.retain(|_, v| !predicate(v));
+    }
+
+    pub fn remove_network(&mut self, network: IpNetwork) {
+        self.ips.remove(network);
     }
 
     pub fn iter(&'_ self) -> Iter<'_, D> {
