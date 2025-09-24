@@ -22,7 +22,7 @@ use tokio::join;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
-use crate::device::hooks::Hooks;
+use crate::device::daita::DaitaHooks;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
@@ -178,7 +178,6 @@ impl<T: DeviceTransports> Connection<T> {
             Arc::clone(&device_guard.tun_rx),
         );
         let buffered_ip_tx = BufferedIpSend::new(MAX_PACKET_BUFS, Arc::clone(&device_guard.tun_tx));
-        drop(device_guard);
 
         let buffered_udp_tx_v4 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp4_tx.clone());
         let buffered_udp_tx_v6 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp6_tx.clone());
@@ -189,6 +188,22 @@ impl<T: DeviceTransports> Connection<T> {
         let buffered_udp_rx_v6 = BufferedUdpReceive::new::<
             <T::UdpTransportFactory as UdpTransportFactory>::RecvV6,
         >(MAX_PACKET_BUFS, udp6_rx, pool.clone());
+
+        // FIXME: the lifetimes of the UdpSend are getting weird.
+        // FIXME: this is a weird place to initialize DAITA.
+        for peer_arc in device_guard.peers.values_mut() {
+            let mut peer = peer_arc.lock().await;
+            if let Some(machines) = &peer.maybenot_machines {
+                peer.daita = Some(DaitaHooks::new(
+                    machines.clone(),
+                    Arc::downgrade(peer_arc),
+                    buffered_udp_tx_v4.clone(), // TODO: ipv6?
+                    pool.clone(),
+                ))
+            }
+        }
+
+        drop(device_guard);
 
         let outgoing = Task::spawn(
             "handle_outgoing",
@@ -364,7 +379,7 @@ impl<T: DeviceTransports> Device<T> {
         new_allowed_ips: &[AllowedIP],
         keepalive: Option<u16>,
         preshared_key: Option<[u8; 32]>,
-        hooks: Option<Box<dyn Hooks>>,
+        maybenot_machines: Option<String>,
     ) {
         if remove {
             // Completely remove a peer
@@ -417,9 +432,6 @@ impl<T: DeviceTransports> Device<T> {
         };
 
         let mut peer = Peer::new(tunn, index, endpoint, &allowed_ips, preshared_key);
-        if let Some(hooks) = hooks {
-            peer.hooks = hooks;
-        }
         let peer = Arc::new(Mutex::new(peer));
 
         self.peers_by_idx.insert(index, Arc::clone(&peer));
@@ -660,14 +672,16 @@ impl<T: DeviceTransports> Device<T> {
             let Some(peer) = peer else { continue };
             let mut peer = peer.lock().await;
 
-            let Peer { tunnel, hooks, .. } = &mut *peer;
+            let Peer { tunnel, daita, .. } = &mut *peer;
 
-            // TODO: what about keepalives?
-            if let WgKind::Data(_) = &parsed_packet {
-                hooks.before_data_decapsulate();
-            };
+            if let Some(daita) = daita {
+                // TODO: what about keepalives?
+                if let WgKind::Data(_) = &parsed_packet {
+                    daita.before_data_decapsulate();
+                };
+            }
 
-            match tunnel.handle_incoming_packet(parsed_packet, hooks.as_mut()) {
+            match tunnel.handle_incoming_packet(parsed_packet, daita.as_mut()) {
                 TunnResult::Done => (),
                 TunnResult::Err(_) => continue,
                 TunnResult::WriteToNetwork(packet) => {
@@ -766,15 +780,23 @@ impl<T: DeviceTransports> Device<T> {
                     continue;
                 };
 
-                let Peer { tunnel, hooks, .. } = &mut *peer;
-                let packet = hooks.before_data_encapsulate(packet);
+                let Peer { tunnel, daita, .. } = &mut *peer;
+
+                let packet = match daita {
+                    Some(daita) => daita.before_data_encapsulate(packet),
+                    None => packet,
+                };
 
                 let Some(packet) = tunnel.handle_outgoing_packet(packet) else {
                     continue;
                 };
 
-                let Some(packet) = hooks.after_data_encapsulate(packet) else {
-                    continue;
+                let packet = match daita {
+                    None => packet,
+                    Some(daita) => match daita.after_data_encapsulate(packet) {
+                        Some(packet) => packet,
+                        None => continue,
+                    },
                 };
 
                 drop(peer); // release lock

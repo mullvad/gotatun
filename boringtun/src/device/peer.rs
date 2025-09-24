@@ -7,7 +7,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 
 use crate::device::AllowedIps;
-use crate::device::hooks::Hooks;
+use crate::device::daita::DaitaHooks;
 use crate::noise::Tunn;
 use crate::noise::errors::WireGuardError;
 use crate::packet::{Packet, Wg};
@@ -25,8 +25,9 @@ pub struct Peer {
     endpoint: RwLock<Endpoint>,
     allowed_ips: AllowedIps<()>,
     preshared_key: Option<[u8; 32]>,
-    // FIXME
-    pub hooks: Box<dyn Hooks>,
+
+    pub maybenot_machines: Option<String>,
+    pub daita: Option<DaitaHooks>,
 }
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
@@ -67,25 +68,8 @@ impl Peer {
             endpoint: RwLock::new(Endpoint { addr: endpoint }),
             allowed_ips: allowed_ips.iter().map(|ip| (ip, ())).collect(),
             preshared_key,
-            hooks: Box::new(()),
-        }
-    }
-
-    pub fn new_with_hooks(
-        tunnel: Tunn,
-        index: u32,
-        endpoint: Option<SocketAddr>,
-        allowed_ips: &[AllowedIP],
-        preshared_key: Option<[u8; 32]>,
-        hooks: impl Hooks,
-    ) -> Peer {
-        Peer {
-            tunnel,
-            index,
-            endpoint: RwLock::new(Endpoint { addr: endpoint }),
-            allowed_ips: allowed_ips.iter().map(|ip| (ip, ())).collect(),
-            preshared_key,
-            hooks: Box::new(hooks),
+            maybenot_machines: None,
+            daita: None,
         }
     }
 

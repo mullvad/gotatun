@@ -34,6 +34,7 @@
 use std::{
     collections::VecDeque,
     pin::pin,
+    str::FromStr,
     sync::{
         Arc, Weak,
         atomic::{self, AtomicU32, AtomicUsize},
@@ -49,7 +50,7 @@ use crate::{
 use super::peer::Peer;
 use futures::{FutureExt, future::Fuse};
 use maybenot::{Framework, Machine, MachineId, TriggerAction, TriggerEvent};
-use rand::RngCore;
+use rand::{RngCore, SeedableRng, rngs::StdRng};
 use tokio::sync::{
     RwLock,
     mpsc::{self, error::TrySendError},
@@ -89,17 +90,14 @@ pub struct DaitaHooks {
 }
 
 impl DaitaHooks {
-    pub fn new<M, R, US, P>(
-        maybenot: Framework<M, R>,
+    pub fn new<US>(
+        maybenot_machines: String,
         peer: Weak<Mutex<Peer>>,
         udp_send: US,
         packet_pool: packet::PacketBufPool,
     ) -> Self
     where
-        Framework<M, R>: Send + 'static,
         US: UdpSend + Clone + 'static,
-        M: AsRef<[Machine]> + Send + Sync + 'static,
-        R: RngCore + Send + Sync,
     {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let packet_count = Arc::new(PacketCount {
@@ -109,6 +107,25 @@ impl DaitaHooks {
         let blocking = Arc::new(RwLock::new(BlockingState::Inactive));
         let (blocking_queue_tx, blocking_queue_rx) = mpsc::channel(MAX_BLOCKED_PACKETS);
         let tx_padding_packet_bytes = Arc::new(AtomicUsize::new(0));
+
+        let machines = maybenot_machines
+            .lines()
+            .map(Machine::from_str)
+            .collect::<::core::result::Result<Vec<_>, _>>()
+            .unwrap_or_else(|_| panic!("bad machines: {maybenot_machines:?}")); // TODO
+
+        let rng = StdRng::from_os_rng(); // TODO
+
+        let max_padding_frac = 0.5; // TODO
+        let max_blocking_frac = 0.5; // TODO
+        let maybenot = maybenot::Framework::new(
+            machines,
+            max_padding_frac,
+            max_blocking_frac,
+            std::time::Instant::now(),
+            rng,
+        )
+        .unwrap();
 
         let daita = DAITA {
             maybenot,
