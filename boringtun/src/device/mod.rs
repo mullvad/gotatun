@@ -12,8 +12,10 @@ pub mod hooks;
 mod integration_tests;
 pub mod peer;
 
+use ip_network::IpNetwork;
 use std::collections::HashMap;
 use std::io::{self};
+use std::mem;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::ops::BitOrAssign;
 use std::sync::{Arc, Weak};
@@ -171,6 +173,10 @@ impl<T: DeviceTransports> Connection<T> {
         let pool = PacketBufPool::new(MAX_PACKET_BUFS);
 
         let mut device_guard = device.write().await;
+        let _ = device_guard.connection.take(); // clean up existing connection
+        // FIXME: wait for connection to be dropped
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
         let (udp4_tx, udp4_rx, udp6_tx, udp6_rx) = device_guard.open_listen_socket().await?;
         let buffered_ip_rx = BufferedIpRecv::new(
             MAX_PACKET_BUFS,
@@ -193,9 +199,10 @@ impl<T: DeviceTransports> Connection<T> {
         // FIXME: this is a weird place to initialize DAITA.
         for peer_arc in device_guard.peers.values_mut() {
             let mut peer = peer_arc.lock().await;
-            if let Some(machines) = &peer.maybenot_machines {
+            if !peer.maybenot_machines.is_empty() {
+                log::error!("creating DaitaHooks");
                 peer.daita = Some(DaitaHooks::new(
-                    machines.clone(),
+                    peer.maybenot_machines.clone(),
                     Arc::downgrade(peer_arc),
                     buffered_udp_tx_v4.clone(), // TODO: ipv6?
                     pool.clone(),
@@ -350,11 +357,11 @@ impl<T: DeviceTransports> Device<T> {
         self.next_index.next()
     }
 
-    fn remove_peer(&mut self, pub_key: &x25519::PublicKey) -> Option<Arc<Mutex<Peer>>> {
+    async fn remove_peer(&mut self, pub_key: &x25519::PublicKey) -> Option<Arc<Mutex<Peer>>> {
         if let Some(peer) = self.peers.remove(pub_key) {
             // Found a peer to remove, now purge all references to it:
             {
-                let p = peer.blocking_lock();
+                let p = peer.lock().await;
                 self.peers_by_idx.remove(&p.index());
             }
             self.peers_by_ip
@@ -370,7 +377,7 @@ impl<T: DeviceTransports> Device<T> {
 
     /// Update or add peer
     #[allow(clippy::too_many_arguments)]
-    fn update_peer(
+    async fn update_peer(
         &mut self,
         pub_key: x25519::PublicKey,
         remove: bool,
@@ -379,32 +386,43 @@ impl<T: DeviceTransports> Device<T> {
         new_allowed_ips: &[AllowedIP],
         keepalive: Option<u16>,
         preshared_key: Option<[u8; 32]>,
-        maybenot_machines: Option<String>,
+        maybenot_machines: Option<Vec<String>>,
     ) {
         if remove {
             // Completely remove a peer
-            self.remove_peer(&pub_key);
+            self.remove_peer(&pub_key).await;
             return;
         }
 
-        let (index, old_allowed_ips) = if let Some(old_peer) = self.remove_peer(&pub_key) {
-            // TODO: Update existing peer?
-            let peer = old_peer.blocking_lock();
-            let index = peer.index();
-            let old_allowed_ips = peer
-                .allowed_ips()
-                .map(|(addr, cidr)| AllowedIP { addr, cidr })
-                .collect();
-            drop(peer);
+        let (index, old_allowed_ips, old_maybenot_machines) =
+            if let Some(old_peer) = self.remove_peer(&pub_key).await {
+                // TODO: Update existing peer?
+                let mut peer = old_peer.lock().await;
+                let index = peer.index();
+                let old_allowed_ips = peer
+                    .allowed_ips()
+                    .map(|(addr, cidr)| AllowedIP { addr, cidr })
+                    .collect();
+                let old_maybenot_machines = mem::take(&mut peer.maybenot_machines);
 
-            // TODO: Match pubkey instead of index
-            self.peers_by_ip
-                .remove(&|p| p.blocking_lock().index() == index);
+                drop(peer);
 
-            (index, old_allowed_ips)
-        } else {
-            (self.next_index(), vec![])
-        };
+                // TODO: Match pubkey instead of index
+                // TODO: FIXME
+                let mut remove_list = vec![];
+                for (peer, addr, cidr) in self.peers_by_ip.iter() {
+                    if peer.lock().await.index() == index {
+                        remove_list.push(IpNetwork::new(addr, cidr).unwrap());
+                    }
+                }
+                for network in remove_list {
+                    self.peers_by_ip.remove_network(network);
+                }
+
+                (index, old_allowed_ips, old_maybenot_machines)
+            } else {
+                (self.next_index(), vec![], vec![])
+            };
 
         // Update an existing peer or add peer
         let device_key_pair = self
@@ -432,7 +450,10 @@ impl<T: DeviceTransports> Device<T> {
         };
 
         let mut peer = Peer::new(tunn, index, endpoint, &allowed_ips, preshared_key);
-        peer.maybenot_machines = maybenot_machines;
+        peer.maybenot_machines = match maybenot_machines {
+            Some(new) => new,
+            None => old_maybenot_machines,
+        };
         let peer = Arc::new(Mutex::new(peer));
 
         self.peers_by_idx.insert(index, Arc::clone(&peer));

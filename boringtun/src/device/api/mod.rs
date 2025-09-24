@@ -414,16 +414,23 @@ async fn on_api_set(
             command::SetUnset::Unset => todo!("not sure how to handle this"),
         });
 
-        device.update_peer(
-            public_key,
-            remove,
-            replace_allowed_ips,
-            endpoint,
-            allowed_ip.as_slice(),
-            persistent_keepalive_interval,
-            preshared_key,
-            maybenot_machines,
-        );
+        // HACK
+        if maybenot_machines.is_some() {
+            reconfigure |= Reconfigure::Yes
+        }
+
+        device
+            .update_peer(
+                public_key,
+                remove,
+                replace_allowed_ips,
+                endpoint,
+                allowed_ip.as_slice(),
+                persistent_keepalive_interval,
+                preshared_key,
+                maybenot_machines,
+            )
+            .await;
     }
 
     (SetResponse { errno: 0 }, reconfigure)

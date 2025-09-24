@@ -26,7 +26,7 @@ pub struct Peer {
     allowed_ips: AllowedIps<()>,
     preshared_key: Option<[u8; 32]>,
 
-    pub maybenot_machines: Option<String>,
+    pub maybenot_machines: Vec<String>,
     pub daita: Option<DaitaHooks>,
 }
 
@@ -68,7 +68,7 @@ impl Peer {
             endpoint: RwLock::new(Endpoint { addr: endpoint }),
             allowed_ips: allowed_ips.iter().map(|ip| (ip, ())).collect(),
             preshared_key,
-            maybenot_machines: None,
+            maybenot_machines: vec![],
             daita: None,
         }
     }
