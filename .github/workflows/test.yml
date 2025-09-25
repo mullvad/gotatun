@@ -11,17 +11,53 @@ jobs:
     name: Check
     strategy:
       matrix:
-        features:
-          - ""
-          - "--no-default-features"
-          - "--all-features"
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          # Native builds
+          - os: ubuntu-latest
+            target: ""
+            features: ""
+          - os: ubuntu-latest
+            target: ""
+            features: "--no-default-features"
+          - os: ubuntu-latest
+            target: ""
+            features: "--all-features"
+          - os: windows-latest
+            target: ""
+            features: ""
+          - os: windows-latest
+            target: ""
+            features: "--no-default-features"
+          - os: windows-latest
+            target: ""
+            features: "--all-features"
+          - os: macos-latest
+            target: ""
+            features: ""
+          - os: macos-latest
+            target: ""
+            features: "--no-default-features"
+          - os: macos-latest
+            target: ""
+            features: "--all-features"
+          # Android cross-compilation
+          - os: ubuntu-latest
+            target: "x86_64-linux-android"
+            features: ""
+          - os: ubuntu-latest
+            target: "x86_64-linux-android"
+            features: "--no-default-features"
+          - os: ubuntu-latest
+            target: "x86_64-linux-android"
+            features: "--all-features"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
         
       - name: Cache dependencies
         uses: actions/cache@v4
@@ -30,10 +66,16 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           
       - name: Check with features ${{ matrix.features }}
-        run: cargo check --locked --workspace ${{ matrix.features }}
+        run: |
+          if [ -n "${{ matrix.target }}" ]; then
+            cargo check --locked --workspace --target ${{ matrix.target }} ${{ matrix.features }}
+          else
+            cargo check --locked --workspace ${{ matrix.features }}
+          fi
+        shell: bash
 
   fmt:
     name: Format
@@ -53,7 +95,17 @@ jobs:
     name: Clippy
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          # Native builds
+          - os: ubuntu-latest
+            target: ""
+          - os: windows-latest
+            target: ""
+          - os: macos-latest
+            target: ""
+          # Android x86 cross-compilation
+          - os: ubuntu-latest
+            target: "x86_64-linux-android"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -62,6 +114,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+          targets: ${{ matrix.target }}
           
       - name: Cache dependencies
         uses: actions/cache@v4
@@ -70,10 +123,16 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           
       - name: Run clippy
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+        run: |
+          if [ -n "${{ matrix.target }}" ]; then
+            cargo clippy --locked --workspace --target ${{ matrix.target }} --all-features -- -D warnings
+          else
+            cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+          fi
+        shell: bash
 
   test:
     name: Test
