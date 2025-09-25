@@ -102,10 +102,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-x86_64-linux-android-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Check with features ${{ matrix.features }}
-        run: cargo check --locked --workspace --target ${{ matrix.target }} ${{ matrix.features }}
+        run: cargo check --locked --workspace --target x86_64-linux-android ${{ matrix.features }}
 
   check-other:
     name: Check
@@ -212,10 +212,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-x86_64-linux-android-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run clippy
-        run: cargo clippy --locked --workspace --target ${{ matrix.target }} --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --target x86_64-linux-android --all-features -- -D warnings
 
   test:
     name: Test
