@@ -15,8 +15,6 @@ edition = "2024"
 [features]
 default = []
 device = ["thiserror"]
-# mocks std::time::Instant with mock_instant
-mock-instant = ["mock_instant"]
 pcap = ["dep:pcap-file"]
 
 [dependencies]
