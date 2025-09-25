@@ -52,13 +52,11 @@ use futures::{FutureExt, future::Fuse};
 use maybenot::{Framework, Machine, MachineId, TriggerAction, TriggerEvent};
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use tokio::sync::{
-    RwLock,
+    Mutex, RwLock,
     mpsc::{self, error::TrySendError},
 };
 use tokio::time::Instant;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
-
-use tokio::sync::Mutex;
 
 // TODO: get real MTU
 const MTU: u16 = 1300;
@@ -362,7 +360,7 @@ impl MachineTimers {
         self.0.retain(|&(_, m, _)| m != *machine);
     }
 
-    fn insert_padding(
+    fn schedule_padding(
         &mut self,
         machine: MachineId,
         timeout: std::time::Duration,
@@ -386,7 +384,7 @@ impl MachineTimers {
         debug_assert!(self.0.iter().is_sorted_by_key(|(time, _, _)| *time));
     }
 
-    fn insert_block(
+    fn schedule_block(
         &mut self,
         machine: MachineId,
         timeout: std::time::Duration,
@@ -415,7 +413,7 @@ impl MachineTimers {
         debug_assert!(self.0.iter().is_sorted_by_key(|(time, _, _)| *time));
     }
 
-    fn update_internal(
+    fn schedule_internal_timer(
         &mut self,
         machine: MachineId,
         duration: std::time::Duration,
@@ -556,7 +554,7 @@ where
                                 bypass,
                                 replace
                             );
-                            machine_timers.insert_padding(*machine, *timeout, *replace, *bypass);
+                            machine_timers.schedule_padding(*machine, *timeout, *replace, *bypass);
                         }
                         TriggerAction::BlockOutgoing {
                             timeout,
@@ -574,7 +572,7 @@ where
                                 replace
                             );
                             machine_timers
-                                .insert_block(*machine, *timeout, *duration, *replace, *bypass);
+                                .schedule_block(*machine, *timeout, *duration, *replace, *bypass);
                         }
                         TriggerAction::UpdateTimer {
                             duration,
@@ -587,7 +585,8 @@ where
                                 duration,
                                 replace
                             );
-                            if machine_timers.update_internal(*machine, *duration, *replace) {
+                            if machine_timers.schedule_internal_timer(*machine, *duration, *replace)
+                            {
                                 event_buf.push(TriggerEvent::TimerBegin { machine: *machine });
                             }
                         }
@@ -732,7 +731,7 @@ where
                 log::error!("No endpoint");
                 return;
             };
-            // TODO: don't allocate
+            // TODO: don't allocate (update send_many_to to take iterator?)
             let mut packets: Vec<_> = packets.drain(..).map(|p| (p.into_bytes(), addr)).collect();
             let count = packets.len();
             if let Ok(()) = self
