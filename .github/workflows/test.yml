@@ -8,7 +8,7 @@ env:
 
 jobs:
   check-linux:
-    name: Check (Linux)
+    name: Check all feature combinations (Linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
