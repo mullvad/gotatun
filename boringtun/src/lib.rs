@@ -16,7 +16,7 @@ pub mod tun;
 
 mod task;
 
-#[cfg(not(feature = "mock-instant"))]
+#[cfg(not(feature = "mock_instant"))]
 pub(crate) mod sleepyinstant;
 
 #[cfg(feature = "device")]
