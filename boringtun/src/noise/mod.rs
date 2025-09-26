@@ -9,6 +9,8 @@ mod timers;
 
 use zerocopy::IntoBytes;
 
+// TODO: The crate doesn't compile without this feature
+#[cfg(feature = "device")]
 use crate::device::daita::DaitaHooks;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
