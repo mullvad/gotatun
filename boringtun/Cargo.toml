@@ -16,6 +16,9 @@ edition = "2024"
 default = []
 device = ["thiserror"]
 pcap = ["dep:pcap-file"]
+# UDP GRO appears to be broken on Windows.
+# In some cases it fails to return UDP_COALESCED_INFO
+windows-gro = []
 
 [dependencies]
 base64 = "0.13"
@@ -62,6 +65,7 @@ windows-sys = { version = "0.61.0", features = [
     "Win32_Foundation",
     "Win32_Networking",
     "Win32_Networking_WinSock",
+    "Win32_System_IO",
 ] }
 
 [target.'cfg(unix)'.dependencies]
