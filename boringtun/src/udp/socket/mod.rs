@@ -6,6 +6,9 @@ use std::{io, net::SocketAddr, sync::Arc};
 
 use super::{UdpSend, UdpTransportFactory, UdpTransportFactoryParams};
 
+#[cfg(target_os = "linux")]
+use super::UdpSend;
+
 /// Implementations of [super::UdpSend]/[super::UdpRecv] for all targets
 #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "windows")))]
 mod generic;
