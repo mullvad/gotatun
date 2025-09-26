@@ -122,7 +122,7 @@ pub trait WgHandshakeBase:
     fn mac2(&self) -> &[u8; 16];
 }
 
-#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, Debug)]
 #[repr(C, packed)]
 pub struct WgHandshakeInit {
     // INVARIANT: Must be WgPacketType::HandshakeInit
@@ -183,7 +183,7 @@ impl Default for WgHandshakeInit {
     }
 }
 
-#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, Debug)]
 #[repr(C, packed)]
 pub struct WgHandshakeResp {
     // INVARIANT: Must be WgPacketType::HandshakeResp

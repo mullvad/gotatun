@@ -5,6 +5,8 @@
 //!
 //! <code>git clone https://github.com/cloudflare/boringtun.git</code>
 
+#![feature(async_fn_traits)]
+
 #[cfg(feature = "device")]
 pub mod device;
 

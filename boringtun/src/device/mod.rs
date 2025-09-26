@@ -3,6 +3,7 @@
 
 pub mod allowed_ips;
 
+mod pipeline;
 pub mod api;
 #[cfg(unix)]
 pub mod drop_privileges;
