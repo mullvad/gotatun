@@ -7,6 +7,7 @@
 
 pub mod allowed_ips;
 
+mod pipeline;
 pub mod api;
 pub mod daita;
 #[cfg(unix)]

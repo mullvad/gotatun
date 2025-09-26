@@ -9,6 +9,8 @@
 //!
 //! <code>git clone <https://github.com/mullvad/gotatun.git></code>
 
+#![feature(async_fn_traits)]
+
 #[cfg(feature = "device")]
 pub mod device;
 

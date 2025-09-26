@@ -487,6 +487,7 @@ impl Handshake {
         &mut self,
         packet: crate::packet::Packet<WgHandshakeInit>,
     ) -> Result<(crate::packet::Packet<WgHandshakeResp>, Session), WireGuardError> {
+        dbg!(&*packet);
         // initiator.chaining_key = HASH(CONSTRUCTION)
         let mut chaining_key = INITIAL_CHAIN_KEY;
         // initiator.hash = HASH(HASH(initiator.chaining_key || IDENTIFIER) || responder.static_public)
@@ -579,7 +580,7 @@ impl Handshake {
             (_, HandshakeState::InitSent(s)) if s.local_index == packet.receiver_idx.get() => {
                 (s, true)
             }
-            _ => return Err(WireGuardError::UnexpectedPacket),
+            _ => return Err(dbg!(WireGuardError::UnexpectedPacket)),
         };
 
         let peer_index = packet.sender_idx;
