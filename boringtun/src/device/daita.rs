@@ -63,7 +63,7 @@ use futures::{FutureExt, future::Fuse};
 use maybenot::{Framework, Machine, MachineId, TriggerAction, TriggerEvent};
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use tokio::sync::{
-    Mutex, RwLock,
+    Mutex, Notify, RwLock,
     mpsc::{self, error::TrySendError},
 };
 use tokio::time::Instant;
@@ -73,7 +73,11 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endi
 const MTU: u16 = 1300;
 
 // TODO: Pick a good number
+/// Max number of blocked packets.
 const MAX_BLOCKED_PACKETS: usize = 256;
+// TODO: Pick a good number
+/// When the capacity of the blocking queue get's lower that this value, the blocking is aborted.
+const MIN_BLOCKING_CAPACITY: usize = 20;
 
 enum ErrorAction {
     Close,
@@ -87,6 +91,7 @@ pub struct DaitaHooks {
     packet_count: Arc<PacketCount>,
     blocking_queue_tx: mpsc::Sender<Packet<Wg>>,
     blocking_state: Arc<RwLock<BlockingState>>, // TODO: Replace with `tokio::sync::watch`?
+    blocking_abort: Arc<Notify>,
     // TODO: Export to metrics sink
     /// Total extra bytes added due to constant-size padding of data packets.
     tx_padding_bytes: usize,
@@ -119,6 +124,7 @@ impl DaitaHooks {
         let blocking = Arc::new(RwLock::new(BlockingState::Inactive));
         let (blocking_queue_tx, blocking_queue_rx) = mpsc::channel(MAX_BLOCKED_PACKETS);
         let tx_padding_packet_bytes = Arc::new(AtomicUsize::new(0));
+        let blocking_abort = Arc::new(Notify::const_new());
 
         let machines = maybenot_machines
             .iter()
@@ -146,6 +152,7 @@ impl DaitaHooks {
             packet_count: packet_count.clone(),
             blocking_queue_rx,
             blocking_queue_tx: blocking_queue_tx.clone(),
+            blocking_abort: blocking_abort.clone(),
             blocking: blocking.clone(),
             udp_send: udp_send.clone(),
             tx_padding_packet_bytes: tx_padding_packet_bytes.clone(),
@@ -164,6 +171,7 @@ impl DaitaHooks {
             packet_count,
             blocking_queue_tx,
             blocking_state: blocking,
+            blocking_abort,
             tx_padding_bytes: 0,
             tx_padding_packet_bytes,
             rx_padding_bytes: 0,
@@ -197,14 +205,15 @@ impl DaitaHooks {
         if let Ok(blocking) = self.blocking_state.try_read()
             && blocking.is_active()
         {
-            // Send the packet anyway if the blocking queue is full
-            // TODO: this would be an out of order packet, not ideal.
-            // We should probably trigger the blocking the end here and flush
-            // the queue (don't forget to send `TriggerEvent::BlockingEnd`)
-            // before sending the packet
+            if self.blocking_queue_tx.capacity() < MIN_BLOCKING_CAPACITY {
+                self.blocking_abort.notify_one();
+            }
             if let Err(TrySendError::Full(returned_packet)) =
                 self.blocking_queue_tx.try_send(packet)
             {
+                // Send the packet anyway if the blocking queue is full
+                // TODO: this would be an out of order packet, not ideal.
+                // Should we drop the packet instead?
                 let _ = self.event_tx.send(TriggerEvent::TunnelSent);
                 self.packet_count.dec(1);
                 return Some(returned_packet);
@@ -481,21 +490,6 @@ impl MachineTimers {
     }
 }
 
-pub struct DAITA<US>
-where
-    US: UdpSend + Clone + 'static,
-{
-    packet_count: Arc<PacketCount>,
-    blocking_queue_rx: mpsc::Receiver<Packet<Wg>>,
-    blocking_queue_tx: mpsc::Sender<Packet<Wg>>,
-    blocking: Arc<RwLock<BlockingState>>,
-    peer: Weak<Mutex<Peer>>,
-    packet_pool: packet::PacketBufPool,
-    udp_send: US,
-    tx_padding_packet_bytes: Arc<AtomicUsize>,
-    event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
-}
-
 async fn handle_events<M, R>(
     mut maybenot: Framework<M, R>,
     mut event_rx: mpsc::UnboundedReceiver<TriggerEvent>,
@@ -578,6 +572,22 @@ where
     }
 }
 
+pub struct DAITA<US>
+where
+    US: UdpSend + Clone + 'static,
+{
+    packet_count: Arc<PacketCount>,
+    blocking_queue_rx: mpsc::Receiver<Packet<Wg>>,
+    blocking_queue_tx: mpsc::Sender<Packet<Wg>>,
+    blocking_abort: Arc<Notify>,
+    blocking: Arc<RwLock<BlockingState>>,
+    peer: Weak<Mutex<Peer>>,
+    packet_pool: packet::PacketBufPool,
+    udp_send: US,
+    tx_padding_packet_bytes: Arc<AtomicUsize>,
+    event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
+}
+
 impl<US> DAITA<US>
 where
     US: UdpSend + Clone + 'static,
@@ -586,11 +596,11 @@ where
         mut self,
         mut actions: mpsc::UnboundedReceiver<(Action, MachineId)>,
     ) -> Result<()> {
-        let mut blocking_ended = pin!(Fuse::terminated());
+        let mut blocking_timer = pin!(Fuse::terminated());
         let mut blocked_packets_buf = Vec::new();
 
         loop {
-            blocking_ended.set(
+            blocking_timer.set(
                 // TODO: Try refactoring this into a function, I dare you
                 if let BlockingState::Active { expires_at, .. } = &*self.blocking.read().await {
                     log::debug!("DAITA: Blocking active, expires at {:?}", expires_at);
@@ -601,7 +611,11 @@ where
             );
 
             futures::select! {
-                _ = blocking_ended => {
+                _ = blocking_timer => {
+                    log::debug!("DAITA: Blocking ended, flushing blocked packets");
+                    self.end_blocking(&mut blocked_packets_buf).await?;
+                }
+                _ = self.blocking_abort.notified().fuse() => {
                     log::debug!("DAITA: Blocking ended, flushing blocked packets");
                     self.end_blocking(&mut blocked_packets_buf).await?;
                 }
