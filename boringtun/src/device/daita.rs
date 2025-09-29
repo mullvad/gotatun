@@ -278,7 +278,7 @@ struct PaddingHeader {
 
 const DAITA_MARKER: u8 = 0xFF;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Action {
     Padding {
         replace: bool,
@@ -291,7 +291,7 @@ enum Action {
     },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum MachineTimer {
     Internal,
     Action(Action),
@@ -513,15 +513,15 @@ where
     loop {
         futures::select! {
             _ = event_rx.recv_many(&mut event_buf, usize::MAX).fuse() => {
-                log::debug!("DAITA: Received {} events from event_rx", event_buf.len());
+                log::debug!("DAITA: Received events {:?}", event_buf);
                 if event_buf.is_empty() {
                     log::debug!("DAITA: event_rx channel closed, exiting handle_events");
                     return None; // channel closed
                 }
             },
             _ = machine_timers.wait_next_timer().fuse() => {
-                log::debug!("DAITA: Timer expired, handling next timer");
                 let (machine, timer) = machine_timers.pop_next_timer().unwrap();
+                log::debug!("DAITA: Timer expired {:?} for machine {:?}", timer, machine);
                 match timer {
                     MachineTimer::Action(action_type) => action_tx
                         .send((action_type, machine))
@@ -531,10 +531,9 @@ where
                         .send(TriggerEvent::TimerEnd { machine })
                         .ok(),
                 }?;
+                continue;
             }
         }
-
-        log::debug!("DAITA: Processing actions for {} events", event_buf.len());
         let actions = maybenot.trigger_events(event_buf.as_slice(), Instant::now().into()); // TODO: support mocked time?
         event_buf.clear();
         for action in actions {
@@ -551,13 +550,6 @@ where
                     replace,
                     machine,
                 } => {
-                    log::debug!(
-                        "DAITA: SendPadding for machine {:?}, timeout={:?}, bypass={}, replace={}",
-                        machine,
-                        timeout,
-                        bypass,
-                        replace
-                    );
                     machine_timers.schedule_padding(*machine, *timeout, *replace, *bypass);
                 }
                 TriggerAction::BlockOutgoing {
@@ -567,14 +559,6 @@ where
                     replace,
                     machine,
                 } => {
-                    log::debug!(
-                        "DAITA: BlockOutgoing for machine {:?}, timeout={:?}, duration={:?}, bypass={}, replace={}",
-                        machine,
-                        timeout,
-                        duration,
-                        bypass,
-                        replace
-                    );
                     machine_timers.schedule_block(*machine, *timeout, *duration, *replace, *bypass);
                 }
                 TriggerAction::UpdateTimer {
@@ -582,12 +566,6 @@ where
                     replace,
                     machine,
                 } => {
-                    log::debug!(
-                        "DAITA: UpdateTimer for machine {:?}, duration={:?}, replace={}",
-                        machine,
-                        duration,
-                        replace
-                    );
                     if machine_timers.schedule_internal_timer(*machine, *duration, *replace) {
                         event_tx
                             .upgrade()?
@@ -641,9 +619,12 @@ where
                             let mut blocking = self.blocking.write().await;
                             let new_expiry = Instant::now() + duration;
                             match &mut *blocking {
-                                BlockingState::Active { expires_at, .. } if !replace && new_expiry <= *expires_at => {}
+                                BlockingState::Active { expires_at, .. } if !replace && new_expiry <= *expires_at => {
+                                    log::debug!("Current blocking was not replaced");
+                                }
                                 _ => {
                                     *blocking = BlockingState::Active { bypass, expires_at: new_expiry };
+                                    log::debug!("Blocking started");
                                 }
                             }
                         }
@@ -675,21 +656,28 @@ where
             (Some(true), true) => {
                 if let Ok(packet) = self.blocking_queue_rx.try_recv() {
                     // self.send_event(TriggerEvent::NormalSent)?; // TODO: Already sent when queued, unclear spec
+                    log::debug!("Padding packet was replaced by blocked packet which was sent");
                     let peer = self.get_peer().await?;
                     self.send(packet, peer).await?;
                 }
+                log::debug!("Padding packet could not be replaced by blocked packet and was sent");
                 self.send_padding().await
             }
-            (Some(true), false) => self.send_padding().await,
+            (Some(true), false) => {
+                log::debug!("Padding packet was sent bypassing blocking");
+                self.send_padding().await
+            }
             (Some(false), true)
                 if self.packet_count.replaced()
                     < self.packet_count.outbound() + self.blocking_queue_rx.len() as u32 =>
             {
+                log::debug!("Padding packet was replaced by blocked data packet and dropped");
                 self.packet_count.inc_replaced(1);
                 Ok(())
             }
             // Padding packet should or cannot be replaced by a blocked packet, so we must added it to the blocking queue
             (Some(false), _) => {
+                log::debug!("Padding packet was added to blocking queue");
                 let mut peer = self.get_peer().await?;
                 let padding_packet = self.encapsulate_padding(&mut peer).await?;
                 //  Drop the padding packet if blocking queue is full
@@ -697,10 +685,14 @@ where
                 Ok(())
             }
             (None, true) if self.packet_count.replaced() < self.packet_count.outbound() => {
+                log::debug!("Padding packet was replaced by in-flight data packet and dropped");
                 self.packet_count.inc_replaced(1);
                 Ok(())
             }
-            (None, _) => self.send_padding().await,
+            (None, _) => {
+                log::debug!("Padding packet was sent");
+                self.send_padding().await
+            }
         }
     }
 
