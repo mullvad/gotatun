@@ -23,7 +23,18 @@
 //! - Tests and benches
 //! - Track MTU changes from somewhere. In wg-go, there is an atomic variable in `Tun` that updates in realized
 //!   with MTU changes, that we use.
+//! - The is from the spec of "SendPadding" action:
+//!  > The replace flag determines if the padding packet MAY be replaced by a packet already queued to be sent
+//!  > at the time the padding packet would be sent. This applies for data queued to be turned into normal
+//!  > (non-padding) packets AND any packet (padding or normal) in the egress queue yet to be sent (i.e.,
+//!  > before the TunnelSent event is triggered). Such a packet could be in the queue due to ongoing blocking
+//!  > or just not being sent yet (e.g., due to CC). We assume that packets will be encrypted ASAP for the
+//!  > egress queue and we do not want to keep state around to distinguish padding and non-padding, hence, any
+//!  > packet. Similarly, this implies that a single blocked packet in the egress queue can replace multiple
+//!  > padding packets with the replace flag set.
 //!
+//!   We currently down't allow padding packets to replace other padding packets, or a single blocked packet
+//!   to replace multiple padding packets
 //!
 //! ## Regarding <https://mullvad.atlassian.net/wiki/spaces/PPS/pages/4285923358/DAITA+version+3>
 //! ### 1. Restore support for keep-alive packets
@@ -100,6 +111,7 @@ impl DaitaHooks {
         log::info!("Initializing DAITA with machines: {maybenot_machines:?}");
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (action_tx, action_rx) = mpsc::unbounded_channel();
         let packet_count = Arc::new(PacketCount {
             outbound_normal: AtomicU32::new(0),
             replaced_normal: AtomicU32::new(0),
@@ -129,7 +141,6 @@ impl DaitaHooks {
         .unwrap();
 
         let daita = DAITA {
-            maybenot,
             peer,
             packet_pool,
             packet_count: packet_count.clone(),
@@ -138,9 +149,16 @@ impl DaitaHooks {
             blocking: blocking.clone(),
             udp_send: udp_send.clone(),
             tx_padding_packet_bytes: tx_padding_packet_bytes.clone(),
+            event_tx: event_tx.clone().downgrade(),
         };
         // TODO abort on drop?
-        tokio::spawn(daita.handle_events(event_rx));
+        tokio::spawn(daita.handle_actions(action_rx));
+        tokio::spawn(handle_events(
+            maybenot,
+            event_rx,
+            event_tx.clone().downgrade(),
+            action_tx,
+        ));
         DaitaHooks {
             event_tx: event_tx.clone(),
             packet_count,
@@ -261,7 +279,7 @@ struct PaddingHeader {
 const DAITA_MARKER: u8 = 0xFF;
 
 #[derive(Clone, Copy)]
-enum ActionTimerType {
+enum Action {
     Padding {
         replace: bool,
         bypass: bool,
@@ -276,7 +294,7 @@ enum ActionTimerType {
 #[derive(Clone, Copy)]
 enum MachineTimer {
     Internal,
-    Action(ActionTimerType),
+    Action(Action),
 }
 
 /// Counter for the number of normal packets that have been received on the tunnel interface
@@ -378,7 +396,7 @@ impl MachineTimers {
             (
                 expiration_time,
                 machine,
-                MachineTimer::Action(ActionTimerType::Padding { replace, bypass }),
+                MachineTimer::Action(Action::Padding { replace, bypass }),
             ),
         );
         debug_assert!(self.0.iter().is_sorted_by_key(|(time, _, _)| *time));
@@ -403,7 +421,7 @@ impl MachineTimers {
             (
                 expiration_time,
                 machine,
-                MachineTimer::Action(ActionTimerType::Block {
+                MachineTimer::Action(Action::Block {
                     replace,
                     bypass,
                     duration,
@@ -463,13 +481,10 @@ impl MachineTimers {
     }
 }
 
-pub struct DAITA<M, R, US>
+pub struct DAITA<US>
 where
-    M: AsRef<[Machine]> + Send + 'static,
-    R: RngCore,
     US: UdpSend + Clone + 'static,
 {
-    maybenot: Framework<M, R>,
     packet_count: Arc<PacketCount>,
     blocking_queue_rx: mpsc::Receiver<Packet<Wg>>,
     blocking_queue_tx: mpsc::Sender<Packet<Wg>>,
@@ -478,25 +493,127 @@ where
     packet_pool: packet::PacketBufPool,
     udp_send: US,
     tx_padding_packet_bytes: Arc<AtomicUsize>,
+    event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
 }
 
-impl<M, R, US> DAITA<M, R, US>
+async fn handle_events<M, R>(
+    mut maybenot: Framework<M, R>,
+    mut event_rx: mpsc::UnboundedReceiver<TriggerEvent>,
+    event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
+    action_tx: mpsc::UnboundedSender<(Action, MachineId)>,
+) -> Option<()>
+// TODO: return type is meaningless and only there to allow `?` operator
 where
     M: AsRef<[Machine]> + Send + 'static,
     R: RngCore,
+{
+    let mut machine_timers = MachineTimers::new(maybenot.num_machines() * 2);
+    let mut event_buf = Vec::new();
+
+    loop {
+        futures::select! {
+            _ = event_rx.recv_many(&mut event_buf, usize::MAX).fuse() => {
+                log::debug!("DAITA: Received {} events from event_rx", event_buf.len());
+                if event_buf.is_empty() {
+                    log::debug!("DAITA: event_rx channel closed, exiting handle_events");
+                    return None; // channel closed
+                }
+            },
+            _ = machine_timers.wait_next_timer().fuse() => {
+                log::debug!("DAITA: Timer expired, handling next timer");
+                let (machine, timer) = machine_timers.pop_next_timer().unwrap();
+                match timer {
+                    MachineTimer::Action(action_type) => action_tx
+                        .send((action_type, machine))
+                        .ok(),
+                    MachineTimer::Internal => event_tx
+                        .upgrade()?
+                        .send(TriggerEvent::TimerEnd { machine })
+                        .ok(),
+                }?;
+            }
+        }
+
+        log::debug!("DAITA: Processing actions for {} events", event_buf.len());
+        let actions = maybenot.trigger_events(event_buf.as_slice(), Instant::now().into()); // TODO: support mocked time?
+        event_buf.clear();
+        for action in actions {
+            log::debug!("DAITA: TriggerAction: {:?}", action);
+            match action {
+                TriggerAction::Cancel { machine, timer } => match timer {
+                    maybenot::Timer::Action => machine_timers.remove_action(machine),
+                    maybenot::Timer::Internal => machine_timers.remove_internal(machine),
+                    maybenot::Timer::All => machine_timers.remove_all(machine),
+                },
+                TriggerAction::SendPadding {
+                    timeout,
+                    bypass,
+                    replace,
+                    machine,
+                } => {
+                    log::debug!(
+                        "DAITA: SendPadding for machine {:?}, timeout={:?}, bypass={}, replace={}",
+                        machine,
+                        timeout,
+                        bypass,
+                        replace
+                    );
+                    machine_timers.schedule_padding(*machine, *timeout, *replace, *bypass);
+                }
+                TriggerAction::BlockOutgoing {
+                    timeout,
+                    duration,
+                    bypass,
+                    replace,
+                    machine,
+                } => {
+                    log::debug!(
+                        "DAITA: BlockOutgoing for machine {:?}, timeout={:?}, duration={:?}, bypass={}, replace={}",
+                        machine,
+                        timeout,
+                        duration,
+                        bypass,
+                        replace
+                    );
+                    machine_timers.schedule_block(*machine, *timeout, *duration, *replace, *bypass);
+                }
+                TriggerAction::UpdateTimer {
+                    duration,
+                    replace,
+                    machine,
+                } => {
+                    log::debug!(
+                        "DAITA: UpdateTimer for machine {:?}, duration={:?}, replace={}",
+                        machine,
+                        duration,
+                        replace
+                    );
+                    if machine_timers.schedule_internal_timer(*machine, *duration, *replace) {
+                        event_tx
+                            .upgrade()?
+                            .send(TriggerEvent::TimerBegin { machine: *machine })
+                            .ok()?;
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<US> DAITA<US>
+where
     US: UdpSend + Clone + 'static,
 {
-    pub async fn handle_events(mut self, mut event_rx: mpsc::UnboundedReceiver<TriggerEvent>) {
-        let mut machine_timers = MachineTimers::new(self.maybenot.num_machines() * 2);
-
-        let mut event_buf = Vec::new();
+    async fn handle_actions(
+        mut self,
+        mut actions: mpsc::UnboundedReceiver<(Action, MachineId)>,
+    ) -> Result<()> {
+        let mut blocking_ended = pin!(Fuse::terminated());
         let mut blocked_packets_buf = Vec::new();
 
-        let mut blocking_ended = pin!(Fuse::terminated());
-
         loop {
-            // TODO: Try refactoring this into a function, I dare you
             blocking_ended.set(
+                // TODO: Try refactoring this into a function, I dare you
                 if let BlockingState::Active { expires_at, .. } = &*self.blocking.read().await {
                     log::debug!("DAITA: Blocking active, expires at {:?}", expires_at);
                     tokio::time::sleep_until(*expires_at).fuse()
@@ -504,242 +621,115 @@ where
                     Fuse::terminated()
                 },
             );
+
             futures::select! {
-                _ = event_rx.recv_many(&mut event_buf, usize::MAX).fuse() => {
-                    log::debug!("DAITA: Received {} events from event_rx", event_buf.len());
-                    if event_buf.is_empty() {
-                        log::debug!("DAITA: event_rx channel closed, exiting handle_events");
-                        return; // channel closed
-                    }
-                },
                 _ = blocking_ended => {
                     log::debug!("DAITA: Blocking ended, flushing blocked packets");
-                    self.end_blocking(&mut blocked_packets_buf, &mut event_buf).await;
+                    self.end_blocking(&mut blocked_packets_buf).await?;
                 }
-                _ = machine_timers.wait_next_timer().fuse() => {
-                    log::debug!("DAITA: Timer expired, handling next timer");
-                    let (machine, timer) = machine_timers.pop_next_timer().unwrap();
-                    if let Err(ErrorAction::Close) = self.on_machine_timer(machine, timer, &mut machine_timers, &mut event_buf).await {
-                        log::debug!("DAITA: on_machine_timer returned Close, exiting handle_events");
-                        return
-                    }
-                }
-            }
-            // Since `TriggerEvent::TimerBegin` can be generated by actions, we need to loop until
-            // no new events are generated
-            loop {
-                log::debug!("DAITA: Processing actions for {} events", event_buf.len());
-                let actions = self
-                    .maybenot
-                    .trigger_events(event_buf.as_slice(), Instant::now().into()); // TODO: support mocked time?
-                event_buf.clear(); // Clear immediately after use so we can add new events generated by actions
-                for action in actions {
-                    log::debug!("DAITA: TriggerAction: {:?}", action);
+                res = actions.recv().fuse() => {
+                    let Some((action, machine)) = res else {
+                        log::debug!("DAITA: actions channel closed, exiting handle_actions");
+                        break; // TODO: flush blocked packets?
+                    };
                     match action {
-                        TriggerAction::Cancel { machine, timer } => match timer {
-                            maybenot::Timer::Action => machine_timers.remove_action(machine),
-                            maybenot::Timer::Internal => machine_timers.remove_internal(machine),
-                            maybenot::Timer::All => machine_timers.remove_all(machine),
-                        },
-                        TriggerAction::SendPadding {
-                            timeout,
-                            bypass,
-                            replace,
-                            machine,
-                        } => {
-                            log::debug!(
-                                "DAITA: SendPadding for machine {:?}, timeout={:?}, bypass={}, replace={}",
-                                machine,
-                                timeout,
-                                bypass,
-                                replace
-                            );
-                            machine_timers.schedule_padding(*machine, *timeout, *replace, *bypass);
+                        Action::Padding { replace, bypass } => {
+                            self.handle_padding(machine, replace, bypass).await?;
                         }
-                        TriggerAction::BlockOutgoing {
-                            timeout,
-                            duration,
-                            bypass,
-                            replace,
-                            machine,
-                        } => {
-                            log::debug!(
-                                "DAITA: BlockOutgoing for machine {:?}, timeout={:?}, duration={:?}, bypass={}, replace={}",
-                                machine,
-                                timeout,
-                                duration,
-                                bypass,
-                                replace
-                            );
-                            machine_timers
-                                .schedule_block(*machine, *timeout, *duration, *replace, *bypass);
-                        }
-                        TriggerAction::UpdateTimer {
-                            duration,
-                            replace,
-                            machine,
-                        } => {
-                            log::debug!(
-                                "DAITA: UpdateTimer for machine {:?}, duration={:?}, replace={}",
-                                machine,
-                                duration,
-                                replace
-                            );
-                            if machine_timers.schedule_internal_timer(*machine, *duration, *replace)
-                            {
-                                event_buf.push(TriggerEvent::TimerBegin { machine: *machine });
+                        Action::Block { replace, bypass, duration } => {
+                            self.send_event(TriggerEvent::BlockingBegin { machine })?;
+                            let mut blocking = self.blocking.write().await;
+                            let new_expiry = Instant::now() + duration;
+                            match &mut *blocking {
+                                BlockingState::Active { expires_at, .. } if !replace && new_expiry <= *expires_at => {}
+                                _ => {
+                                    *blocking = BlockingState::Active { bypass, expires_at: new_expiry };
+                                }
                             }
                         }
                     }
                 }
-                // If no new events were generated by actions, break the loop
-                if event_buf.is_empty() {
-                    log::debug!("DAITA: No new events generated by actions, breaking inner loop");
-                    break;
-                }
-            }
-        }
-    }
-
-    async fn on_machine_timer(
-        &mut self,
-        machine: MachineId,
-        timer: MachineTimer,
-        machine_timers: &mut MachineTimers,
-        event_buf: &mut Vec<TriggerEvent>,
-    ) -> Result<()> {
-        match timer {
-            MachineTimer::Action(action_type) => match action_type {
-                ActionTimerType::Padding { replace, bypass } => {
-                    self.handle_padding(machine, machine_timers, replace, bypass, event_buf)
-                        .await?;
-                }
-                ActionTimerType::Block {
-                    replace,
-                    bypass,
-                    duration,
-                } => {
-                    event_buf.push(TriggerEvent::BlockingBegin { machine });
-                    let mut blocking = self.blocking.write().await;
-                    let new_expiry = Instant::now() + duration;
-                    match &mut *blocking {
-                        BlockingState::Active { expires_at, .. }
-                            if !replace && new_expiry <= *expires_at => {}
-                        _ => {
-                            *blocking = BlockingState::Active {
-                                bypass,
-                                expires_at: new_expiry,
-                            };
-                        }
-                    }
-                }
-            },
-            MachineTimer::Internal => {
-                event_buf.push(TriggerEvent::TimerEnd { machine });
             }
         }
         Ok(())
     }
 
+    /// Send a padding packet according to [`TriggerAction::SendPadding`].
     async fn handle_padding(
         &mut self,
         machine: MachineId,
-        machine_timers: &mut MachineTimers,
         replace: bool,
         padding_bypass: bool,
-        event_buf: &mut Vec<TriggerEvent>,
     ) -> Result<()> {
+        self.send_event(TriggerEvent::PaddingSent { machine })?;
+
         let blocking_with_bypass = match &*self.blocking.read().await {
             BlockingState::Inactive => None,
             BlockingState::Active {
                 bypass: blocking_bypass,
                 ..
-            } => Some(*blocking_bypass && padding_bypass),
+            } => Some(*blocking_bypass && padding_bypass), // Both must be true to bypass
         };
+
         match (blocking_with_bypass, replace) {
             (Some(true), true) => {
                 if let Ok(packet) = self.blocking_queue_rx.try_recv() {
-                    // TODO: Fix (and maybe don't wait for peer lock)
-                    let Some(destination) = self
-                        .peer
-                        .upgrade()
-                        .ok_or(ErrorAction::Close)?
-                        .lock()
-                        .await
-                        .endpoint()
-                        .addr
-                    else {
-                        log::error!("No endpoint");
-                        return Err(ErrorAction::Ignore);
-                    };
-                    self.udp_send
-                        .send_to(packet.into_bytes(), destination)
-                        .await
-                        .unwrap();
+                    // self.send_event(TriggerEvent::NormalSent)?; // TODO: Already sent when queued, unclear spec
+                    let peer = self.get_peer().await?;
+                    self.send(packet, peer).await?;
                 }
-                self.send_padding(event_buf, machine).await
+                self.send_padding().await
             }
-            (Some(true), false) => self.send_padding(event_buf, machine).await,
+            (Some(true), false) => self.send_padding().await,
             (Some(false), true)
                 if self.packet_count.replaced()
                     < self.packet_count.outbound() + self.blocking_queue_rx.len() as u32 =>
             {
                 self.packet_count.inc_replaced(1);
-                machine_timers.remove_action(&machine);
                 Ok(())
             }
-            // Padding packet should or cannot replace any blocked packet
+            // Padding packet should or cannot be replaced by a blocked packet, so we must added it to the blocking queue
             (Some(false), _) => {
-                let padding_packet = self.encapsulate_padding(event_buf, machine).await?;
+                let mut peer = self.get_peer().await?;
+                let padding_packet = self.encapsulate_padding(&mut peer).await?;
                 //  Drop the padding packet if blocking queue is full
                 let _ = self.blocking_queue_tx.try_send(padding_packet);
                 Ok(())
             }
             (None, true) if self.packet_count.replaced() < self.packet_count.outbound() => {
                 self.packet_count.inc_replaced(1);
-                machine_timers.remove_action(&machine);
                 Ok(())
             }
-            (None, _) => self.send_padding(event_buf, machine).await,
+            (None, _) => self.send_padding().await,
         }
     }
 
-    async fn end_blocking(
-        &mut self,
-        packets: &mut Vec<Packet<Wg>>,
-        event_buf: &mut Vec<TriggerEvent>,
-    ) {
-        // We lock the peer for the entire duration of flushing the blocking queue.
-        // This will prevent other incoming and outgoing packets from being processed
-        // which should be fine and help prevent out of order packets.
-        let Some(peer) = self.peer.upgrade() else {
-            log::error!("Peer gone");
-            return;
-        };
-        let Some(addr) = peer.lock().await.endpoint().addr else {
+    async fn end_blocking(&mut self, packets: &mut Vec<Packet<Wg>>) -> Result<()> {
+        let Some(addr) = self.get_peer().await?.endpoint().addr else {
             log::error!("No endpoint");
-            return;
+            return Err(ErrorAction::Close);
         };
+
         let mut blocking = true;
         loop {
             let limit = self.udp_send.max_number_of_packets_to_send();
             futures::select! {
                 count = self.blocking_queue_rx.recv_many(packets, limit - packets.len()).fuse() => {
                     if count == 0 {
-                        break; // channel closed
+                        break Err(ErrorAction::Close); // channel closed
                     }
                 },
                 // Packet queue is empty
                 default => {
                     // When the packet queue is empty, we can end blocking.
-                    // To prevent new packets from getting stuck in the queue before we set the state to Inactive,
+                    // To prevent new packets from sneaking into the queue before we set the state to Inactive,
                     // we loop once more and flush any new packets that might have arrived.
                     if blocking {
                         *self.blocking.write().await = BlockingState::Inactive;
-                        event_buf.push(TriggerEvent::BlockingEnd);
+                        self.send_event(TriggerEvent::BlockingEnd)?;
                         blocking = false;
                     }  else {
-                        return;
+                        return Ok(());
                     }
 
                 },
@@ -756,53 +746,22 @@ where
             {
                 // Trigger a TunnelSent for each packet sent
                 let sent = count - packets.len();
-                event_buf.resize(event_buf.len() + sent, TriggerEvent::TunnelSent);
+                let event_tx = self.event_tx.upgrade().ok_or(ErrorAction::Close)?;
+                for _ in 0..sent {
+                    event_tx
+                        .send(TriggerEvent::TunnelSent)
+                        .map_err(|_| ErrorAction::Close)?;
+                }
             }
         }
-    }
-
-    async fn send_padding(
-        &self,
-        event_buf: &mut Vec<TriggerEvent>,
-        machine: MachineId,
-    ) -> Result<()> {
-        let packet = self.encapsulate_padding(event_buf, machine).await?;
-        let Some(peer) = self.peer.upgrade() else {
-            return Err(ErrorAction::Close);
-        };
-        // TODO: don't lock twice
-        let peer = peer.lock().await;
-        let endpoint_addr = peer.endpoint().addr;
-        let Some(addr) = endpoint_addr else {
-            log::error!("No endpoint");
-            return Err(ErrorAction::Ignore);
-        };
-
-        self.udp_send
-            .send_to(packet.into_bytes(), addr)
-            .await
-            .map_err(|_| ErrorAction::Close)?;
-
-        // TODO: do not increase if handshake
-        self.tx_padding_packet_bytes
-            .fetch_add(MTU as usize, atomic::Ordering::SeqCst);
-        event_buf.push(TriggerEvent::TunnelSent);
-        Ok(())
     }
 
     // TODO: handle the case where handle_outgoing_packet returns a handshake
     async fn encapsulate_padding(
         &self,
-        event_buf: &mut Vec<TriggerEvent>,
-        machine: MachineId,
+        peer: &mut tokio::sync::OwnedMutexGuard<Peer>,
     ) -> Result<Packet<Wg>> {
-        let Some(peer) = self.peer.upgrade() else {
-            return Err(ErrorAction::Close);
-        };
-        let mut peer = peer.lock().await;
-
         // TODO: Reuse the same padding packet each time (unless MTU changes)?
-        event_buf.push(TriggerEvent::PaddingSent { machine });
         match peer
             .tunnel
             .handle_outgoing_packet(self.create_padding_packet(MTU))
@@ -825,6 +784,50 @@ where
             .extend_from_slice(padding_packet_header.as_bytes());
         padding_packet_buf.buf_mut().resize(mtu.into(), 0);
         padding_packet_buf
+    }
+
+    async fn send_padding(&self) -> Result<()> {
+        let mut peer = self.get_peer().await?;
+
+        let packet = self.encapsulate_padding(&mut peer).await?;
+        self.send(packet, peer).await?;
+        Ok(())
+    }
+
+    async fn send(
+        &self,
+        packet: Packet<Wg>,
+        peer: tokio::sync::OwnedMutexGuard<Peer>,
+    ) -> Result<()> {
+        let endpoint_addr = peer.endpoint().addr;
+        let Some(addr) = endpoint_addr else {
+            log::trace!("No endpoint");
+            return Err(ErrorAction::Ignore);
+        };
+        self.udp_send
+            .send_to(packet.into_bytes(), addr)
+            .await
+            .map_err(|_| ErrorAction::Close)?;
+        self.tx_padding_packet_bytes
+            .fetch_add(MTU as usize, atomic::Ordering::SeqCst);
+        self.send_event(TriggerEvent::TunnelSent)?;
+        Ok(())
+    }
+
+    async fn get_peer(&self) -> Result<tokio::sync::OwnedMutexGuard<Peer>> {
+        let Some(peer) = self.peer.upgrade() else {
+            return Err(ErrorAction::Close);
+        };
+        let peer = peer.lock_owned().await;
+        Ok(peer)
+    }
+
+    fn send_event(&self, event: TriggerEvent) -> Result<()> {
+        self.event_tx
+            .upgrade()
+            .ok_or(ErrorAction::Close)?
+            .send(event)
+            .map_err(|_| ErrorAction::Close)
     }
 }
 
