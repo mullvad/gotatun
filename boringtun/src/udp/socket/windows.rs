@@ -1,7 +1,7 @@
 use socket2::{Domain, Socket, Type};
-use std::{ffi::c_char, io, net::SocketAddr};
 use std::{ffi::c_uchar, mem, sync::LazyLock};
 use std::{ffi::c_uint, os::windows::io::AsRawSocket};
+use std::{io, net::SocketAddr};
 use tokio::io::Interest;
 use windows_sys::Win32::Networking::WinSock::{self, CMSGHDR};
 
@@ -144,6 +144,8 @@ impl UdpSend for super::UdpSocket {
     #[cfg(feature = "windows-gro")]
     /// Enable receive offloading
     fn enable_udp_gro(&self) -> io::Result<()> {
+        use std::ffi::c_char;
+
         let raw_sock = self.inner.as_raw_socket();
         // Same as msquic
         let val = u32::from(u16::MAX);
