@@ -709,8 +709,18 @@ where
         packets: &mut Vec<Packet<Wg>>,
         event_buf: &mut Vec<TriggerEvent>,
     ) {
-        *self.blocking.write().await = BlockingState::Inactive;
-        event_buf.push(TriggerEvent::BlockingEnd);
+        // We lock the peer for the entire duration of flushing the blocking queue.
+        // This will prevent other incoming and outgoing packets from being processed
+        // which should be fine and help prevent out of order packets.
+        let Some(peer) = self.peer.upgrade() else {
+            log::error!("Peer gone");
+            return;
+        };
+        let Some(addr) = peer.lock().await.endpoint().addr else {
+            log::error!("No endpoint");
+            return;
+        };
+        let mut blocking = true;
         loop {
             let limit = self.udp_send.max_number_of_packets_to_send();
             futures::select! {
@@ -719,18 +729,23 @@ where
                         break; // channel closed
                     }
                 },
-                default => break, // Packet queue is empty
+                // Packet queue is empty
+                default => {
+                    // When the packet queue is empty, we can end blocking.
+                    // To prevent new packets from getting stuck in the queue before we set the state to Inactive,
+                    // we loop once more and flush any new packets that might have arrived.
+                    if blocking {
+                        *self.blocking.write().await = BlockingState::Inactive;
+                        event_buf.push(TriggerEvent::BlockingEnd);
+                        blocking = false;
+                    }  else {
+                        return;
+                    }
+
+                },
             }
 
             let mut send_many_bufs = US::SendManyBuf::default();
-            let Some(peer) = self.peer.upgrade() else {
-                log::error!("Peer gone");
-                return;
-            };
-            let Some(addr) = peer.lock().await.endpoint().addr else {
-                log::error!("No endpoint");
-                return;
-            };
             // TODO: don't allocate (update send_many_to to take iterator?)
             let mut packets: Vec<_> = packets.drain(..).map(|p| (p.into_bytes(), addr)).collect();
             let count = packets.len();
