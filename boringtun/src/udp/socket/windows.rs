@@ -477,10 +477,9 @@ pub fn cmsgdata_align(length: usize) -> usize {
     (length + mem::align_of::<usize>() - 1) & !(mem::align_of::<usize>() - 1)
 }
 
-// TODO: fixup
+/// Maximum number of segments we can send in one go using UDP GSO
 pub static MAX_GSO_SEGMENTS: LazyLock<usize> = LazyLock::new(|| {
     // Detect whether UDP GSO is supported
-
     let Ok(socket) = Socket::new(Domain::IPV4, Type::DGRAM, None) else {
         return 1;
     };
