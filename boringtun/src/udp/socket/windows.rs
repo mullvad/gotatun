@@ -38,6 +38,7 @@ impl UdpSend for super::UdpSocket {
         packets: &mut Vec<(Packet, SocketAddr)>,
     ) -> io::Result<()> {
         if *MAX_GSO_SEGMENTS == 1 {
+            // No GSO support
             for (pkt, dest) in packets.drain(..) {
                 self.send_to(pkt, dest).await?;
             }
