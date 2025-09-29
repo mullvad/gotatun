@@ -37,6 +37,13 @@ impl UdpSend for super::UdpSocket {
         buf: &mut SendmmsgBuf,
         packets: &mut Vec<(Packet, SocketAddr)>,
     ) -> io::Result<()> {
+        if *MAX_GSO_SEGMENTS == 1 {
+            for (pkt, dest) in packets.drain(..) {
+                self.send_to(pkt, dest).await?;
+            }
+            return Ok(());
+        }
+
         let n = packets.len();
         debug_assert!(n <= *MAX_GSO_SEGMENTS);
 
