@@ -1,5 +1,9 @@
+use socket2::{Domain, Socket, Type};
 use std::{ffi::c_char, io, net::SocketAddr};
+use std::{ffi::c_uchar, mem, sync::LazyLock};
+use std::{ffi::c_uint, os::windows::io::AsRawSocket};
 use tokio::io::Interest;
+use windows_sys::Win32::Networking::WinSock::{self, CMSGHDR};
 
 use crate::{
     packet::{Packet, PacketBufPool},
@@ -397,11 +401,6 @@ mod gro {
         .as_socket()
     }
 }
-
-use socket2::{Domain, Socket, Type};
-use std::{ffi::c_uchar, mem, sync::LazyLock};
-use std::{ffi::c_uint, os::windows::io::AsRawSocket};
-use windows_sys::Win32::Networking::WinSock::{self, CMSGHDR};
 
 /// Struct representing a CMSG
 pub struct Cmsg {
