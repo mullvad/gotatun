@@ -101,6 +101,7 @@ impl UdpSend for super::UdpSocket {
             // Single packet, so use send_to
             if buf.buffer.len() == segment_size {
                 self.send_to(pkt, dest).await?;
+                continue;
             }
 
             self.inner
