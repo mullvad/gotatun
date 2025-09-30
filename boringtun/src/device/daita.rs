@@ -250,22 +250,18 @@ impl DaitaHooks {
 
 impl Hooks for DaitaHooks {
     fn before_data_encapsulate(&mut self, packet: Packet) -> Packet {
-        // TODO: check peer
         DaitaHooks::before_data_encapsulate(self, packet)
     }
 
     fn after_data_encapsulate(&self, packet: Packet<packet::Wg>) -> Option<Packet<Wg>> {
-        // TODO: check peer
         DaitaHooks::after_data_encapsulate(self, packet)
     }
 
     fn before_data_decapsulate(&self) {
-        // TODO: check peer
         DaitaHooks::before_data_decapsulate(self);
     }
 
     fn after_data_decapsulate(&mut self, packet: Packet) -> Option<Packet> {
-        // TODO: check peer
         DaitaHooks::after_data_decapsulate(self, packet)
     }
 }
@@ -616,7 +612,7 @@ where
                     self.end_blocking(&mut blocked_packets_buf).await?;
                 }
                 _ = self.blocking_abort.notified().fuse() => {
-                    log::debug!("DAITA: Blocking ended, flushing blocked packets");
+                    log::debug!("DAITA: Blocking was aborted due to overfull buffer capacity, flushing blocked packets");
                     self.end_blocking(&mut blocked_packets_buf).await?;
                 }
                 res = actions.recv().fuse() => {
