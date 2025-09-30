@@ -16,7 +16,7 @@ use ip_network::IpNetwork;
 use std::collections::HashMap;
 use std::io::{self};
 use std::mem;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::ops::BitOrAssign;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -703,7 +703,7 @@ impl<T: DeviceTransports> Device<T> {
                 };
             }
 
-            match tunnel.handle_incoming_packet(parsed_packet, daita.as_mut()) {
+            match tunnel.handle_incoming_packet(parsed_packet) {
                 TunnResult::Done => (),
                 TunnResult::Err(_) => continue,
                 TunnResult::WriteToNetwork(packet) => {
@@ -720,26 +720,31 @@ impl<T: DeviceTransports> Device<T> {
                         }
                     }
                 }
-                TunnResult::WriteToTunnelV4(packet) => {
-                    if peer.is_allowed_ip(packet.header.destination()) {
-                        /*let Some(packet) = hooks.map_incoming_data(packet.into_bytes()) else {
-                            continue;
-                        };*/
-                        if let Err(_err) = tun_tx.send(packet.into()).await {
-                            log::trace!("buffered_tun_send.send failed");
-                            break;
+                TunnResult::WriteToTunnel(mut packet) => {
+                    if let Some(daita) = daita {
+                        match daita.after_data_decapsulate(packet) {
+                            Some(new) => packet = new,
+                            None => continue,
                         }
                     }
-                }
-                TunnResult::WriteToTunnelV6(packet) => {
-                    if peer.is_allowed_ip(packet.header.destination()) {
-                        /*let Some(packet) = hooks.map_incoming_data(packet.into_bytes()) else {
-                            continue;
-                        };*/
-                        if let Err(_err) = tun_tx.send(packet.into()).await {
-                            log::trace!("buffered_tun_send.send failed");
-                            break;
-                        }
+
+                    // keepalive
+                    if packet.is_empty() {
+                        continue;
+                    }
+                    let Ok(packet) = packet.try_into_ipvx() else {
+                        continue;
+                    };
+                    let (destination, packet): (IpAddr, _) = packet.either(
+                        |ipv4| (ipv4.header.destination().into(), ipv4.into()),
+                        |ipv6| (ipv6.header.destination().into(), ipv6.into()),
+                    );
+
+                    if peer.is_allowed_ip(destination)
+                        && let Err(_err) = tun_tx.send(packet).await
+                    {
+                        log::trace!("buffered_tun_send.send failed");
+                        break;
                     }
                 }
             };
