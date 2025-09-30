@@ -18,7 +18,10 @@ use crate::{
         Ip, IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Ipv6Header, Packet, PacketBufPool, Udp,
         UdpHeader,
     },
-    tun::channel::{Ipv4Fragments, TunChannelRx, TunChannelTx},
+    tun::{
+        LinkMtuWatcher,
+        channel::{Ipv4Fragments, TunChannelRx, TunChannelTx},
+    },
     udp::{UdpRecv, UdpSend, UdpTransportFactory},
 };
 
@@ -105,6 +108,7 @@ pub fn new_udp_tun_channel(
     capacity: usize,
     source_ip_v4: Ipv4Addr,
     source_ip_v6: Ipv6Addr,
+    tun_link_mtu: LinkMtuWatcher,
 ) -> (TunChannelTx, TunChannelRx, UdpChannelFactory) {
     let (udp_tx, tun_rx) = mpsc::channel(capacity);
     let (tun_tx_v4, udp_rx_v4) = mpsc::channel(capacity);
@@ -115,7 +119,10 @@ pub fn new_udp_tun_channel(
 
         fragments_v4: Ipv4Fragments::default(),
     };
-    let tun_rx = TunChannelRx { tun_rx };
+    let tun_rx = TunChannelRx {
+        tun_rx,
+        mtu: tun_link_mtu,
+    };
     let udp_channel_factory = UdpChannelFactory {
         source_ip_v4,
         source_ip_v6,

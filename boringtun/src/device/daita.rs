@@ -55,6 +55,7 @@ use std::{
 use crate::{
     device::hooks::Hooks,
     packet::{self, Packet, Wg, WgPacketType},
+    tun::LinkMtuWatcher,
     udp::UdpSend,
 };
 
@@ -68,9 +69,6 @@ use tokio::sync::{
 };
 use tokio::time::Instant;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
-
-// TODO: get real MTU
-const MTU: u16 = 1300;
 
 // TODO: Pick a good number
 /// Max number of blocked packets.
@@ -92,6 +90,7 @@ pub struct DaitaHooks {
     blocking_queue_tx: mpsc::Sender<Packet<Wg>>,
     blocking_state: Arc<RwLock<BlockingState>>, // TODO: Replace with `tokio::sync::watch`?
     blocking_abort: Arc<Notify>,
+    mtu: LinkMtuWatcher,
     // TODO: Export to metrics sink
     /// Total extra bytes added due to constant-size padding of data packets.
     tx_padding_bytes: usize,
@@ -107,6 +106,7 @@ impl DaitaHooks {
     pub fn new<US>(
         maybenot_machines: Vec<String>,
         peer: Weak<Mutex<Peer>>,
+        mtu: LinkMtuWatcher,
         udp_send: US,
         packet_pool: packet::PacketBufPool,
     ) -> Self
@@ -155,6 +155,7 @@ impl DaitaHooks {
             blocking_abort: blocking_abort.clone(),
             blocking: blocking.clone(),
             udp_send: udp_send.clone(),
+            mtu: mtu.clone(),
             tx_padding_packet_bytes: tx_padding_packet_bytes.clone(),
             event_tx: event_tx.clone().downgrade(),
         };
@@ -172,6 +173,7 @@ impl DaitaHooks {
             blocking_queue_tx,
             blocking_state: blocking,
             blocking_abort,
+            mtu,
             tx_padding_bytes: 0,
             tx_padding_packet_bytes,
             rx_padding_bytes: 0,
@@ -184,12 +186,20 @@ impl DaitaHooks {
         let _ = self.event_tx.send(TriggerEvent::NormalSent);
         self.packet_count.inc_outbound(1);
 
-        // Pad to constant size
-        // // FIXME: mtu
-        // debug_assert!(packet.len() <= MTU as usize);
-        // self.tx_padding_bytes += MTU as usize - packet.len(); // TODO
+        let mtu = usize::from(self.mtu.get());
 
-        // packet.buf_mut().resize(MTU as usize, 0);
+        if packet.len() > mtu {
+            if cfg!(debug_assertions) {
+                log::warn!(
+                    "Packet size exceeded MTU. Either the TUN MTU changed, or there's a bug."
+                );
+            }
+            return packet;
+        }
+
+        // Pad to constant size
+        self.tx_padding_bytes += mtu - packet.len();
+        packet.buf_mut().resize(mtu, 0);
         packet
     }
 
@@ -580,6 +590,7 @@ where
     peer: Weak<Mutex<Peer>>,
     packet_pool: packet::PacketBufPool,
     udp_send: US,
+    mtu: LinkMtuWatcher,
     tx_padding_packet_bytes: Arc<AtomicUsize>,
     event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
 }
@@ -689,7 +700,8 @@ where
             (Some(false), _) => {
                 log::debug!("Padding packet was added to blocking queue");
                 let mut peer = self.get_peer().await?;
-                let padding_packet = self.encapsulate_padding(&mut peer).await?;
+                let mtu = self.mtu.get();
+                let padding_packet = self.encapsulate_padding(&mut peer, mtu).await?;
                 //  Drop the padding packet if blocking queue is full
                 let _ = self.blocking_queue_tx.try_send(padding_packet);
                 Ok(())
@@ -762,11 +774,12 @@ where
     async fn encapsulate_padding(
         &self,
         peer: &mut tokio::sync::OwnedMutexGuard<Peer>,
+        mtu: u16,
     ) -> Result<Packet<Wg>> {
         // TODO: Reuse the same padding packet each time (unless MTU changes)?
         match peer
             .tunnel
-            .handle_outgoing_packet(self.create_padding_packet(MTU))
+            .handle_outgoing_packet(self.create_padding_packet(mtu))
         {
             None => Err(ErrorAction::Ignore), // TODO: error?
             Some(packet) => Ok(packet),
@@ -788,10 +801,11 @@ where
         padding_packet_buf
     }
 
-    async fn send_padding(&self) -> Result<()> {
+    async fn send_padding(&mut self) -> Result<()> {
+        let mtu = self.mtu.get();
         let mut peer = self.get_peer().await?;
 
-        let packet = self.encapsulate_padding(&mut peer).await?;
+        let packet = self.encapsulate_padding(&mut peer, mtu).await?;
         self.send(packet, peer).await?;
         Ok(())
     }
@@ -810,8 +824,8 @@ where
             .send_to(packet.into_bytes(), addr)
             .await
             .map_err(|_| ErrorAction::Close)?;
-        self.tx_padding_packet_bytes
-            .fetch_add(MTU as usize, atomic::Ordering::SeqCst);
+        // self.tx_padding_packet_bytes
+        //     .fetch_add(MTU as usize, atomic::Ordering::SeqCst);
         self.send_event(TriggerEvent::TunnelSent)?;
         Ok(())
     }
