@@ -123,7 +123,7 @@ impl UdpSend for super::UdpSocket {
                     let msg_hdr = socket2::MsgHdr::new()
                         .with_addr(&daddr)
                         .with_buffers(&io_slices)
-                        .with_control(buf.cmsg.as_slice());
+                        .with_control(buf.cmsg.as_bytes());
 
                     client_socket_ref.sendmsg(&msg_hdr, 0)
                 })
@@ -340,8 +340,7 @@ mod gro {
 
         let ctrl = WSABUF {
             len: cmsg.len() as u32,
-            // TODO: use `cmsg.as_mut_ptr()` when we can implement `IntoBytes`
-            buf: cmsg.header.as_mut_bytes().as_mut_ptr(),
+            buf: cmsg.as_mut_bytes().as_mut_ptr(),
         };
 
         let mut source = SOCKADDR_INET::default();
@@ -406,8 +405,9 @@ mod gro {
 }
 
 /// Struct representing a CMSG
-#[derive(FromBytes, Immutable, KnownLayout)]
-#[repr(C)]
+#[derive(FromBytes, Immutable, KnownLayout, IntoBytes)]
+// TODO: Remove packed when `IntoBytes` handles DSTs properly
+#[repr(C, packed)]
 pub struct Cmsg {
     pub header: Hdr,
     pub data: [u8],
@@ -437,15 +437,9 @@ impl Cmsg {
         cmsg
     }
 
+    #[cfg(feature = "windows-gro")]
     pub fn len(&self) -> usize {
         std::mem::size_of_val(self)
-    }
-
-    pub fn as_slice(&self) -> &[u8] {
-        let ptr = self as *const Cmsg as *const CMSGHDR;
-        // TODO: We can make this safe when `IntoBytes` supports DSTs
-        // SAFETY: ptr is aligned and valid for reads of `self.len()` bytes
-        unsafe { std::slice::from_raw_parts(ptr as *const u8, self.len()) }
     }
 }
 
