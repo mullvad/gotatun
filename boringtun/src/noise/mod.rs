@@ -157,7 +157,7 @@ impl Tunn {
         }
     }
 
-    pub(crate) fn handle_incoming_packet(&mut self, packet: WgKind) -> TunnResult {
+    pub fn handle_incoming_packet(&mut self, packet: WgKind) -> TunnResult {
         match packet {
             WgKind::HandshakeInit(p) => self.handle_handshake_init(p),
             WgKind::HandshakeResp(p) => self.handle_handshake_response(p),
