@@ -32,7 +32,9 @@ use crate::noise::{Tunn, TunnResult};
 use crate::packet::{PacketBufPool, WgKind};
 use crate::task::Task;
 use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
-use crate::tun::{IpRecv, IpSend};
+#[cfg(feature = "tun")]
+use crate::tun::tun_async_device::TunSusan;
+use crate::tun::{IpRecv, IpSend, LinkMtuWatcher};
 use crate::udp::buffer::{BufferedUdpReceive, BufferedUdpSend};
 use crate::udp::{
     UdpRecv, UdpSend, UdpTransportFactory, UdpTransportFactoryParams, socket::UdpSocketFactory,
@@ -96,11 +98,13 @@ pub struct DeviceConfig {
 
 /// By default, use a UDP socket for sending datagrams and a tunnel device for IP packets.
 #[cfg(feature = "tun")]
-pub type DefaultDeviceTransports = (
-    UdpSocketFactory,
-    Arc<tun::AsyncDevice>,
-    Arc<tun::AsyncDevice>,
-);
+pub type DefaultDeviceTransports = (UdpSocketFactory, TunSusan);
+
+pub trait DeviceTransports: 'static {
+    type UdpTransportFactory: UdpTransportFactory;
+    type IpSend: IpSend;
+    type IpRecv: IpRecv;
+}
 
 impl<UF, IS, IR> DeviceTransports for (UF, IS, IR)
 where
@@ -113,10 +117,14 @@ where
     type IpRecv = IR;
 }
 
-pub trait DeviceTransports: 'static {
-    type UdpTransportFactory: UdpTransportFactory;
-    type IpSend: IpSend;
-    type IpRecv: IpRecv;
+impl<UF, IP> DeviceTransports for (UF, IP)
+where
+    UF: UdpTransportFactory,
+    IP: IpSend + IpRecv + Clone,
+{
+    type UdpTransportFactory = UF;
+    type IpSend = IP;
+    type IpRecv = IP;
 }
 
 pub struct Device<T: DeviceTransports> {
@@ -133,6 +141,9 @@ pub struct Device<T: DeviceTransports> {
     /// This is implemented by the task taking the lock upon startup, and holding it until it is
     /// stopped.
     tun_rx: Arc<Mutex<T::IpRecv>>,
+
+    /// Link-MTU wather of the TUN device.
+    tun_rx_mtu: LinkMtuWatcher,
 
     peers: HashMap<x25519::PublicKey, Arc<Mutex<Peer>>>,
     peers_by_ip: AllowedIps<Arc<Mutex<Peer>>>,
@@ -197,6 +208,7 @@ impl<T: DeviceTransports> Connection<T> {
 
         // FIXME: the lifetimes of the UdpSend are getting weird.
         // FIXME: this is a weird place to initialize DAITA.
+        let tun_rx_mtu = device_guard.tun_rx_mtu.clone();
         for peer_arc in device_guard.peers.values_mut() {
             let mut peer = peer_arc.lock().await;
             if !peer.maybenot_machines.is_empty() {
@@ -204,6 +216,7 @@ impl<T: DeviceTransports> Connection<T> {
                 peer.daita = Some(DaitaHooks::new(
                     peer.maybenot_machines.clone(),
                     Arc::downgrade(peer_arc),
+                    tun_rx_mtu.clone(),
                     buffered_udp_tx_v4.clone(), // TODO: ipv6?
                     pool.clone(),
                 ))
@@ -265,9 +278,7 @@ impl<T: DeviceTransports> Connection<T> {
 }
 
 #[cfg(feature = "tun")]
-impl<T: DeviceTransports<IpRecv = Arc<tun::AsyncDevice>, IpSend = Arc<tun::AsyncDevice>>>
-    DeviceHandle<T>
-{
+impl<T: DeviceTransports<IpRecv = TunSusan, IpSend = TunSusan>> DeviceHandle<T> {
     pub async fn from_tun_name(
         udp_factory: T::UdpTransportFactory,
         tun_name: &str,
@@ -280,8 +291,8 @@ impl<T: DeviceTransports<IpRecv = Arc<tun::AsyncDevice>, IpSend = Arc<tun::Async
             p.enable_routing(false);
         });
         let tun = tun::create_as_async(&tun_config)?;
-        let tun_tx = Arc::new(tun);
-        let tun_rx = Arc::clone(&tun_tx);
+        let tun = TunSusan::from_tun_device(tun)?;
+        let (tun_tx, tun_rx) = (tun.clone(), tun);
         Ok(DeviceHandle::new(udp_factory, tun_tx, tun_rx, config).await)
     }
 }
@@ -477,6 +488,7 @@ impl<T: DeviceTransports> Device<T> {
             api: None,
             udp_factory,
             tun_tx: Arc::new(Mutex::new(tun_tx)),
+            tun_rx_mtu: tun_rx.mtu(),
             tun_rx: Arc::new(Mutex::new(tun_rx)),
             fwmark: Default::default(),
             key_pair: Default::default(),

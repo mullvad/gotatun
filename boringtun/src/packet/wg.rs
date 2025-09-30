@@ -67,8 +67,6 @@ pub struct WgDataHeader {
 impl WgDataHeader {
     /// Header length
     pub const LEN: usize = size_must_be::<Self>(16);
-    /// Data packet overhead: header and tag (16 bytes)
-    pub const OVERHEAD: usize = Self::LEN + 16;
 }
 
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
@@ -79,6 +77,9 @@ pub struct WgData {
 }
 
 impl WgData {
+    /// Data packet overhead: header and tag (16 bytes)
+    pub const OVERHEAD: usize = WgDataHeader::LEN + 16;
+
     pub fn encrypted_encapsulated_packet_mut(&mut self) -> &mut [u8] {
         let (encrypted_encapsulated_packet, _tag) = self
             .encrypted_encapsulated_packet_and_tag
@@ -289,7 +290,7 @@ impl Packet<Wg> {
                 Ok(WgKind::HandshakeResp(self.cast()))
             }
             (WgPacketType::CookieReply, WgCookieReply::LEN) => Ok(WgKind::CookieReply(self.cast())),
-            (WgPacketType::Data, WgDataHeader::OVERHEAD..) => Ok(WgKind::Data(self.cast())),
+            (WgPacketType::Data, WgData::OVERHEAD..) => Ok(WgKind::Data(self.cast())),
             _ => bail!("Not a wireguard packet, bad type/size."),
         }
     }
