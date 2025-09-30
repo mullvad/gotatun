@@ -1,9 +1,10 @@
 use socket2::{Domain, Socket, Type};
-use std::{ffi::c_uchar, mem, sync::LazyLock};
 use std::{ffi::c_uint, os::windows::io::AsRawSocket};
 use std::{io, net::SocketAddr};
+use std::{mem, sync::LazyLock};
 use tokio::io::Interest;
 use windows_sys::Win32::Networking::WinSock::{self, CMSGHDR};
+use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
 
 use crate::{
     packet::{Packet, PacketBufPool},
@@ -12,7 +13,7 @@ use crate::{
 
 pub struct SendmmsgBuf {
     buffer: Vec<u8>,
-    cmsg: Cmsg,
+    cmsg: Box<Cmsg>,
 }
 
 impl Default for SendmmsgBuf {
@@ -115,8 +116,7 @@ impl UdpSend for super::UdpSocket {
                     // Call sendmsg with one CMSG containing the segment size.
                     // This will send all packets in `buffer`.
 
-                    // SAFETY: We have allocated capacity for a u32. The data may contain that.
-                    unsafe { *(buf.cmsg.data_mut_ptr() as *mut u32) = segment_size as u32 };
+                    buf.cmsg.data[..].copy_from_slice(&segment_size.to_ne_bytes());
 
                     let io_slices = [IoSlice::new(&buf.buffer); 1];
                     let daddr = socket2::SockAddr::from(dest);
@@ -197,7 +197,7 @@ mod gro {
     pub struct RecvManyBuf {
         // TODO: create a single packet buf and split it?
         gro_buf: Vec<u8>,
-        cmsg: Cmsg,
+        cmsg: Box<Cmsg>,
     }
 
     impl Default for RecvManyBuf {
@@ -339,8 +339,9 @@ mod gro {
         let recvmsg = RECVMSG.expect("missing WSARecvMsg");
 
         let ctrl = WSABUF {
-            len: cmsg.buffer.len() as u32,
-            buf: cmsg.buffer.as_mut_ptr(),
+            len: cmsg.len() as u32,
+            // TODO: use `cmsg.as_mut_ptr()` when we can implement `IntoBytes`
+            buf: cmsg.header.as_mut_bytes().as_mut_ptr(),
         };
 
         let mut source = SOCKADDR_INET::default();
@@ -377,9 +378,9 @@ mod gro {
 
         let mut gro_size = 0;
 
-        if cmsg.header().cmsg_type == UDP_COALESCED_INFO {
-            // SAFETY: We have allocated space for a u32 in the CMSG
-            gro_size = unsafe { *(cmsg.data_mut_ptr() as *const u32) };
+        if cmsg.header.cmsg_type == UDP_COALESCED_INFO {
+            let slice = &cmsg.data[..mem::size_of::<u32>()];
+            gro_size = u32::from_ne_bytes(slice.try_into().expect("cmsg data too small"));
         }
 
         let source = try_socketaddr_from_inet_sockaddr(source)
@@ -405,50 +406,46 @@ mod gro {
 }
 
 /// Struct representing a CMSG
+#[derive(FromBytes, Immutable, KnownLayout)]
+#[repr(C)]
 pub struct Cmsg {
-    buffer: Vec<u8>,
+    pub header: Hdr,
+    pub data: [u8],
+}
+
+/// `CMSGHDR`
+#[derive(FromBytes, Immutable, KnownLayout, IntoBytes)]
+#[repr(C)]
+pub struct Hdr {
+    pub cmsg_len: usize,
+    pub cmsg_level: i32,
+    pub cmsg_type: i32,
 }
 
 impl Cmsg {
     /// Create a new with space for `space` bytes and a CMSG header
-    pub fn new(space: usize, cmsg_level: i32, cmsg_type: i32) -> Self {
-        let mut self_ = Self {
-            buffer: vec![0u8; cmsg_space(space)],
-        };
+    pub fn new(space: usize, cmsg_level: i32, cmsg_type: i32) -> Box<Self> {
+        let mut cmsg = Cmsg::new_box_zeroed_with_elems(cmsg_space(space) - mem::size_of::<Hdr>())
+            .expect("alloc");
 
-        *self_.header_mut() = CMSGHDR {
+        cmsg.header = Hdr {
             cmsg_len: cmsg_len(space),
             cmsg_level,
             cmsg_type,
         };
 
-        self_
+        cmsg
     }
 
-    fn header_mut(&mut self) -> &mut CMSGHDR {
-        let hdr = self.buffer.as_mut_ptr() as *mut CMSGHDR;
-        debug_assert!(hdr.is_aligned());
-        // SAFETY: `hdr` is aligned and points to an initialized `CMSGHDR`
-        unsafe { &mut *hdr }
-    }
-
-    #[cfg(feature = "windows-gro")]
-    fn header(&mut self) -> &CMSGHDR {
-        let hdr = self.buffer.as_mut_ptr() as *const CMSGHDR;
-        debug_assert!(hdr.is_aligned());
-        // SAFETY: `hdr` is aligned and points to an initialized `CMSGHDR`
-        unsafe { &*hdr }
+    pub fn len(&self) -> usize {
+        std::mem::size_of_val(self)
     }
 
     pub fn as_slice(&self) -> &[u8] {
-        &self.buffer[..]
-    }
-
-    pub fn data_mut_ptr(&mut self) -> *mut u8 {
-        let header = self.header_mut();
-        // SAFETY: The buffer is initialized using `cmsg_space`, so this points to actual data
-        // (but len may be 0)
-        unsafe { cmsg_data(header) }
+        let ptr = self as *const Cmsg as *const CMSGHDR;
+        // TODO: We can make this safe when `IntoBytes` supports DSTs
+        // SAFETY: ptr is aligned and valid for reads of `self.len()` bytes
+        unsafe { std::slice::from_raw_parts(ptr as *const u8, self.len()) }
     }
 }
 
@@ -462,12 +459,6 @@ pub fn cmsg_space(length: usize) -> usize {
 /// Source: ws2def.h: CMSG_LEN macro
 pub fn cmsg_len(length: usize) -> usize {
     cmsgdata_align(mem::size_of::<CMSGHDR>()) + length
-}
-
-/// Pointer to the first byte of data in `cmsg`.
-/// Source: ws2def.h: CMSG_DATA macro
-pub unsafe fn cmsg_data(cmsg: *mut CMSGHDR) -> *mut c_uchar {
-    (cmsg as usize + cmsgdata_align(mem::size_of::<CMSGHDR>())) as *mut c_uchar
 }
 
 // Taken from ws2def.h: CMSGHDR_ALIGN macro
@@ -508,3 +499,54 @@ pub static MAX_GSO_SEGMENTS: LazyLock<usize> = LazyLock::new(|| {
         _ => 1,
     }
 });
+
+/// Pointer to the first byte of data in `cmsg`.
+/// Source: ws2def.h: CMSG_DATA macro
+#[cfg(test)]
+pub unsafe fn cmsg_data(cmsg: *mut CMSGHDR) -> *mut core::ffi::c_uchar {
+    (cmsg as usize + cmsgdata_align(mem::size_of::<CMSGHDR>())) as *mut core::ffi::c_uchar
+}
+
+const _: () = {
+    assert!(mem::size_of::<CMSGHDR>() == mem::size_of::<Hdr>());
+    assert!(mem::align_of::<CMSGHDR>() == mem::align_of::<Hdr>());
+};
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    // Ensure that `Cmsg` works as expected
+    #[test]
+    fn test_cmsg_layout() {
+        let space = 100;
+        let cmsg_len = cmsg_len(space);
+
+        let cmsg = Cmsg::new(space, 2, 3);
+        let zc_data = cmsg.data.as_ptr();
+        let cmsg_ptr = cmsg.as_ref() as *const Cmsg as *const u8 as *mut CMSGHDR;
+
+        assert_eq!(
+            // SAFETY: `cmsg_ptr` points to a valid CMSGHDR
+            unsafe { cmsg_data(cmsg_ptr) } as *const u8,
+            zc_data,
+            "unexpected CMSG data ptr"
+        );
+
+        let standard_hdr = CMSGHDR {
+            cmsg_len,
+            cmsg_level: 2,
+            cmsg_type: 3,
+        };
+        let hdr = unsafe { std::ptr::read_unaligned(cmsg_ptr as *const CMSGHDR) };
+        assert!(
+            unsafe {
+                libc::memcmp(
+                    &standard_hdr as *const _ as *const _,
+                    &hdr as *const _ as *const _,
+                    mem::size_of::<CMSGHDR>(),
+                )
+            } == 0
+        );
+    }
+}
