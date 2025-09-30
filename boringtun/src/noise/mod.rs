@@ -9,16 +9,11 @@ mod timers;
 
 use zerocopy::IntoBytes;
 
-// TODO: The crate doesn't compile without this feature
-#[cfg(feature = "device")]
-use crate::device::daita::DaitaHooks;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
-use crate::packet::{
-    Ipv4, Ipv6, Packet, Wg, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind,
-};
+use crate::packet::{Packet, Wg, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind};
 use crate::x25519;
 
 use std::collections::VecDeque;
@@ -37,8 +32,7 @@ pub enum TunnResult {
     Done,
     Err(WireGuardError),
     WriteToNetwork(Packet<Wg>),
-    WriteToTunnelV4(Packet<Ipv4>),
-    WriteToTunnelV6(Packet<Ipv6>),
+    WriteToTunnel(Packet),
 }
 
 impl From<WireGuardError> for TunnResult {
@@ -163,16 +157,12 @@ impl Tunn {
         }
     }
 
-    pub(crate) fn handle_incoming_packet(
-        &mut self,
-        packet: WgKind,
-        daita: Option<&mut DaitaHooks>,
-    ) -> TunnResult {
+    pub(crate) fn handle_incoming_packet(&mut self, packet: WgKind) -> TunnResult {
         match packet {
             WgKind::HandshakeInit(p) => self.handle_handshake_init(p),
             WgKind::HandshakeResp(p) => self.handle_handshake_response(p),
             WgKind::CookieReply(p) => self.handle_cookie_reply(&p),
-            WgKind::Data(p) => self.handle_data(p, daita),
+            WgKind::Data(p) => self.handle_data(p),
         }
         .unwrap_or_else(TunnResult::from)
     }
@@ -257,24 +247,13 @@ impl Tunn {
     }
 
     /// Decrypt a data packet, and return a [TunnResult::WriteToTunnelV4] (or `*V6`) if successful.
-    fn handle_data(
-        &mut self,
-        packet: Packet<WgData>,
-        daita: Option<&mut DaitaHooks>,
-    ) -> Result<TunnResult, WireGuardError> {
-        let mut decapsulated_packet = self.decapsulate_with_session(packet)?;
+    fn handle_data(&mut self, packet: Packet<WgData>) -> Result<TunnResult, WireGuardError> {
+        let decapsulated_packet = self.decapsulate_with_session(packet)?;
 
-        if let Some(daita) = daita {
-            match daita.after_data_decapsulate(decapsulated_packet) {
-                Some(new) => decapsulated_packet = new,
+        self.timer_tick(TimerName::TimeLastDataPacketReceived);
+        self.rx_bytes += decapsulated_packet.as_bytes().len();
 
-                // TODO: it was a padding packet, do we do this?
-                // self.timer_tick(TimerName::TimeLastDataPacketReceived);
-                None => return Ok(TunnResult::Done),
-            }
-        }
-
-        Ok(self.validate_decapsulated_packet(decapsulated_packet))
+        Ok(TunnResult::WriteToTunnel(decapsulated_packet))
     }
 
     pub fn decapsulate_with_session(
@@ -328,37 +307,6 @@ impl Tunn {
         }
         self.timer_tick(TimerName::TimeLastPacketSent);
         Some(packet)
-    }
-
-    /// Check that packet is an IP packet,
-    /// then truncate to [Ipv4Header::total_len](crate::packet::Ipv4Header::total_len)
-    /// or [Ipv6Header::payload_length](crate::packet::Ipv6Header::payload_length).
-    ///
-    /// Returns the truncated packet and the source IP as [TunnResult::WriteToTunnelV4] (or `*V6`).
-    pub fn validate_decapsulated_packet(&mut self, packet: Packet) -> TunnResult {
-        // keepalive
-        if packet.is_empty() {
-            return TunnResult::Done;
-        }
-
-        let Ok(packet) = packet.try_into_ipvx() else {
-            return TunnResult::Err(WireGuardError::InvalidPacket);
-        };
-
-        self.timer_tick(TimerName::TimeLastDataPacketReceived);
-
-        match packet {
-            either::Either::Left(ipv4) => {
-                // TODO: Should we instead add length before truncating? see discussion on symmetrical counters
-                self.rx_bytes += ipv4.as_bytes().len();
-                TunnResult::WriteToTunnelV4(ipv4)
-            }
-            either::Either::Right(ipv6) => {
-                // TODO: Should we instead add length before truncating? see discussion on symmetrical counters
-                self.rx_bytes += ipv6.as_bytes().len();
-                TunnResult::WriteToTunnelV6(ipv6)
-            }
-        }
     }
 
     /// Get the first packet from [Self::packet_queue], and try to encapsulate it.
@@ -428,6 +376,7 @@ impl Tunn {
 mod tests {
     #[cfg(feature = "mock_instant")]
     use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT};
+    use crate::packet::Ipv4;
 
     use super::*;
     use bytes::BytesMut;
@@ -458,8 +407,7 @@ mod tests {
         tun: &mut Tunn,
         handshake_init: Packet<WgHandshakeInit>,
     ) -> Packet<WgHandshakeResp> {
-        let handshake_resp =
-            tun.handle_incoming_packet(WgKind::HandshakeInit(handshake_init), None);
+        let handshake_resp = tun.handle_incoming_packet(WgKind::HandshakeInit(handshake_init));
         assert!(matches!(handshake_resp, TunnResult::WriteToNetwork(_)));
 
         let TunnResult::WriteToNetwork(handshake_resp) = handshake_resp else {
@@ -478,7 +426,7 @@ mod tests {
         tun: &mut Tunn,
         handshake_resp: Packet<WgHandshakeResp>,
     ) -> Packet<WgData> {
-        let keepalive = tun.handle_incoming_packet(WgKind::HandshakeResp(handshake_resp), None);
+        let keepalive = tun.handle_incoming_packet(WgKind::HandshakeResp(handshake_resp));
         assert!(matches!(keepalive, TunnResult::WriteToNetwork(_)));
 
         let TunnResult::WriteToNetwork(keepalive) = keepalive else {
@@ -494,7 +442,7 @@ mod tests {
     }
 
     fn parse_keepalive(tun: &mut Tunn, keepalive: Packet<WgData>) {
-        let result = tun.handle_incoming_packet(WgKind::Data(keepalive), None);
+        let result = tun.handle_incoming_packet(WgKind::Data(keepalive));
         assert!(matches!(result, TunnResult::Done));
     }
 
@@ -650,8 +598,8 @@ mod tests {
         let data = data.into_kind().unwrap();
         assert!(matches!(data, WgKind::Data(..)));
 
-        let data = their_tun.handle_incoming_packet(data, None);
-        let recv_packet_buf = if let TunnResult::WriteToTunnelV4(recv) = data {
+        let data = their_tun.handle_incoming_packet(data);
+        let recv_packet_buf = if let TunnResult::WriteToTunnel(recv) = data {
             recv
         } else {
             unreachable!("expected WritetoTunnelV4");
