@@ -208,6 +208,10 @@ impl Packet<[u8]> {
         Ok(self.cast::<Ip>())
     }
 
+    /// Convert this untyped packet into either an IPv4 or IPv6 packet.
+    ///
+    /// This will truncate to [Ipv4Header::total_len](crate::packet::Ipv4Header::total_len)
+    /// or [Ipv6Header::payload_length](crate::packet::Ipv6Header::payload_length).
     pub fn try_into_ipvx(self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
         self.try_into_ip()?.try_into_ipvx()
     }
