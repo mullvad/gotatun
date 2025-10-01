@@ -1,6 +1,5 @@
 use super::MIN_BLOCKING_CAPACITY;
 use super::types::{BlockingState, DAITA_MARKER, PacketCount, PaddingPacket};
-use crate::device::hooks::Hooks;
 use crate::{
     packet::{self, Packet, Wg, WgPacketType},
     tun::LinkMtuWatcher,
@@ -115,23 +114,5 @@ impl DaitaHooks {
         let _ = self.event_tx.send(TriggerEvent::NormalRecv);
 
         Some(packet)
-    }
-}
-
-impl Hooks for DaitaHooks {
-    fn before_data_encapsulate(&mut self, packet: Packet) -> Packet {
-        DaitaHooks::before_data_encapsulate(self, packet)
-    }
-
-    fn after_data_encapsulate(&self, packet: Packet<packet::Wg>) -> Option<Packet<Wg>> {
-        DaitaHooks::after_data_encapsulate(self, packet)
-    }
-
-    fn before_data_decapsulate(&self) {
-        DaitaHooks::before_data_decapsulate(self);
-    }
-
-    fn after_data_decapsulate(&mut self, packet: Packet) -> Option<Packet> {
-        DaitaHooks::after_data_decapsulate(self, packet)
     }
 }

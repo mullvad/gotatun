@@ -7,7 +7,6 @@ pub mod api;
 pub mod daita;
 #[cfg(unix)]
 pub mod drop_privileges;
-pub mod hooks;
 #[cfg(test)]
 mod integration_tests;
 pub mod peer;
