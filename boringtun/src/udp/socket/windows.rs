@@ -329,7 +329,7 @@ mod gro {
             }
         });
 
-        if buffer.len() == 0 {
+        if buffer.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "buffer must be non-empty",
@@ -347,7 +347,7 @@ mod gro {
 
         let mut data = WSABUF {
             len: buffer.len() as u32,
-            buf: buffer.as_mut_ptr() as *mut u8,
+            buf: buffer.as_mut_ptr(),
         };
 
         let mut msg = WSAMSG {
@@ -383,7 +383,7 @@ mod gro {
         }
 
         let source = try_socketaddr_from_inet_sockaddr(source)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "invalid source address"))?;
+            .ok_or_else(|| io::Error::other("invalid source address"))?;
 
         Ok(RecvMsg {
             bytes_received: len,
