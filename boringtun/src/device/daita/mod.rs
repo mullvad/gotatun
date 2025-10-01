@@ -1,0 +1,364 @@
+//! # NOTES
+//!
+//! This is a work-in-progress implementation of DAITA version 3.
+//!
+//! The intent of the design is that DAITA will exist in the app-repo (i.e. this module will not
+//! be part of boringtun proper) and that it will be possible inject DAITA as a set of hooks/plugins
+//! into boringtun.
+//!
+//! ## TODO
+//!
+//! - Implement correct hooks in the packet pipeline. The methods on [DaitaHooks] describe where they
+//!   should be injected. They need to operate on data packets for a particular peer, and need to have
+//!   the ability to mutate the packet (constant packet size) or withhold it (blocking).
+//! - Make encapsulation/decapsulation concurrent with IO.
+//!   The maybenot spec describes that outbound packet (i.e. those that have been received on the tunnel
+//!   interface but not yet sent on the network) can replace padding packets. However, currently there
+//!   are no `await`-points in `handle_outgoing` that would allow this to happen, I think.
+//!   Lacking the ability to replace padding packets with in-flight packets would be a regression
+//!   in comparison with the `wireguard-go` implementation. As far as I remember, this occurred quite
+//!   often, so it could be important for performance.
+//! - The [crate::noise::Tunn] type already has a concept for a queue of blocked packets. Consider how this
+//!   should interact/integrate with the blocking queue used by DAITA.
+//! - Tests and benches
+//! - Track MTU changes from somewhere. In wg-go, there is an atomic variable in `Tun` that updates in realized
+//!   with MTU changes, that we use.
+//! - The is from the spec of "SendPadding" action:
+//!  > The replace flag determines if the padding packet MAY be replaced by a packet already queued to be sent
+//!  > at the time the padding packet would be sent. This applies for data queued to be turned into normal
+//!  > (non-padding) packets AND any packet (padding or normal) in the egress queue yet to be sent (i.e.,
+//!  > before the TunnelSent event is triggered). Such a packet could be in the queue due to ongoing blocking
+//!  > or just not being sent yet (e.g., due to CC). We assume that packets will be encrypted ASAP for the
+//!  > egress queue and we do not want to keep state around to distinguish padding and non-padding, hence, any
+//!  > packet. Similarly, this implies that a single blocked packet in the egress queue can replace multiple
+//!  > padding packets with the replace flag set.
+//!
+//!   We currently down't allow padding packets to replace other padding packets, or a single blocked packet
+//!   to replace multiple padding packets
+//!
+//! ## Regarding <https://mullvad.atlassian.net/wiki/spaces/PPS/pages/4285923358/DAITA+version+3>
+//! ### 1. Restore support for keep-alive packets
+//! I would prefer to completely disregard any non-data packets for DAITA. This would be
+//! less intrusive help decouple DAITA from WireGuard.
+//! Keepalives should thus be left as-is and not padded to constant packet size.
+
+mod actions;
+mod hooks;
+
+pub use hooks::DaitaHooks;
+
+use std::{
+    str::FromStr,
+    sync::{
+        Arc, Weak,
+        atomic::{AtomicU32, AtomicUsize},
+    },
+};
+
+use crate::{
+    device::daita::{actions::ActionHandler, types::MachineTimer},
+    packet,
+    tun::LinkMtuWatcher,
+    udp::UdpSend,
+};
+
+use super::peer::Peer;
+use futures::FutureExt;
+use maybenot::{Framework, Machine, MachineId, TriggerAction, TriggerEvent};
+use rand::{RngCore, SeedableRng, rngs::StdRng};
+use tokio::sync::{Mutex, Notify, RwLock, mpsc};
+use tokio::time::Instant;
+
+// TODO: Pick a good number
+/// Max number of blocked packets.
+const MAX_BLOCKED_PACKETS: usize = 256;
+// TODO: Pick a good number
+/// When the capacity of the blocking queue get's lower that this value, the blocking is aborted.
+const MIN_BLOCKING_CAPACITY: usize = 20;
+
+mod types;
+
+impl DaitaHooks {
+    pub fn new<US>(
+        maybenot_machines: Vec<String>,
+        peer: Weak<Mutex<Peer>>,
+        mtu: LinkMtuWatcher,
+        udp_send: US,
+        packet_pool: packet::PacketBufPool,
+    ) -> Self
+    where
+        US: UdpSend + Clone + 'static,
+    {
+        log::info!("Initializing DAITA with machines: {maybenot_machines:?}");
+
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (action_tx, action_rx) = mpsc::unbounded_channel();
+        let packet_count = Arc::new(types::PacketCount {
+            outbound_normal: AtomicU32::new(0),
+            replaced_normal: AtomicU32::new(0),
+        });
+        let blocking = Arc::new(RwLock::new(types::BlockingState::Inactive));
+        let (blocking_queue_tx, blocking_queue_rx) = mpsc::channel(MAX_BLOCKED_PACKETS);
+        let tx_padding_packet_bytes = Arc::new(AtomicUsize::new(0));
+        let blocking_abort = Arc::new(Notify::const_new());
+
+        let machines = maybenot_machines
+            .iter()
+            .map(AsRef::as_ref)
+            .map(Machine::from_str)
+            .collect::<::core::result::Result<Vec<_>, _>>()
+            .unwrap_or_else(|_| panic!("bad machines: {maybenot_machines:?}")); // TODO
+
+        let rng = StdRng::from_os_rng(); // TODO
+
+        let max_padding_frac = 0.5; // TODO
+        let max_blocking_frac = 0.5; // TODO
+        let maybenot = maybenot::Framework::new(
+            machines,
+            max_padding_frac,
+            max_blocking_frac,
+            std::time::Instant::now(),
+            rng,
+        )
+        .unwrap();
+
+        let action_handler = ActionHandler {
+            peer,
+            packet_pool,
+            packet_count: packet_count.clone(),
+            blocking_queue_rx,
+            blocking_queue_tx: blocking_queue_tx.clone(),
+            blocking_abort: blocking_abort.clone(),
+            blocking: blocking.clone(),
+            udp_send: udp_send.clone(),
+            mtu: mtu.clone(),
+            tx_padding_packet_bytes: tx_padding_packet_bytes.clone(),
+            event_tx: event_tx.clone().downgrade(),
+        };
+        // TODO abort on drop?
+        tokio::spawn(action_handler.handle_actions(action_rx));
+        tokio::spawn(handle_events(
+            maybenot,
+            event_rx,
+            event_tx.clone().downgrade(),
+            action_tx,
+        ));
+        DaitaHooks {
+            event_tx: event_tx.clone(),
+            packet_count,
+            blocking_queue_tx,
+            blocking_state: blocking,
+            blocking_abort,
+            mtu,
+            tx_padding_bytes: 0,
+            tx_padding_packet_bytes,
+            rx_padding_bytes: 0,
+            rx_padding_packet_bytes: 0,
+        }
+    }
+}
+
+async fn handle_events<M, R>(
+    mut maybenot: Framework<M, R>,
+    mut event_rx: mpsc::UnboundedReceiver<TriggerEvent>,
+    event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
+    action_tx: mpsc::UnboundedSender<(types::Action, MachineId)>,
+) -> Option<()>
+// TODO: return type is meaningless and only there to allow `?` operator
+where
+    M: AsRef<[Machine]> + Send + 'static,
+    R: RngCore,
+{
+    let mut machine_timers = types::MachineTimers::new(maybenot.num_machines() * 2);
+    let mut event_buf = Vec::new();
+
+    loop {
+        futures::select! {
+            _ = event_rx.recv_many(&mut event_buf, usize::MAX).fuse() => {
+                log::debug!("DAITA: Received events {:?}", event_buf);
+                if event_buf.is_empty() {
+                    log::debug!("DAITA: event_rx channel closed, exiting handle_events");
+                    return None; // channel closed
+                }
+            },
+            _ = machine_timers.wait_next_timer().fuse() => {
+                let (machine, timer) = machine_timers.pop_next_timer().unwrap();
+                log::debug!("DAITA: Timer expired {:?} for machine {:?}", timer, machine);
+                match timer {
+                    MachineTimer::Action(action_type) => action_tx
+                        .send((action_type, machine))
+                        .ok(),
+                    MachineTimer::Internal => event_tx
+                        .upgrade()?
+                        .send(TriggerEvent::TimerEnd { machine })
+                        .ok(),
+                }?;
+                continue;
+            }
+        }
+        let actions = maybenot.trigger_events(event_buf.as_slice(), Instant::now().into()); // TODO: support mocked time?
+        event_buf.clear();
+        for action in actions {
+            log::debug!("DAITA: TriggerAction: {:?}", action);
+            match action {
+                TriggerAction::Cancel { machine, timer } => match timer {
+                    maybenot::Timer::Action => machine_timers.remove_action(machine),
+                    maybenot::Timer::Internal => machine_timers.remove_internal(machine),
+                    maybenot::Timer::All => machine_timers.remove_all(machine),
+                },
+                TriggerAction::SendPadding {
+                    timeout,
+                    bypass,
+                    replace,
+                    machine,
+                } => {
+                    machine_timers.schedule_padding(*machine, *timeout, *replace, *bypass);
+                }
+                TriggerAction::BlockOutgoing {
+                    timeout,
+                    duration,
+                    bypass,
+                    replace,
+                    machine,
+                } => {
+                    machine_timers.schedule_block(*machine, *timeout, *duration, *replace, *bypass);
+                }
+                TriggerAction::UpdateTimer {
+                    duration,
+                    replace,
+                    machine,
+                } => {
+                    if machine_timers.schedule_internal_timer(*machine, *duration, *replace) {
+                        event_tx
+                            .upgrade()?
+                            .send(TriggerEvent::TimerBegin { machine: *machine })
+                            .ok()?;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::SocketAddr;
+
+    use crate::packet::{Packet, PacketBufPool};
+
+    use super::*;
+
+    #[derive(Clone)]
+    struct DummyUdpSend;
+
+    impl UdpSend for DummyUdpSend {
+        type SendManyBuf = ();
+        fn max_number_of_packets_to_send(&self) -> usize {
+            10
+        }
+        async fn send_many_to<'a>(
+            &'a self,
+            _send_buf: &mut Self::SendManyBuf,
+            _packets: &mut Vec<(Packet, SocketAddr)>,
+        ) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        async fn send_to(&self, _packet: Packet, _destination: SocketAddr) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    // fn make_hooks() -> DaitaHooks {
+    //     let peer = Arc::new(Mutex::new(Peer::dummy()));
+    //     let udp_send = DummyUdpSend;
+    //     let packet_pool = PacketBufPool::new(10);
+    //     DaitaHooks::new(
+    //         vec!["machine1".to_string()],
+    //         Arc::downgrade(&peer),
+    //         udp_send,
+    //         packet_pool,
+    //     )
+    // }
+
+    #[test]
+    fn test_packet_count_concurrent() {
+        let pc = types::PacketCount {
+            outbound_normal: AtomicU32::new(0),
+            replaced_normal: AtomicU32::new(0),
+        };
+        std::thread::scope(|s| {
+            for _ in 0..500 {
+                s.spawn(|| {
+                    pc.inc_outbound(2);
+                    pc.inc_replaced(1);
+                    pc.dec(2);
+                });
+            }
+        });
+        assert_eq!(pc.outbound(), 0);
+        assert_eq!(pc.replaced(), 0);
+    }
+
+    #[test]
+    fn test_machine_timers_schedule_and_remove() {
+        let mut timers = types::MachineTimers::new(4);
+        let machine = MachineId::from_raw(1);
+        timers.schedule_padding(machine, std::time::Duration::from_secs(1), false, false);
+        assert_eq!(timers.0.len(), 1);
+        timers.schedule_internal_timer(machine, std::time::Duration::from_secs(1), false);
+        assert_eq!(timers.0.len(), 2);
+        timers.remove_action(&machine);
+        assert_eq!(timers.0.len(), 1);
+        timers.remove_internal(&machine);
+        assert_eq!(timers.0.len(), 0);
+    }
+
+    #[test]
+    fn test_internal_machine_timer_replace() {
+        let mut timers = types::MachineTimers::new(4);
+        let machine = MachineId::from_raw(1);
+
+        timers.schedule_internal_timer(machine, std::time::Duration::from_secs(1), false);
+        timers.schedule_internal_timer(machine, std::time::Duration::from_secs(2), false);
+        assert_eq!(timers.0.len(), 1);
+        let (i, _, t) = timers.0.front().unwrap();
+        assert!(matches!(t, MachineTimer::Internal));
+        assert!(i.duration_since(Instant::now()) > std::time::Duration::from_secs(1));
+    }
+
+    // #[tokio::test]
+    // async fn test_hooks_before_after_data_encapsulate() {
+    //     let mut hooks = make_hooks();
+    //     let packet = Packet::dummy();
+    //     let packet = hooks.before_data_encapsulate(packet);
+    //     let wg_packet = Packet::<Wg>::dummy_with_type(WgPacketType::Data);
+    //     let result = hooks.after_data_encapsulate(wg_packet);
+    //     assert!(result.is_some());
+    // }
+
+    // #[tokio::test]
+    // async fn test_hooks_after_data_decapsulate_padding() {
+    //     let mut hooks = make_hooks();
+    //     // Create a fake padding packet
+    //     let mut packet = Packet::dummy();
+    //     let header = PaddingHeader {
+    //         _daita_marker: DAITA_MARKER,
+    //         _reserved: 0,
+    //         length: 10u16.into(),
+    //     };
+    //     packet.buf_mut().clear();
+    //     packet.buf_mut().extend_from_slice(header.as_bytes());
+    //     packet.buf_mut().resize(10, 0);
+    //     let result = hooks.after_data_decapsulate(packet);
+    //     assert!(result.is_none());
+    // }
+
+    // #[tokio::test]
+    // async fn test_hooks_after_data_decapsulate_normal() {
+    //     let mut hooks = make_hooks();
+    //     let packet = Packet::dummy();
+    //     let result = hooks.after_data_decapsulate(packet);
+    //     assert!(result.is_some());
+    // }
+}
