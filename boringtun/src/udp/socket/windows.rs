@@ -540,6 +540,7 @@ mod test {
         // SAFETY: `cmsg_ptr` is a valid CMSGHDR and is aligned
         let hdr = unsafe { std::ptr::read(cmsg_ptr as *const CMSGHDR) };
         assert!(
+            // SAFETY: Both `hdr` and `standard_hdr` include at least `size_of::<CMSGHDR>()` bytes
             unsafe {
                 libc::memcmp(
                     &standard_hdr as *const _ as *const _,
