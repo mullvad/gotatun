@@ -130,6 +130,7 @@ impl MachineTimers {
         self.0.retain(|&(_, m, _)| m != *machine);
     }
 
+    /// Schedule padding timer according to [`maybenot::TriggerAction::SendPadding`].
     pub(crate) fn schedule_padding(
         &mut self,
         machine: MachineId,
@@ -154,6 +155,7 @@ impl MachineTimers {
         debug_assert!(self.0.iter().is_sorted_by_key(|(time, _, _)| *time));
     }
 
+    /// Schedule blocking timer according to [`maybenot::TriggerAction::BlockOutgoing`].
     pub(crate) fn schedule_block(
         &mut self,
         machine: MachineId,
@@ -183,6 +185,7 @@ impl MachineTimers {
         debug_assert!(self.0.iter().is_sorted_by_key(|(time, _, _)| *time));
     }
 
+    /// Schedule internal timer according to [`maybenot::TriggerAction::UpdateTimer`].
     pub(crate) fn schedule_internal_timer(
         &mut self,
         machine: MachineId,
@@ -228,7 +231,82 @@ impl MachineTimers {
         }
     }
 
+    /// Pop the next expired timer. Returns `None` if there is no timer.
     pub(crate) fn pop_next_timer(&mut self) -> Option<(MachineId, MachineTimer)> {
         self.0.pop_front().map(|(_, m, t)| (m, t))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::device::daita::types;
+
+    #[test]
+    fn test_packet_count_concurrent() {
+        let pc = types::PacketCount {
+            outbound_normal: AtomicU32::new(0),
+            replaced_normal: AtomicU32::new(0),
+        };
+        std::thread::scope(|s| {
+            for _ in 0..500 {
+                s.spawn(|| {
+                    pc.inc_outbound(2);
+                    pc.inc_replaced(1);
+                    pc.dec(2);
+                });
+            }
+        });
+        assert_eq!(pc.outbound(), 0);
+        assert_eq!(pc.replaced(), 0);
+    }
+
+    #[test]
+    fn test_machine_timers_schedule_and_remove() {
+        let mut timers = types::MachineTimers::new(4);
+        let machine = MachineId::from_raw(1);
+        timers.schedule_padding(machine, std::time::Duration::from_secs(1), false, false);
+        assert_eq!(timers.0.len(), 1);
+        timers.schedule_internal_timer(machine, std::time::Duration::from_secs(1), false);
+        assert_eq!(timers.0.len(), 2);
+        timers.remove_action(&machine);
+        assert_eq!(timers.0.len(), 1);
+        timers.remove_internal(&machine);
+        assert_eq!(timers.0.len(), 0);
+    }
+
+    #[test]
+    fn test_internal_machine_timer_replace() {
+        let mut timers = types::MachineTimers::new(4);
+        let machine = MachineId::from_raw(1);
+
+        timers.schedule_internal_timer(machine, std::time::Duration::from_secs(1), false);
+        timers.schedule_internal_timer(machine, std::time::Duration::from_secs(2), false);
+        assert_eq!(timers.0.len(), 1);
+        let i = timers.0.front().unwrap().0;
+        assert!(
+            i.duration_since(Instant::now()) > std::time::Duration::from_secs(1),
+            "The longer timer should be kept"
+        );
+
+        timers.schedule_internal_timer(machine, std::time::Duration::from_secs(2), false);
+        timers.schedule_internal_timer(machine, std::time::Duration::from_secs(1), false);
+
+        assert_eq!(timers.0.len(), 1);
+        let i = timers.0.front().unwrap().0;
+        assert!(
+            i.duration_since(Instant::now()) > std::time::Duration::from_secs(1),
+            "The longer timer should be kept"
+        );
+
+        timers.schedule_internal_timer(machine, std::time::Duration::from_secs(2), true);
+        timers.schedule_internal_timer(machine, std::time::Duration::from_secs(1), true);
+
+        assert_eq!(timers.0.len(), 1);
+        let i = timers.0.front().unwrap().0;
+        assert!(
+            i.duration_since(Instant::now()) < std::time::Duration::from_secs(2),
+            "The last timer should be kept"
+        );
     }
 }
