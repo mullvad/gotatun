@@ -520,6 +520,11 @@ mod test {
         let zc_data = cmsg.data.as_ptr();
         let cmsg_ptr = cmsg.as_ref() as *const Cmsg as *const u8 as *mut CMSGHDR;
 
+        assert!(
+            cmsg_ptr.align_offset(align_of::<CMSGHDR>()) == 0,
+            "cmsg is not properly aligned"
+        );
+
         assert_eq!(
             // SAFETY: `cmsg_ptr` points to a valid CMSGHDR
             unsafe { cmsg_data(cmsg_ptr) } as *const u8,
@@ -532,7 +537,8 @@ mod test {
             cmsg_level: 2,
             cmsg_type: 3,
         };
-        let hdr = unsafe { std::ptr::read_unaligned(cmsg_ptr as *const CMSGHDR) };
+        // SAFETY: `cmsg_ptr` is a valid CMSGHDR and is aligned
+        let hdr = unsafe { std::ptr::read(cmsg_ptr as *const CMSGHDR) };
         assert!(
             unsafe {
                 libc::memcmp(
