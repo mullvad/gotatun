@@ -1,24 +1,19 @@
-use super::MIN_BLOCKING_CAPACITY;
-use super::types::{BlockingState, DAITA_MARKER, PacketCount, PaddingPacket};
+use super::types::{DAITA_MARKER, PacketCount, PaddingPacket};
+use crate::device::daita::types::BlockingWatcher;
 use crate::{
-    packet::{self, Packet, Wg, WgPacketType},
+    packet::{Packet, Wg, WgPacketType},
     tun::LinkMtuWatcher,
 };
 use maybenot::TriggerEvent;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
-use tokio::sync::{
-    Notify, RwLock,
-    mpsc::{self, error::TrySendError},
-};
+use tokio::sync::mpsc::{self};
 use zerocopy::{FromBytes, IntoBytes};
 
 pub struct DaitaHooks {
     pub(super) event_tx: mpsc::UnboundedSender<TriggerEvent>,
     pub(super) packet_count: Arc<PacketCount>,
-    pub(super) blocking_queue_tx: mpsc::Sender<Packet<Wg>>,
-    pub(super) blocking_state: Arc<RwLock<BlockingState>>, // TODO: Replace with `tokio::sync::watch`?
-    pub(super) blocking_abort: Arc<Notify>,
+    pub(super) blocking_watcher: BlockingWatcher,
     pub(super) mtu: LinkMtuWatcher,
     // TODO: Export to metrics sink
     /// Total extra bytes added due to constant-size padding of data packets.
@@ -66,30 +61,10 @@ impl DaitaHooks {
             return Some(packet);
         }
 
-        if let Ok(blocking) = self.blocking_state.try_read()
-            && blocking.is_active()
-        {
-            // Notify the blocking handler to abort blocking when the capacity is low
-            if self.blocking_queue_tx.capacity() < MIN_BLOCKING_CAPACITY {
-                self.blocking_abort.notify_one();
-            }
-            if let Err(TrySendError::Full(returned_packet)) =
-                self.blocking_queue_tx.try_send(packet)
-            {
-                // If the queue is full, we can't block anymore, so we
-                // send the packet anyway.
-                // TODO: this would be an out of order packet, not ideal.
-                // Should we drop the packet instead?
-                let _ = self.event_tx.send(TriggerEvent::TunnelSent);
-                self.packet_count.dec(1);
-                return Some(returned_packet);
-            }
-            None
-        } else {
+        self.blocking_watcher.send_if_blocking(packet).inspect(|_| {
             let _ = self.event_tx.send(TriggerEvent::TunnelSent);
             self.packet_count.dec(1);
-            Some(packet)
-        }
+        })
     }
 
     /// Should be called on incoming validated encapsulated packets.

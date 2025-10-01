@@ -56,7 +56,10 @@ use std::{
 };
 
 use crate::{
-    device::daita::{actions::ActionHandler, types::MachineTimer},
+    device::daita::{
+        actions::ActionHandler,
+        types::{BlockingWatcher, MachineTimer},
+    },
     packet,
     tun::LinkMtuWatcher,
     udp::UdpSend,
@@ -146,9 +149,11 @@ impl DaitaHooks {
         DaitaHooks {
             event_tx: event_tx.clone(),
             packet_count,
-            blocking_queue_tx,
-            blocking_state: blocking,
-            blocking_abort,
+            blocking_watcher: BlockingWatcher {
+                blocking_queue_tx,
+                blocking_state: blocking,
+                blocking_abort,
+            },
             mtu,
             tx_padding_bytes: 0,
             tx_padding_packet_bytes,
