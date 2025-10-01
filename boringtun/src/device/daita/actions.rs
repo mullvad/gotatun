@@ -9,8 +9,7 @@ use futures::{FutureExt, future::Fuse};
 use maybenot::{MachineId, TriggerEvent};
 use std::{
     pin::pin,
-    sync::atomic::AtomicUsize,
-    sync::{Arc, Weak},
+    sync::{Arc, Weak, atomic::AtomicUsize},
 };
 use tokio::{
     sync::{Mutex, Notify, RwLock, mpsc},
@@ -35,6 +34,15 @@ where
     pub(super) event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
 }
 
+fn await_blocking_timer(blocking: &BlockingState) -> Fuse<tokio::time::Sleep> {
+    if let BlockingState::Active { expires_at, .. } = blocking {
+        log::debug!("DAITA: Blocking active, expires at {:?}", expires_at);
+        tokio::time::sleep_until(*expires_at).fuse()
+    } else {
+        Fuse::terminated()
+    }
+}
+
 impl<US> ActionHandler<US>
 where
     US: UdpSend + Clone + 'static,
@@ -42,11 +50,13 @@ where
     pub(crate) async fn handle_actions(
         mut self,
         mut actions: mpsc::UnboundedReceiver<(Action, MachineId)>,
-    ) -> Result<()> {
+    ) {
         let mut blocking_timer = pin!(Fuse::terminated());
         let mut blocked_packets_buf = Vec::new();
 
         loop {
+            blocking_timer.set(await_blocking_timer(&*self.blocking.read().await));
+
             let res = futures::select! {
                 _ = blocking_timer => {
                     log::debug!("DAITA: Blocking ended, flushing blocked packets");
