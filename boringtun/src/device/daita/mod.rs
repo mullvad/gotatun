@@ -100,10 +100,10 @@ impl DaitaHooks {
             outbound_normal: AtomicU32::new(0),
             replaced_normal: AtomicU32::new(0),
         });
-        let blocking = Arc::new(RwLock::new(types::BlockingState::Inactive));
-        let (blocking_queue_tx, blocking_queue_rx) = mpsc::channel(MAX_BLOCKED_PACKETS);
         let tx_padding_packet_bytes = Arc::new(AtomicUsize::new(0));
-        let blocking_abort = Arc::new(Notify::const_new());
+
+        let (blocking_queue_tx, blocking_queue_rx) = mpsc::channel(MAX_BLOCKED_PACKETS);
+        let blocking_watcher = BlockingWatcher::new(blocking_queue_tx);
 
         let machines = maybenot_machines
             .iter()
@@ -130,9 +130,7 @@ impl DaitaHooks {
             packet_pool,
             packet_count: packet_count.clone(),
             blocking_queue_rx,
-            blocking_queue_tx: blocking_queue_tx.clone(),
-            blocking_abort: blocking_abort.clone(),
-            blocking: blocking.clone(),
+            blocking_watcher: blocking_watcher.clone(),
             udp_send: udp_send.clone(),
             mtu: mtu.clone(),
             tx_padding_packet_bytes: tx_padding_packet_bytes.clone(),
@@ -146,14 +144,11 @@ impl DaitaHooks {
             event_tx.clone().downgrade(),
             action_tx,
         ));
+
         DaitaHooks {
             event_tx: event_tx.clone(),
             packet_count,
-            blocking_watcher: BlockingWatcher {
-                blocking_queue_tx,
-                blocking_state: blocking,
-                blocking_abort,
-            },
+            blocking_watcher,
             mtu,
             tx_padding_bytes: 0,
             tx_padding_packet_bytes,
