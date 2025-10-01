@@ -1,3 +1,4 @@
+use futures::FutureExt;
 use maybenot::MachineId;
 use std::{
     collections::VecDeque,
@@ -99,13 +100,39 @@ impl BlockingState {
     }
 }
 
+#[derive(Clone)]
 pub struct BlockingWatcher {
     pub(super) blocking_queue_tx: mpsc::Sender<Packet<Wg>>,
     pub(super) blocking_state: Arc<RwLock<BlockingState>>,
-    pub(super) blocking_abort: Arc<Notify>,
+    blocking_abort: Arc<Notify>,
 }
 
 impl BlockingWatcher {
+    pub fn new(blocking_queue_tx: mpsc::Sender<Packet<Wg>>) -> Self {
+        let blocking_state = Arc::new(RwLock::new(BlockingState::Inactive));
+        let blocking_abort = Arc::new(Notify::const_new());
+        Self {
+            blocking_queue_tx,
+            blocking_state,
+            blocking_abort,
+        }
+    }
+
+    /// Wait until the blocking timer expires, or until `blocking_abort` is notified.
+    ///
+    /// When this future resolves, blocked packets should be flushed.
+    pub async fn wait_blocking_ended(&self) {
+        let abort = self.blocking_abort.notified();
+        if let BlockingState::Active { expires_at, .. } = &*self.blocking_state.read().await {
+            futures::select! {
+                _ = tokio::time::sleep_until(*expires_at).fuse() => {},
+                _ = abort.fuse() => {},
+            }
+        } else {
+            abort.await;
+        };
+    }
+
     /// Add the packet to the queue if blocking is active, otherwise return it to be sent immediately.
     ///
     /// Returns `None` if the packet was queued for blocking.

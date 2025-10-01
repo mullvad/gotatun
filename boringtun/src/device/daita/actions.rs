@@ -1,18 +1,15 @@
 use super::types::{Action, BlockingState, ErrorAction, PacketCount, PaddingHeader, Result};
 use crate::{
-    device::peer::Peer,
+    device::{daita::types::BlockingWatcher, peer::Peer},
     packet::{self, Packet, Wg},
     tun::LinkMtuWatcher,
     udp::UdpSend,
 };
-use futures::{FutureExt, future::Fuse};
+use futures::FutureExt;
 use maybenot::{MachineId, TriggerEvent};
-use std::{
-    pin::pin,
-    sync::{Arc, Weak, atomic::AtomicUsize},
-};
+use std::sync::{Arc, Weak, atomic::AtomicUsize};
 use tokio::{
-    sync::{Mutex, Notify, RwLock, mpsc},
+    sync::{Mutex, mpsc},
     time::Instant,
 };
 use zerocopy::IntoBytes;
@@ -23,24 +20,13 @@ where
 {
     pub(super) packet_count: Arc<PacketCount>,
     pub(super) blocking_queue_rx: mpsc::Receiver<Packet<Wg>>,
-    pub(super) blocking_queue_tx: mpsc::Sender<Packet<Wg>>,
-    pub(super) blocking_abort: Arc<Notify>,
-    pub(super) blocking: Arc<RwLock<BlockingState>>,
+    pub(super) blocking_watcher: BlockingWatcher,
     pub(super) peer: Weak<Mutex<Peer>>,
     pub(super) packet_pool: packet::PacketBufPool,
     pub(super) udp_send: US,
     pub(super) mtu: LinkMtuWatcher,
     pub(super) tx_padding_packet_bytes: Arc<AtomicUsize>,
     pub(super) event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
-}
-
-fn await_blocking_timer(blocking: &BlockingState) -> Fuse<tokio::time::Sleep> {
-    if let BlockingState::Active { expires_at, .. } = blocking {
-        log::debug!("DAITA: Blocking active, expires at {:?}", expires_at);
-        tokio::time::sleep_until(*expires_at).fuse()
-    } else {
-        Fuse::terminated()
-    }
 }
 
 impl<US> ActionHandler<US>
@@ -51,19 +37,12 @@ where
         mut self,
         mut actions: mpsc::UnboundedReceiver<(Action, MachineId)>,
     ) {
-        let mut blocking_timer = pin!(Fuse::terminated());
         let mut blocked_packets_buf = Vec::new();
 
         loop {
-            blocking_timer.set(await_blocking_timer(&*self.blocking.read().await));
-
             let res = futures::select! {
-                _ = blocking_timer => {
+                _ = self.blocking_watcher.wait_blocking_ended().fuse() => {
                     log::debug!("DAITA: Blocking ended, flushing blocked packets");
-                    self.end_blocking(&mut blocked_packets_buf).await
-                }
-                _ = self.blocking_abort.notified().fuse() => {
-                    log::debug!("DAITA: Blocking was aborted due to overfull buffer capacity, flushing blocked packets");
                     self.end_blocking(&mut blocked_packets_buf).await
                 }
                 res = actions.recv().fuse() => {
@@ -98,7 +77,7 @@ where
         duration: std::time::Duration,
     ) -> Result<()> {
         self.send_event(TriggerEvent::BlockingBegin { machine })?;
-        let mut blocking = self.blocking.write().await;
+        let mut blocking = self.blocking_watcher.blocking_state.write().await;
         let new_expiry = Instant::now() + duration;
         match &mut *blocking {
             BlockingState::Active { expires_at, .. } if !replace && new_expiry <= *expires_at => {
@@ -124,7 +103,7 @@ where
     ) -> Result<()> {
         self.send_event(TriggerEvent::PaddingSent { machine })?;
 
-        let blocking_with_bypass = match &*self.blocking.read().await {
+        let blocking_with_bypass = match &*self.blocking_watcher.blocking_state.read().await {
             BlockingState::Inactive => None,
             BlockingState::Active {
                 bypass: blocking_bypass,
@@ -162,7 +141,10 @@ where
                 let mtu = self.mtu.get();
                 let padding_packet = self.encapsulate_padding(&mut peer, mtu).await?;
                 //  Drop the padding packet if blocking queue is full
-                let _ = self.blocking_queue_tx.try_send(padding_packet);
+                let _ = self
+                    .blocking_watcher
+                    .blocking_queue_tx
+                    .try_send(padding_packet);
                 Ok(())
             }
             (None, true) if self.packet_count.replaced() < self.packet_count.outbound() => {
@@ -199,7 +181,7 @@ where
                     // To prevent new packets from sneaking into the queue before we set the state to Inactive,
                     // we loop once more and flush any new packets that might have arrived.
                     if blocking {
-                        *self.blocking.write().await = BlockingState::Inactive;
+                        *self.blocking_watcher.blocking_state.write().await = BlockingState::Inactive;
                         self.send_event(TriggerEvent::BlockingEnd)?;
                         blocking = false;
                     }  else {
