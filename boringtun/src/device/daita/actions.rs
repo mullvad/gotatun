@@ -47,24 +47,14 @@ where
         let mut blocked_packets_buf = Vec::new();
 
         loop {
-            blocking_timer.set(
-                // TODO: Try refactoring this into a function, I dare you
-                if let BlockingState::Active { expires_at, .. } = &*self.blocking.read().await {
-                    log::debug!("DAITA: Blocking active, expires at {:?}", expires_at);
-                    tokio::time::sleep_until(*expires_at).fuse()
-                } else {
-                    Fuse::terminated()
-                },
-            );
-
-            futures::select! {
+            let res = futures::select! {
                 _ = blocking_timer => {
                     log::debug!("DAITA: Blocking ended, flushing blocked packets");
-                    self.end_blocking(&mut blocked_packets_buf).await?;
+                    self.end_blocking(&mut blocked_packets_buf).await
                 }
                 _ = self.blocking_abort.notified().fuse() => {
                     log::debug!("DAITA: Blocking was aborted due to overfull buffer capacity, flushing blocked packets");
-                    self.end_blocking(&mut blocked_packets_buf).await?;
+                    self.end_blocking(&mut blocked_packets_buf).await
                 }
                 res = actions.recv().fuse() => {
                     let Some((action, machine)) = res else {
@@ -73,31 +63,50 @@ where
                     };
                     match action {
                         Action::Padding { replace, bypass } => {
-                            self.handle_padding(machine, replace, bypass).await?;
+                            self.handle_padding(machine, replace, bypass).await
                         }
                         Action::Block { replace, bypass, duration } => {
-                            self.send_event(TriggerEvent::BlockingBegin { machine })?;
-                            let mut blocking = self.blocking.write().await;
-                            let new_expiry = Instant::now() + duration;
-                            match &mut *blocking {
-                                BlockingState::Active { expires_at, .. } if !replace && new_expiry <= *expires_at => {
-                                    log::debug!("Current blocking was not replaced");
-                                }
-                                _ => {
-                                    *blocking = BlockingState::Active { bypass, expires_at: new_expiry };
-                                    log::debug!("Blocking started");
-                                }
-                            }
+                            self.handle_blocking(machine, replace, bypass, duration).await
                         }
                     }
                 }
+            };
+            match res {
+                Err(ErrorAction::Close) => return,
+                Err(ErrorAction::Ignore) => {}
+                Ok(()) => {}
             }
         }
+    }
+
+    /// Start or extend blocking according to [`maybenot::TriggerAction::BlockOutgoing`].
+    async fn handle_blocking(
+        &mut self,
+        machine: MachineId,
+        replace: bool,
+        bypass: bool,
+        duration: std::time::Duration,
+    ) -> Result<()> {
+        self.send_event(TriggerEvent::BlockingBegin { machine })?;
+        let mut blocking = self.blocking.write().await;
+        let new_expiry = Instant::now() + duration;
+        match &mut *blocking {
+            BlockingState::Active { expires_at, .. } if !replace && new_expiry <= *expires_at => {
+                log::debug!("Current blocking was not replaced");
+            }
+            _ => {
+                *blocking = BlockingState::Active {
+                    bypass,
+                    expires_at: new_expiry,
+                };
+                log::debug!("Blocking started");
+            }
+        };
         Ok(())
     }
 
-    /// Send a padding packet according to [`TriggerAction::SendPadding`].
-    pub(crate) async fn handle_padding(
+    /// Send a padding packet according to [`maybenot::TriggerAction::SendPadding`].
+    async fn handle_padding(
         &mut self,
         machine: MachineId,
         replace: bool,
@@ -158,6 +167,7 @@ where
         }
     }
 
+    /// Flush all blocked packets and end blocking.
     pub(crate) async fn end_blocking(&mut self, packets: &mut Vec<Packet<Wg>>) -> Result<()> {
         let Some(addr) = self.get_peer().await?.endpoint().addr else {
             log::error!("No endpoint");
