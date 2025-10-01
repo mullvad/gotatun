@@ -1,10 +1,24 @@
 use maybenot::MachineId;
 use std::{
     collections::VecDeque,
-    sync::atomic::{self, AtomicU32},
+    sync::{
+        Arc,
+        atomic::{self, AtomicU32},
+    },
 };
-use tokio::time::Instant;
+use tokio::{
+    sync::{
+        Notify, RwLock,
+        mpsc::{self, error::TrySendError},
+    },
+    time::Instant,
+};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
+
+use crate::{
+    device::daita::MIN_BLOCKING_CAPACITY,
+    packet::{Packet, Wg},
+};
 
 pub(crate) const DAITA_MARKER: u8 = 0xFF;
 
@@ -82,6 +96,45 @@ impl BlockingState {
     #[must_use]
     pub(crate) fn is_active(&self) -> bool {
         matches!(self, Self::Active { .. })
+    }
+}
+
+pub struct BlockingWatcher {
+    pub(super) blocking_queue_tx: mpsc::Sender<Packet<Wg>>,
+    pub(super) blocking_state: Arc<RwLock<BlockingState>>,
+    pub(super) blocking_abort: Arc<Notify>,
+}
+
+impl BlockingWatcher {
+    /// Add the packet to the queue if blocking is active, otherwise return it to be sent immediately.
+    ///
+    /// Returns `None` if the packet was queued for blocking.
+    ///
+    /// Returns `Some(packet)` if the packet should be sent immediately.
+    /// This happens if blocking is inactive, or if the blocking queue is full/closed.
+    pub fn send_if_blocking(&self, packet: Packet<Wg>) -> Option<Packet<Wg>> {
+        if let Ok(blocking) = self.blocking_state.try_read()
+            && blocking.is_active()
+        {
+            // Notify the blocking handler to abort blocking when the capacity is low
+            if self.blocking_queue_tx.capacity() < MIN_BLOCKING_CAPACITY {
+                self.blocking_abort.notify_one();
+            }
+
+            if let Err(TrySendError::Closed(packet) | TrySendError::Full(packet)) =
+                self.blocking_queue_tx.try_send(packet)
+            {
+                // If the queue is closed or full, we can't block anymore, so we
+                // send the packet anyway.
+                // TODO: this would be an out of order packet, not ideal.
+                // Should we drop the packet instead?
+                Some(packet)
+            } else {
+                None
+            }
+        } else {
+            Some(packet)
+        }
     }
 }
 
