@@ -33,7 +33,7 @@ impl BufferedUdpSend {
                 }
                 // send all packets at once
                 let _ = udp_tx
-                    .send_many_to(&mut send_many_buf, &mut buf.drain(..))
+                    .send_many_to(&mut send_many_buf, &mut buf)
                     .await
                     .inspect_err(|e| log::trace!("send_to_many_err: {e:#}"));
             }
