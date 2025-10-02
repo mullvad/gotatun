@@ -69,7 +69,7 @@ use super::peer::Peer;
 use futures::FutureExt;
 use maybenot::{Framework, Machine, MachineId, TriggerAction, TriggerEvent};
 use rand::{RngCore, SeedableRng, rngs::StdRng};
-use tokio::sync::{Mutex, Notify, RwLock, mpsc};
+use tokio::sync::{Mutex, mpsc};
 use tokio::time::Instant;
 
 // TODO: Pick a good number
