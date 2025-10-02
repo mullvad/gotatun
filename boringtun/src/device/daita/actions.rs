@@ -8,7 +8,7 @@ use crate::{
 use futures::FutureExt;
 use maybenot::{MachineId, TriggerEvent};
 use std::{
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::{Arc, Weak, atomic::AtomicUsize},
 };
 use tokio::{
@@ -29,7 +29,8 @@ where
     pub(super) blocking_watcher: BlockingWatcher,
     pub(super) peer: Weak<Mutex<Peer>>,
     pub(super) packet_pool: packet::PacketBufPool,
-    pub(super) udp_send: US,
+    pub(super) udp_send_v4: US,
+    pub(super) udp_send_v6: US,
     pub(super) mtu: LinkMtuWatcher,
     pub(super) tx_padding_packet_bytes: Arc<AtomicUsize>,
     pub(super) event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
@@ -175,9 +176,14 @@ where
             return Err(ErrorAction::Close);
         };
 
+        let udp_send = match addr.ip() {
+            IpAddr::V4(..) => &self.udp_send_v4,
+            IpAddr::V6(..) => &self.udp_send_v6,
+        };
+
         let mut send_many_bufs = US::SendManyBuf::default();
         let mut blocking = true;
-        let limit = self.udp_send.max_number_of_packets_to_send();
+        let limit = udp_send.max_number_of_packets_to_send();
         loop {
             while packets.len() <= limit {
                 match self.blocking_queue_rx.try_recv() {
@@ -201,11 +207,7 @@ where
                 }
             }
             let count = packets.len();
-            if let Ok(()) = self
-                .udp_send
-                .send_many_to(&mut send_many_bufs, packets)
-                .await
-            {
+            if let Ok(()) = udp_send.send_many_to(&mut send_many_bufs, packets).await {
                 // In case not all packets are drained from `packets`, we count remaining items
                 let sent = count - packets.len();
                 self.packet_count.dec(sent as u32);
@@ -269,7 +271,13 @@ where
             log::trace!("No endpoint");
             return Err(ErrorAction::Ignore);
         };
-        self.udp_send
+
+        let udp_send = match addr.ip() {
+            IpAddr::V4(..) => &self.udp_send_v4,
+            IpAddr::V6(..) => &self.udp_send_v6,
+        };
+
+        udp_send
             .send_to(packet.into_bytes(), addr)
             .await
             .map_err(|_| ErrorAction::Close)?;

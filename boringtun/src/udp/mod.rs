@@ -88,6 +88,7 @@ pub trait UdpRecv: Send + Sync {
 /// An abstraction of `send_to` for a UDP socket.
 ///
 /// This allows us to, for example, swap out UDP sockets with a channel.
+// TODO: consider splitting into UdpSendV4 and UdpSendV6
 pub trait UdpSend: Send + Sync + Clone {
     type SendManyBuf: Default + Send + Sync;
 
@@ -97,6 +98,8 @@ pub trait UdpSend: Send + Sync + Clone {
         packet: Packet,
         destination: SocketAddr,
     ) -> impl Future<Output = io::Result<()>> + Send;
+
+    // --- Optional Methods ---
 
     /// The maximum number of packets that can be passed to [UdpSend::send_many_to].
     fn max_number_of_packets_to_send(&self) -> usize {
@@ -108,8 +111,12 @@ pub trait UdpSend: Send + Sync + Clone {
     /// # Arguments
     /// - `send_buf` - Internal buffer. Should be reused between calls. Create with [Default].
     /// - `packets` - Input. Packets to send. Packets are removed from this vector when sent.
+    ///
+    /// # Notes
+    /// May panic or return an error if [SocketAddr::V4]s and [SocketAddr::V6]s are mixed.
     //
     // TODO: define how many packets are sent in case of an error.
+    // TODO: consider splitting into send_many_to_ipv4 and send_many_to_ipv6
     fn send_many_to(
         &self,
         send_buf: &mut Self::SendManyBuf,
@@ -118,8 +125,6 @@ pub trait UdpSend: Send + Sync + Clone {
         let _ = send_buf;
         generic_send_many_to(self, packets)
     }
-
-    // --- Optional Methods ---
 
     /// Get the port in use, if any.
     ///
