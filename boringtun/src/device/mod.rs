@@ -15,7 +15,7 @@ use ip_network::IpNetwork;
 use std::collections::HashMap;
 use std::io::{self};
 use std::mem;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
 use std::ops::BitOrAssign;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -746,14 +746,24 @@ impl<T: DeviceTransports> Device<T> {
                     let Ok(packet) = packet.try_into_ipvx() else {
                         continue;
                     };
-                    let (destination, packet): (IpAddr, _) = packet.either(
-                        |ipv4| (ipv4.header.destination().into(), ipv4.into()),
-                        |ipv6| (ipv6.header.destination().into(), ipv6.into()),
-                    );
 
-                    if peer.is_allowed_ip(destination)
-                        && let Err(_err) = tun_tx.send(packet).await
-                    {
+                    // check whether `peer` is allowed to send us packets from `source`
+                    let (source, packet): (IpAddr, _) = packet.either(
+                        |ipv4| (ipv4.header.source().into(), ipv4.into()),
+                        |ipv6| (ipv6.header.source().into(), ipv6.into()),
+                    );
+                    if !peer.is_allowed_ip(source) {
+                        if cfg!(debug_assertions) {
+                            let unspecified = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0).into();
+                            log::warn!(
+                                "peer at {} is not allowed to send us packets from: {source}",
+                                peer.endpoint().addr.unwrap_or(unspecified)
+                            );
+                        }
+                        continue;
+                    }
+
+                    if let Err(_err) = tun_tx.send(packet).await {
                         log::trace!("buffered_tun_send.send failed");
                         break;
                     }
