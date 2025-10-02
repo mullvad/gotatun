@@ -1,6 +1,6 @@
 use super::types::{DAITA_MARKER, PacketCount, PaddingPacket};
 use crate::device::daita::types::BlockingWatcher;
-use crate::packet::WgKind;
+use crate::packet::{self, WgKind};
 use crate::{
     packet::{Packet, Wg},
     tun::LinkMtuWatcher,
@@ -90,9 +90,28 @@ impl DaitaHooks {
             return None;
         }
 
-        // TODO: Inspect Ipv4/Ipv6 header to determine actual payload size
-        // self.rx_padding_bytes += packet.len() - packet.payload_len();
         let _ = self.event_tx.send(TriggerEvent::NormalRecv);
+
+        // Inspect Ipv4/Ipv6 header to determine actual payload size
+        let ip = packet::Ip::ref_from_bytes(&packet).ok()?;
+        let ip_len = match ip.header.version() {
+            4 => {
+                let ipv4 = packet::Ipv4::<[u8]>::ref_from_bytes(&packet).ok()?;
+                usize::from(ipv4.header.total_len.get())
+            }
+            6 => {
+                let ipv6 = packet::Ipv6::<[u8]>::ref_from_bytes(&packet).ok()?;
+                let payload_len = usize::from(ipv6.header.payload_length.get());
+                payload_len + packet::Ipv6Header::LEN
+            }
+            _ => return None,
+        };
+
+        // Add bytes padded due to constant-size
+        // NOTE: We don't truncate the packet buffer here, as that will
+        // to done before handing it to the TUN device anyway, with more
+        // safety checks.
+        self.rx_padding_bytes += packet.len() - ip_len;
 
         Some(packet)
     }
