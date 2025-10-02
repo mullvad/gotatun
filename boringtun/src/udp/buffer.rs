@@ -24,28 +24,18 @@ impl BufferedUdpSend {
             let max_number_of_packets_to_send = udp_tx.max_number_of_packets_to_send();
             let mut send_many_buf = Default::default();
 
-            while let Some((packet, addr)) = send_rx.recv().await {
-                buf.clear();
-
-                if send_rx.is_empty() {
-                    let _ = udp_tx.send_to(packet, addr).await;
-                } else {
-                    // collect as many packets as possible into a buffer, and use send_many_to
-                    [(packet, addr)]
-                        .into_iter()
-                        .chain(iter::from_fn(|| send_rx.try_recv().ok()))
-                        .take(max_number_of_packets_to_send)
-                        .for_each(|(packet_buf, target)| buf.push((packet_buf, target)));
-
-                    // send all packets at once
-                    let _ = udp_tx
-                        .send_many_to(&mut send_many_buf, &mut buf)
-                        .await
-                        .inspect_err(|e| log::trace!("send_to_many_err: {e:#}"));
-
-                    // Release borrowed buffers
-                    buf.clear();
+            loop {
+                let count = send_rx
+                    .recv_many(&mut buf, max_number_of_packets_to_send)
+                    .await;
+                if count == 0 {
+                    break;
                 }
+                // send all packets at once
+                let _ = udp_tx
+                    .send_many_to(&mut send_many_buf, &mut buf.drain(..))
+                    .await
+                    .inspect_err(|e| log::trace!("send_to_many_err: {e:#}"));
             }
         });
 
