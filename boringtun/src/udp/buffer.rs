@@ -1,6 +1,5 @@
 //! Generic buffered UdpTransport implementation.
 
-use std::iter;
 use std::{net::SocketAddr, sync::Arc};
 
 use tokio::{io, sync::mpsc};
