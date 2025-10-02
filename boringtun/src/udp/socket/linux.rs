@@ -17,7 +17,6 @@ const MAX_PACKET_COUNT: usize = 100;
 #[derive(Default)]
 pub struct SendmmsgBuf {
     targets: Vec<Option<SockaddrStorage>>,
-    packets: Vec<Packet>,
 }
 
 impl UdpSend for super::UdpSocket {
@@ -31,25 +30,22 @@ impl UdpSend for super::UdpSocket {
     async fn send_many_to(
         &self,
         buf: &mut SendmmsgBuf,
-        packets: impl Iterator<Item = (Packet, SocketAddr)>,
+        packets: &mut Vec<(Packet, SocketAddr)>,
     ) -> io::Result<()> {
         let fd = self.inner.as_raw_fd();
 
         buf.targets.clear();
-        buf.packets.clear();
 
         // This allocation can't be put in the struct because of lifetimes.
         // So we allocate it on the stack instead.
         let mut packets_buf = [[IoSlice::new(&[])]; MAX_PACKET_COUNT];
-        for (packet, target) in packets {
-            buf.targets.push(Some(SockaddrStorage::from(target)));
-            buf.packets.push(packet);
-        }
-        for (i, packet) in buf.packets.iter().enumerate() {
-            packets_buf[i] = [IoSlice::new(&packet[..])];
+        for ((packet, target), packets_buf) in packets.iter().zip(&mut packets_buf) {
+            buf.targets.push(Some(SockaddrStorage::from(*target)));
+            *packets_buf = [IoSlice::new(&packet[..])];
         }
 
-        let pkts = &packets_buf[..buf.targets.len()];
+        let len = buf.targets.len();
+        let pkts = &packets_buf[..len];
 
         self.inner
             .async_io(Interest::WRITABLE, || {
@@ -66,6 +62,11 @@ impl UdpSend for super::UdpSocket {
                 Ok(())
             })
             .await?;
+
+        // Don't clear the entire packets buf in case it contained more than MAX_PACKET_COUNT items
+        // Note that len = min(MAX_PACKET_COUNT, original packets.len()), due to the zip, so this
+        // will not panic.
+        packets.drain(..len);
 
         Ok(())
     }

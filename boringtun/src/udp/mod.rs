@@ -108,14 +108,13 @@ pub trait UdpSend: Send + Sync + Clone {
     ///
     /// # Arguments
     /// - `send_buf` - Internal buffer. Should be reused between calls. Create with [Default].
-    /// - `packets` - Input. Iterator of packets to send. At most [`UdpSend::max_number_of_packets_to_send`]
-    ///   packets will be taken from the iterator to send.
+    /// - `packets` - Input. Packets to send. Packets are removed from this vector when sent.
     //
     // TODO: define how many packets are sent in case of an error.
     fn send_many_to(
         &self,
         send_buf: &mut Self::SendManyBuf,
-        packets: impl Iterator<Item = (Packet, SocketAddr)> + Send,
+        packets: &mut Vec<(Packet, SocketAddr)>,
     ) -> impl Future<Output = io::Result<()>> + Send {
         let _ = send_buf;
         generic_send_many_to(self, packets)
@@ -146,9 +145,9 @@ pub trait UdpSend: Send + Sync + Clone {
 
 async fn generic_send_many_to<U: UdpSend>(
     transport: &U,
-    packets: impl Iterator<Item = (Packet, SocketAddr)>,
+    packets: &mut Vec<(Packet, SocketAddr)>,
 ) -> io::Result<()> {
-    for (packet, target) in packets {
+    for (packet, target) in packets.drain(..) {
         transport.send_to(packet, target).await?;
     }
     Ok(())
