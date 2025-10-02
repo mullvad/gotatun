@@ -7,9 +7,15 @@ use crate::{
 };
 use futures::FutureExt;
 use maybenot::{MachineId, TriggerEvent};
-use std::sync::{Arc, Weak, atomic::AtomicUsize};
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Weak, atomic::AtomicUsize},
+};
 use tokio::{
-    sync::{Mutex, mpsc},
+    sync::{
+        Mutex,
+        mpsc::{self, error::TryRecvError},
+    },
     time::Instant,
 };
 use zerocopy::IntoBytes;
@@ -160,7 +166,10 @@ where
     }
 
     /// Flush all blocked packets and end blocking.
-    pub(crate) async fn end_blocking(&mut self, packets: &mut Vec<Packet<Wg>>) -> Result<()> {
+    pub(crate) async fn end_blocking(
+        &mut self,
+        packets: &mut Vec<(Packet, SocketAddr)>,
+    ) -> Result<()> {
         let Some(addr) = self.get_peer().await?.endpoint().addr else {
             log::error!("No endpoint");
             return Err(ErrorAction::Close);
@@ -168,43 +177,41 @@ where
 
         let mut send_many_bufs = US::SendManyBuf::default();
         let mut blocking = true;
+        let limit = self.udp_send.max_number_of_packets_to_send();
         loop {
-            let limit = self.udp_send.max_number_of_packets_to_send();
-            futures::select! {
-                count = self.blocking_queue_rx.recv_many(packets, limit - packets.len()).fuse() => {
-                    if count == 0 {
-                        break Err(ErrorAction::Close); // channel closed
+            while packets.len() <= limit {
+                match self.blocking_queue_rx.try_recv() {
+                    Ok(packet) => packets.push((packet.into(), addr)),
+                    Err(TryRecvError::Empty) => {
+                        // When the packet queue is empty, we can end blocking.
+                        // To prevent new packets from sneaking into the queue before we set the state to Inactive,
+                        // we loop once more and flush any new packets that might have arrived.
+                        if blocking {
+                            *self.blocking_watcher.blocking_state.write().await =
+                                BlockingState::Inactive;
+                            self.send_event(TriggerEvent::BlockingEnd)?;
+                            blocking = false;
+                        } else {
+                            return Ok(());
+                        }
                     }
-                },
-                // Packet queue is empty
-                default => {
-                    // When the packet queue is empty, we can end blocking.
-                    // To prevent new packets from sneaking into the queue before we set the state to Inactive,
-                    // we loop once more and flush any new packets that might have arrived.
-                    if blocking {
-                        *self.blocking_watcher.blocking_state.write().await = BlockingState::Inactive;
-                        self.send_event(TriggerEvent::BlockingEnd)?;
-                        blocking = false;
-                    }  else {
-                        return Ok(());
+                    Err(TryRecvError::Disconnected) => {
+                        return Err(ErrorAction::Close); // channel closed},
                     }
-
-                },
+                }
             }
-
             let count = packets.len();
             if let Ok(()) = self
                 .udp_send
-                .send_many_to(
-                    &mut send_many_bufs,
-                    packets.drain(..).map(|p| (p.into_bytes(), addr)),
-                )
+                .send_many_to(&mut send_many_bufs, packets)
                 .await
             {
-                // Trigger a TunnelSent for each packet sent
-                self.packet_count.dec(count as u32);
+                // In case not all packets are drained from `packets`, we count remaining items
+                let sent = count - packets.len();
+                self.packet_count.dec(sent as u32);
                 let event_tx = self.event_tx.upgrade().ok_or(ErrorAction::Close)?;
-                for _ in 0..count {
+                // Trigger a TunnelSent for each packet sent
+                for _ in 0..sent {
                     event_tx
                         .send(TriggerEvent::TunnelSent)
                         .map_err(|_| ErrorAction::Close)?;
