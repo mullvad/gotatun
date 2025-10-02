@@ -86,7 +86,8 @@ impl DaitaHooks {
         maybenot_machines: Vec<String>,
         peer: Weak<Mutex<Peer>>,
         mtu: LinkMtuWatcher,
-        udp_send: US,
+        udp_send_v4: US,
+        udp_send_v6: US,
         packet_pool: packet::PacketBufPool,
     ) -> Self
     where
@@ -131,7 +132,8 @@ impl DaitaHooks {
             packet_count: packet_count.clone(),
             blocking_queue_rx,
             blocking_watcher: blocking_watcher.clone(),
-            udp_send: udp_send.clone(),
+            udp_send_v4: udp_send_v4.clone(),
+            udp_send_v6: udp_send_v6.clone(),
             mtu: mtu.clone(),
             tx_padding_packet_bytes: tx_padding_packet_bytes.clone(),
             event_tx: event_tx.clone().downgrade(),

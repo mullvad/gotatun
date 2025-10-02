@@ -38,7 +38,9 @@ impl DaitaHooks {
         if packet.len() > mtu {
             if cfg!(debug_assertions) {
                 log::warn!(
-                    "Packet size exceeded MTU. Either the TUN MTU changed, or there's a bug."
+                    "Packet size {} exceeded MTU {}. Either the TUN MTU changed, or there's a bug.",
+                    packet.len(),
+                    mtu,
                 );
             }
             return packet;

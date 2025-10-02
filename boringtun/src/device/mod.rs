@@ -216,7 +216,8 @@ impl<T: DeviceTransports> Connection<T> {
                     peer.maybenot_machines.clone(),
                     Arc::downgrade(peer_arc),
                     tun_rx_mtu.clone(),
-                    buffered_udp_tx_v4.clone(), // TODO: ipv6?
+                    buffered_udp_tx_v4.clone(),
+                    buffered_udp_tx_v6.clone(),
                     pool.clone(),
                 ))
             }
