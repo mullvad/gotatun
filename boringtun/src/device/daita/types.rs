@@ -18,7 +18,7 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endi
 
 use crate::{
     device::daita::MIN_BLOCKING_CAPACITY,
-    packet::{Packet, Wg},
+    packet::{Packet, WgData},
 };
 
 pub(crate) const DAITA_MARKER: u8 = 0xFF;
@@ -102,13 +102,13 @@ impl BlockingState {
 
 #[derive(Clone)]
 pub struct BlockingWatcher {
-    pub(super) blocking_queue_tx: mpsc::Sender<Packet<Wg>>,
+    pub(super) blocking_queue_tx: mpsc::Sender<Packet<WgData>>,
     pub(super) blocking_state: Arc<RwLock<BlockingState>>,
     blocking_abort: Arc<Notify>,
 }
 
 impl BlockingWatcher {
-    pub fn new(blocking_queue_tx: mpsc::Sender<Packet<Wg>>) -> Self {
+    pub fn new(blocking_queue_tx: mpsc::Sender<Packet<WgData>>) -> Self {
         let blocking_state = Arc::new(RwLock::new(BlockingState::Inactive));
         let blocking_abort = Arc::new(Notify::const_new());
         Self {
@@ -139,7 +139,7 @@ impl BlockingWatcher {
     ///
     /// Returns `Some(packet)` if the packet should be sent immediately.
     /// This happens if blocking is inactive, or if the blocking queue is full/closed.
-    pub fn send_if_blocking(&self, packet: Packet<Wg>) -> Option<Packet<Wg>> {
+    pub fn send_if_blocking(&self, packet: Packet<WgData>) -> Option<Packet<WgData>> {
         if let Ok(blocking) = self.blocking_state.try_read()
             && blocking.is_active()
         {

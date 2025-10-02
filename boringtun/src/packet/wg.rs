@@ -29,7 +29,7 @@ pub enum WgKind {
     Data(Packet<WgData>),
 }
 
-impl From<WgKind> for Packet {
+impl From<WgKind> for Packet<Wg> {
     fn from(kind: WgKind) -> Self {
         match kind {
             WgKind::HandshakeInit(packet) => packet.into(),
@@ -37,6 +37,12 @@ impl From<WgKind> for Packet {
             WgKind::CookieReply(packet) => packet.into(),
             WgKind::Data(packet) => packet.into(),
         }
+    }
+}
+
+impl From<WgKind> for Packet {
+    fn from(kind: WgKind) -> Self {
+        <Packet<Wg>>::from(kind).into()
     }
 }
 

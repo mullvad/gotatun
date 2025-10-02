@@ -1,7 +1,8 @@
 use super::types::{DAITA_MARKER, PacketCount, PaddingPacket};
 use crate::device::daita::types::BlockingWatcher;
+use crate::packet::WgKind;
 use crate::{
-    packet::{Packet, Wg, WgPacketType},
+    packet::{Packet, Wg},
     tun::LinkMtuWatcher,
 };
 use maybenot::TriggerEvent;
@@ -54,17 +55,20 @@ impl DaitaHooks {
     /// Returns `None` to drop/ignore the packet, e.g. when it was queued for blocking.
     /// Returns `Some(packet)` to send the packet.
     pub fn after_data_encapsulate(&self, packet: Packet<Wg>) -> Option<Packet<Wg>> {
-        let packet_type = packet.packet_type;
-
         // DAITA only cares about data packets.
-        if packet_type != WgPacketType::Data {
-            return Some(packet);
-        }
+        let data_packet = match packet.into_kind() {
+            Ok(WgKind::Data(packet)) => packet,
+            Ok(other) => return Some(other.into()),
+            Err(_) => todo!(),
+        };
 
-        self.blocking_watcher.send_if_blocking(packet).inspect(|_| {
-            let _ = self.event_tx.send(TriggerEvent::TunnelSent);
-            self.packet_count.dec(1);
-        })
+        self.blocking_watcher
+            .send_if_blocking(data_packet)
+            .map(|packet| {
+                let _ = self.event_tx.send(TriggerEvent::TunnelSent);
+                self.packet_count.dec(1);
+                packet.into()
+            })
     }
 
     /// Should be called on incoming validated encapsulated packets.
