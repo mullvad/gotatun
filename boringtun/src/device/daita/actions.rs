@@ -1,7 +1,7 @@
 use super::types::{Action, BlockingState, ErrorAction, PacketCount, PaddingHeader, Result};
 use crate::{
     device::{daita::types::BlockingWatcher, peer::Peer},
-    packet::{self, Packet, Wg},
+    packet::{self, Packet, WgData},
     tun::LinkMtuWatcher,
     udp::UdpSend,
 };
@@ -25,7 +25,7 @@ where
     US: UdpSend + Clone + 'static,
 {
     pub(super) packet_count: Arc<PacketCount>,
-    pub(super) blocking_queue_rx: mpsc::Receiver<Packet<Wg>>,
+    pub(super) blocking_queue_rx: mpsc::Receiver<Packet<WgData>>,
     pub(super) blocking_watcher: BlockingWatcher,
     pub(super) peer: Weak<Mutex<Peer>>,
     pub(super) packet_pool: packet::PacketBufPool,
@@ -220,19 +220,18 @@ where
         }
     }
 
-    // TODO: handle the case where handle_outgoing_packet returns a handshake
     pub(crate) async fn encapsulate_padding(
         &self,
         peer: &mut tokio::sync::OwnedMutexGuard<Peer>,
         mtu: u16,
-    ) -> Result<Packet<Wg>> {
+    ) -> Result<Packet<WgData>> {
         // TODO: Reuse the same padding packet each time (unless MTU changes)?
         match peer
             .tunnel
-            .handle_outgoing_packet(self.create_padding_packet(mtu))
+            .encapsulate_with_session(self.create_padding_packet(mtu))
         {
-            None => Err(ErrorAction::Ignore), // TODO: error?
-            Some(packet) => Ok(packet),
+            Err(_) => Err(ErrorAction::Ignore), // TODO: error?
+            Ok(packet) => Ok(packet),
         }
     }
 
@@ -262,7 +261,7 @@ where
 
     pub(crate) async fn send(
         &self,
-        packet: Packet<Wg>,
+        packet: Packet<WgData>,
         peer: tokio::sync::OwnedMutexGuard<Peer>,
     ) -> Result<()> {
         let endpoint_addr = peer.endpoint().addr;
