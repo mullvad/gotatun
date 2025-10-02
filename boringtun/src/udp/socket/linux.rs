@@ -19,6 +19,7 @@ const MAX_PACKET_COUNT: usize = 100;
 #[derive(Default)]
 pub struct SendmmsgBuf {
     targets: Vec<Option<SockaddrStorage>>,
+    packets: Vec<Packet>,
 }
 
 impl UdpSend for super::UdpSocket {
@@ -32,29 +33,25 @@ impl UdpSend for super::UdpSocket {
     async fn send_many_to(
         &self,
         buf: &mut SendmmsgBuf,
-        packets: &mut Vec<(Packet, SocketAddr)>,
+        packets: impl Iterator<Item = (Packet, SocketAddr)>,
     ) -> io::Result<()> {
-        let n = packets.len();
-        debug_assert!(n <= MAX_PACKET_COUNT);
-
         let fd = self.inner.as_raw_fd();
 
         buf.targets.clear();
-        packets
-            .iter()
-            .map(|(_packet, target)| Some(SockaddrStorage::from(*target)))
-            .for_each(|target| buf.targets.push(target));
+        buf.packets.clear();
 
         // This allocation can't be put in the struct because of lifetimes.
         // So we allocate it on the stack instead.
         let mut packets_buf = [[IoSlice::new(&[])]; MAX_PACKET_COUNT];
-        packets
-            .iter()
-            .map(|(packet, _target)| [IoSlice::new(&packet[..])])
-            .enumerate()
-            // packets.len() is no greater than MAX_PACKET_COUNT
-            .for_each(|(i, packet)| packets_buf[i] = packet);
-        let pkts = &packets_buf[..n];
+        for (packet, target) in packets {
+            buf.targets.push(Some(SockaddrStorage::from(target)));
+            buf.packets.push(packet);
+        }
+        for (i, packet) in buf.packets.iter().enumerate() {
+            packets_buf[i] = [IoSlice::new(&packet[..])];
+        }
+
+        let pkts = &packets_buf[..buf.targets.len()];
 
         self.inner
             .async_io(Interest::WRITABLE, || {
@@ -71,8 +68,6 @@ impl UdpSend for super::UdpSocket {
                 Ok(())
             })
             .await?;
-
-        packets.clear();
 
         Ok(())
     }

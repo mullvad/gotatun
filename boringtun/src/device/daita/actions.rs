@@ -166,6 +166,7 @@ where
             return Err(ErrorAction::Close);
         };
 
+        let mut send_many_bufs = US::SendManyBuf::default();
         let mut blocking = true;
         loop {
             let limit = self.udp_send.max_number_of_packets_to_send();
@@ -191,19 +192,19 @@ where
                 },
             }
 
-            let mut send_many_bufs = US::SendManyBuf::default();
-            // TODO: don't allocate (update send_many_to to take iterator?)
-            let mut packets: Vec<_> = packets.drain(..).map(|p| (p.into_bytes(), addr)).collect();
             let count = packets.len();
             if let Ok(()) = self
                 .udp_send
-                .send_many_to(&mut send_many_bufs, &mut packets)
+                .send_many_to(
+                    &mut send_many_bufs,
+                    packets.drain(..).map(|p| (p.into_bytes(), addr)),
+                )
                 .await
             {
                 // Trigger a TunnelSent for each packet sent
-                let sent = count - packets.len();
+                self.packet_count.dec(count as u32);
                 let event_tx = self.event_tx.upgrade().ok_or(ErrorAction::Close)?;
-                for _ in 0..sent {
+                for _ in 0..count {
                     event_tx
                         .send(TriggerEvent::TunnelSent)
                         .map_err(|_| ErrorAction::Close)?;
