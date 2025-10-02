@@ -121,9 +121,7 @@ impl Tunn {
     /// a handshake initiation. `None` is returned if a handshake is already in progress. In that
     /// case, the packet is added to a queue.
     pub fn handle_outgoing_packet(&mut self, packet: Packet) -> Option<Packet<Wg>> {
-        let current = self.current;
-
-        match self.encapsulate_with_session(packet, current) {
+        match self.encapsulate_with_session(packet) {
             Ok(encapsulated_packet) => Some(encapsulated_packet.into()),
             Err(packet) => {
                 // If there is no session, queue the packet for future retry
@@ -136,12 +134,9 @@ impl Tunn {
 
     /// Encapsulate a single packet into a [WgData].
     ///
-    /// Returns `Err(original_packet)` if `current` does not refer to an active session.
-    fn encapsulate_with_session(
-        &mut self,
-        packet: Packet,
-        current: usize,
-    ) -> Result<Packet<WgData>, Packet> {
+    /// Returns `Err(original_packet)` if there is no active session.
+    pub fn encapsulate_with_session(&mut self, packet: Packet) -> Result<Packet<WgData>, Packet> {
+        let current = self.current;
         if let Some(ref session) = self.sessions[current % N_SESSIONS] {
             // Send the packet using an established session
             let packet = session.format_packet_data(packet);
