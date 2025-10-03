@@ -32,7 +32,7 @@ use crate::packet::{PacketBufPool, WgKind};
 use crate::task::Task;
 use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
 #[cfg(feature = "tun")]
-use crate::tun::tun_async_device::TunSusan;
+use crate::tun::tun_async_device::TunDevice;
 use crate::tun::{IpRecv, IpSend, LinkMtuWatcher};
 use crate::udp::buffer::{BufferedUdpReceive, BufferedUdpSend};
 use crate::udp::{
@@ -97,7 +97,7 @@ pub struct DeviceConfig {
 
 /// By default, use a UDP socket for sending datagrams and a tunnel device for IP packets.
 #[cfg(feature = "tun")]
-pub type DefaultDeviceTransports = (UdpSocketFactory, TunSusan);
+pub type DefaultDeviceTransports = (UdpSocketFactory, TunDevice);
 
 pub trait DeviceTransports: 'static {
     type UdpTransportFactory: UdpTransportFactory;
@@ -278,7 +278,7 @@ impl<T: DeviceTransports> Connection<T> {
 }
 
 #[cfg(feature = "tun")]
-impl<T: DeviceTransports<IpRecv = TunSusan, IpSend = TunSusan>> DeviceHandle<T> {
+impl<T: DeviceTransports<IpRecv = TunDevice, IpSend = TunDevice>> DeviceHandle<T> {
     pub async fn from_tun_name(
         udp_factory: T::UdpTransportFactory,
         tun_name: &str,
@@ -291,7 +291,7 @@ impl<T: DeviceTransports<IpRecv = TunSusan, IpSend = TunSusan>> DeviceHandle<T> 
             p.enable_routing(false);
         });
         let tun = tun::create_as_async(&tun_config)?;
-        let tun = TunSusan::from_tun_device(tun)?;
+        let tun = TunDevice::from_tun_device(tun)?;
         let (tun_tx, tun_rx) = (tun.clone(), tun);
         Ok(DeviceHandle::new(udp_factory, tun_tx, tun_rx, config).await)
     }
