@@ -429,7 +429,7 @@ impl Cmsg {
     /// Create a new with space for `space` bytes and a CMSG header
     pub fn new(space: usize, cmsg_level: i32, cmsg_type: i32) -> Box<Self> {
         // Allocate enough space for the header and the data
-        // This will have the same alignment as `CMSGHDR`
+        // This will have the same alignment as `CMSGHDR` (only ensured by unit tests)
         let mut cmsg = Cmsg::new_box_zeroed_with_elems(cmsg_space(space) - mem::size_of::<Hdr>())
             .expect("alloc");
 
@@ -443,6 +443,7 @@ impl Cmsg {
     }
 
     #[cfg(feature = "windows-gro")]
+    /// Length, in bytes, of the entire `Cmsg`. Header included.
     pub fn len(&self) -> usize {
         std::mem::size_of_val(self)
     }
