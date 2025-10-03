@@ -54,16 +54,10 @@ pub trait UdpRecv: Send + Sync {
         pool: &mut PacketBufPool,
     ) -> impl Future<Output = io::Result<(Packet, SocketAddr)>> + Send;
 
-    /// The maximum number of packets that can be passed to [UdpRecv::recv_many_from].
-    fn max_number_of_packets_to_recv(&self) -> usize {
-        1
-    }
-
     /// The buffer type that is passed to [UdpRecv::recv_many_from].
     type RecvManyBuf: Default + Send;
 
-    /// Receive up to `x` packets at once,
-    /// where `x` is [UdpRecv::max_number_of_packets_to_recv].
+    /// Receive up to multiple packets at once.
     ///
     /// # Arguments
     /// - `recv_buf` - Internal buffer. Should be reused between calls. Create with [Default].
