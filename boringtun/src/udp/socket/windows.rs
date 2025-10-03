@@ -326,6 +326,7 @@ mod gro {
             ));
         }
 
+        // TODO: handle case where this is not available
         let recvmsg = RECVMSG.expect("missing WSARecvMsg");
 
         let ctrl = WSABUF {
@@ -367,6 +368,7 @@ mod gro {
 
         let mut gro_size = 0;
 
+        // TODO: allocate a larger buffer and iterate over all CMSGs
         if cmsg.header.cmsg_type == UDP_COALESCED_INFO {
             let slice = &cmsg.data[..mem::size_of::<u32>()];
             gro_size = u32::from_ne_bytes(slice.try_into().expect("cmsg data too small"));
