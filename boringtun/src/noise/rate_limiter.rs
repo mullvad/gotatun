@@ -4,12 +4,12 @@ use crate::noise::{TunnResult, WireGuardError};
 use crate::packet::{Packet, Wg, WgCookieReply, WgHandshakeBase, WgKind};
 
 use constant_time_eq::constant_time_eq;
-#[cfg(feature = "mock-instant")]
+#[cfg(feature = "mock_instant")]
 use mock_instant::Instant;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-#[cfg(not(feature = "mock-instant"))]
+#[cfg(not(feature = "mock_instant"))]
 use crate::sleepyinstant::Instant;
 
 use aead::generic_array::GenericArray;

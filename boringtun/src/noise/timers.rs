@@ -10,10 +10,10 @@ use std::ops::{Index, IndexMut};
 use std::time::Duration;
 
 use bytes::BytesMut;
-#[cfg(feature = "mock-instant")]
+#[cfg(feature = "mock_instant")]
 use mock_instant::Instant;
 
-#[cfg(not(feature = "mock-instant"))]
+#[cfg(not(feature = "mock_instant"))]
 use crate::sleepyinstant::Instant;
 
 // Some constants, represent time in seconds

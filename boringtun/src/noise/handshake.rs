@@ -4,7 +4,7 @@
 use crate::noise::errors::WireGuardError;
 use crate::noise::session::Session;
 use crate::packet::{Packet, WgCookieReply, WgHandshakeBase, WgHandshakeInit, WgHandshakeResp};
-#[cfg(not(feature = "mock-instant"))]
+#[cfg(not(feature = "mock_instant"))]
 use crate::sleepyinstant::Instant;
 use crate::x25519;
 use aead::{Aead, Payload};
@@ -17,7 +17,7 @@ use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use std::convert::TryInto;
 use std::time::{Duration, SystemTime};
 
-#[cfg(feature = "mock-instant")]
+#[cfg(feature = "mock_instant")]
 use mock_instant::Instant;
 
 pub(crate) const LABEL_MAC1: &[u8; 8] = b"mac1----";
