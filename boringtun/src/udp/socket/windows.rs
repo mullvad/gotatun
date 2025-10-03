@@ -205,14 +205,9 @@ mod gro {
 
     impl Default for RecvManyBuf {
         fn default() -> Self {
-            let cmsg = Cmsg::new(
-                mem::size_of::<u32>(),
-                WinSock::IPPROTO_UDP,
-                WinSock::UDP_COALESCED_INFO as i32,
-            );
             Self {
                 gro_buf: vec![],
-                cmsg,
+                cmsg: Cmsg::zeroed(mem::size_of::<u32>()),
             }
         }
     }
@@ -440,6 +435,13 @@ impl Cmsg {
         };
 
         cmsg
+    }
+
+    /// Create a new zeroed `Cmsg` with space for `space` bytes
+    pub fn zeroed(space: usize) -> Box<Self> {
+        // Allocate enough space for the header and the data
+        // This will have the same alignment as `CMSGHDR` (only ensured by unit tests)
+        Cmsg::new_box_zeroed_with_elems(cmsg_space(space) - mem::size_of::<Hdr>()).expect("alloc")
     }
 
     #[cfg(feature = "windows-gro")]
