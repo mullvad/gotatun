@@ -477,7 +477,7 @@ pub static MAX_GSO_SEGMENTS: LazyLock<usize> = LazyLock::new(|| {
         return 1;
     };
 
-    let mut gso_size: c_uint = 1500;
+    let mut gso_size: c_uint = 1280;
 
     // SAFETY: We're correctly passing an *mut c_uint specifying the size, a valid socket, and
     // its correct size.
