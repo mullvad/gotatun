@@ -404,7 +404,7 @@ mod gro {
     }
 }
 
-/// Struct representing a CMSG
+/// Struct representing a CMSG, including its payload
 #[derive(FromBytes, Immutable, KnownLayout, IntoBytes)]
 // TODO: Remove packed when `IntoBytes` handles DSTs properly
 #[repr(C, packed)]
@@ -413,7 +413,7 @@ pub struct Cmsg {
     pub data: [u8],
 }
 
-/// `CMSGHDR`
+/// A copy of [CMSGHDR] that implements zerocopy traits
 #[derive(FromBytes, Immutable, KnownLayout, IntoBytes)]
 #[repr(C)]
 pub struct Hdr {
@@ -425,6 +425,8 @@ pub struct Hdr {
 impl Cmsg {
     /// Create a new with space for `space` bytes and a CMSG header
     pub fn new(space: usize, cmsg_level: i32, cmsg_type: i32) -> Box<Self> {
+        // Allocate enough space for the header and the data
+        // This will have the same alignment as `CMSGHDR`
         let mut cmsg = Cmsg::new_box_zeroed_with_elems(cmsg_space(space) - mem::size_of::<Hdr>())
             .expect("alloc");
 
