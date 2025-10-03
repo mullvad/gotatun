@@ -11,23 +11,23 @@ use crate::{
 
 use std::{convert::Infallible, io, iter, sync::Arc, time::Duration};
 
-/// A linux TUN device.
+/// A kernel virtual network device; a TUN device.
 ///
 /// Implements [IpSend] and [IpRecv].
 #[derive(Clone)]
-pub struct TunSusan {
+pub struct TunDevice {
     tun: Arc<tun::AsyncDevice>,
-    state: Arc<TunSusanState>,
+    state: Arc<TunDeviceState>,
 }
 
-struct TunSusanState {
+struct TunDeviceState {
     mtu: LinkMtuWatcher,
 
     /// Task which monitors TUN device link-MTU. Aborted when dropped.
     _mtu_monitor: Task,
 }
 
-impl TunSusan {
+impl TunDevice {
     /// Construct from a [tun::AsyncDevice].
     pub fn from_tun_device(tun: tun::AsyncDevice) -> io::Result<Self> {
         let mtu = tun.mtu()?;
@@ -57,7 +57,7 @@ impl TunSusan {
 
         Ok(Self {
             tun,
-            state: Arc::new(TunSusanState {
+            state: Arc::new(TunDeviceState {
                 mtu: rx.into(),
                 _mtu_monitor: mtu_monitor,
             }),
@@ -65,14 +65,14 @@ impl TunSusan {
     }
 }
 
-impl IpSend for TunSusan {
+impl IpSend for TunDevice {
     async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
         self.tun.send(&packet.into_bytes()).await?;
         Ok(())
     }
 }
 
-impl IpRecv for TunSusan {
+impl IpRecv for TunDevice {
     async fn recv<'a>(
         &'a mut self,
         pool: &mut PacketBufPool,
