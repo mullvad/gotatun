@@ -143,34 +143,6 @@ impl UdpSend for super::UdpSocket {
     fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
         UdpSocket::local_addr(self).map(Some)
     }
-
-    #[cfg(feature = "windows-gro")]
-    /// Enable receive offloading
-    fn enable_udp_gro(&self) -> io::Result<()> {
-        use std::ffi::c_char;
-
-        let raw_sock = self.inner.as_raw_socket();
-        // Same as msquic
-        let val = u32::from(u16::MAX);
-
-        // SAFETY: We are passing valid pointers
-        let result = unsafe {
-            libc::setsockopt(
-                usize::try_from(raw_sock).unwrap(),
-                WinSock::IPPROTO_UDP,
-                WinSock::UDP_RECV_MAX_COALESCED_SIZE,
-                (&val) as *const u32 as *const c_char,
-                mem::size_of_val(&val) as i32,
-            )
-        };
-
-        if result == 0 {
-            log::debug!("Enabled UDP GRO");
-            Ok(())
-        } else {
-            Err(io::Error::last_os_error())
-        }
-    }
 }
 
 #[cfg(not(feature = "windows-gro"))]
@@ -271,6 +243,31 @@ mod gro {
 
         fn max_number_of_packets_to_recv(&self) -> usize {
             MAX_RECV_PACKETS
+        }
+
+        /// Enable receive offloading
+        fn enable_udp_gro(&self) -> io::Result<()> {
+            let raw_sock = self.inner.as_raw_socket();
+            // Same as msquic
+            let val = u32::from(u16::MAX);
+
+            // SAFETY: We are passing valid pointers
+            let result = unsafe {
+                libc::setsockopt(
+                    usize::try_from(raw_sock).unwrap(),
+                    WinSock::IPPROTO_UDP,
+                    WinSock::UDP_RECV_MAX_COALESCED_SIZE,
+                    (&val) as *const u32 as *const c_char,
+                    mem::size_of_val(&val) as i32,
+                )
+            };
+
+            if result == 0 {
+                log::debug!("Enabled UDP GRO");
+                Ok(())
+            } else {
+                Err(io::Error::last_os_error())
+            }
         }
     }
 

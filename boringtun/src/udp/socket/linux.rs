@@ -90,18 +90,6 @@ impl UdpSend for super::UdpSocket {
         setsockopt(&self.inner, sockopt::Mark, &mark)?;
         Ok(())
     }
-
-    #[cfg(target_os = "linux")]
-    fn enable_udp_gro(&self) -> io::Result<()> {
-        // TODO: missing constants on Android
-        use std::os::fd::AsFd;
-        nix::sys::socket::setsockopt(
-            &self.inner.as_fd(),
-            nix::sys::socket::sockopt::UdpGroSegment,
-            &true,
-        )?;
-        Ok(())
-    }
 }
 
 #[cfg(target_os = "linux")]
@@ -238,6 +226,17 @@ mod gro {
                 })
                 .await?;
 
+            Ok(())
+        }
+
+        fn enable_udp_gro(&self) -> io::Result<()> {
+            // TODO: missing constants on Android
+            use std::os::fd::AsFd;
+            nix::sys::socket::setsockopt(
+                &self.inner.as_fd(),
+                nix::sys::socket::sockopt::UdpGroSegment,
+                &true,
+            )?;
             Ok(())
         }
     }
