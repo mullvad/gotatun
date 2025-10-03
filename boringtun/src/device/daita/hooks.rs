@@ -73,7 +73,7 @@ impl DaitaHooks {
             })
     }
 
-    /// Should be called on incoming validated encapsulated packets.
+    /// Inspect an incoming encapsulated data packet.
     pub fn before_data_decapsulate(&self) {
         let _ = self.event_tx.send(TriggerEvent::TunnelRecv);
     }
