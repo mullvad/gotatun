@@ -30,6 +30,10 @@ struct TunDeviceState {
 impl TunDevice {
     /// Construct from a [tun::AsyncDevice].
     pub fn from_tun_device(tun: tun::AsyncDevice) -> io::Result<Self> {
+        if tun.packet_information() {
+            return Err(io::Error::other("packet_information is not supported"));
+        };
+
         let mtu = tun.mtu()?;
         let (tx, rx) = watch::channel(mtu);
 
