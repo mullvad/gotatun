@@ -1,5 +1,8 @@
 use socket2::{Domain, Socket, Type};
-use std::{ffi::c_uint, os::windows::io::AsRawSocket};
+use std::{
+    ffi::{c_char, c_uint},
+    os::windows::io::AsRawSocket,
+};
 use std::{io, net::SocketAddr};
 use std::{mem, sync::LazyLock};
 use tokio::io::Interest;
@@ -483,7 +486,7 @@ pub static MAX_GSO_SEGMENTS: LazyLock<usize> = LazyLock::new(|| {
             socket.as_raw_socket() as libc::SOCKET,
             WinSock::IPPROTO_UDP,
             WinSock::UDP_SEND_MSG_SIZE,
-            &mut gso_size as *mut _ as *mut _,
+            &mut gso_size as *mut c_uint as *mut c_char,
             i32::try_from(std::mem::size_of_val(&gso_size)).unwrap(),
         )
     };
