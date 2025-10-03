@@ -133,10 +133,6 @@ mod gro {
     impl UdpRecv for UdpSocket {
         type RecvManyBuf = RecvManyBuf;
 
-        fn max_number_of_packets_to_recv(&self) -> usize {
-            MAX_SEGMENTS * MAX_PACKET_COUNT
-        }
-
         async fn recv_from(
             &mut self,
             pool: &mut PacketBufPool,

@@ -168,7 +168,7 @@ mod gro {
     use std::{mem, os::windows::io::AsRawSocket, sync::LazyLock};
     use windows_sys::Win32::Networking::WinSock::{self, SOCKADDR_INET, WSABUF, WSAMSG};
 
-    const MAX_RECV_PACKETS: usize = 100;
+    const MAX_COALESCED_SIZE: usize = u16::MAX as usize;
 
     pub struct RecvManyBuf {
         // TODO: create a single packet buf and split it?
@@ -205,7 +205,7 @@ mod gro {
             packets: &mut Vec<(Packet, SocketAddr)>,
         ) -> io::Result<()> {
             let socket = self.inner.clone();
-            recv_buf.gro_buf.resize(MAX_RECV_PACKETS * 1500, 0);
+            recv_buf.gro_buf.resize(MAX_COALESCED_SIZE, 0);
 
             let msg = self
                 .inner
@@ -242,15 +242,10 @@ mod gro {
             Ok(())
         }
 
-        fn max_number_of_packets_to_recv(&self) -> usize {
-            MAX_RECV_PACKETS
-        }
-
         /// Enable receive offloading
         fn enable_udp_gro(&self) -> io::Result<()> {
             let raw_sock = self.inner.as_raw_socket();
-            // Same as msquic
-            let val = u32::from(u16::MAX);
+            let val: u32 = u32::try_from(MAX_COALESCED_SIZE).unwrap();
 
             // SAFETY: We are passing valid pointers
             let result = unsafe {

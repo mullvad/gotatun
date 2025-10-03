@@ -72,7 +72,6 @@ impl UdpSend for BufferedUdpSend {
 pub struct BufferedUdpReceive {
     _recv_task: Arc<Task>,
     recv_rx: mpsc::Receiver<(Packet, SocketAddr)>,
-    capacity: usize,
 }
 
 impl BufferedUdpReceive {
@@ -84,9 +83,8 @@ impl BufferedUdpReceive {
         let (recv_tx, recv_rx) = mpsc::channel::<(Packet, SocketAddr)>(capacity);
 
         let recv_task = Task::spawn("buffered UDP receive", async move {
-            let max_number_of_packets = udp_rx.max_number_of_packets_to_recv();
             let mut recv_many_buf = Default::default();
-            let mut packet_bufs = Vec::with_capacity(max_number_of_packets);
+            let mut packet_bufs = vec![];
 
             loop {
                 // Read packets from the socket.
@@ -116,7 +114,6 @@ impl BufferedUdpReceive {
         Self {
             _recv_task: Arc::new(recv_task),
             recv_rx,
-            capacity,
         }
     }
 }
@@ -129,11 +126,5 @@ impl UdpRecv for BufferedUdpReceive {
             return Err(io::Error::other("No packet available"));
         };
         Ok((rx_packet, src))
-    }
-
-    // TODO: implement recv_from many with mpsc::Receiver::recv_many?
-
-    fn max_number_of_packets_to_recv(&self) -> usize {
-        self.capacity
     }
 }
