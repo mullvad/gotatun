@@ -4,7 +4,7 @@
 use std::os::fd::AsFd;
 use std::{io, net::SocketAddr, sync::Arc};
 
-use super::{UdpSend, UdpTransportFactory, UdpTransportFactoryParams};
+use super::{UdpRecv, UdpTransportFactory, UdpTransportFactoryParams};
 
 #[cfg(target_os = "linux")]
 use super::UdpSend;

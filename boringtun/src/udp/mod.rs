@@ -84,6 +84,11 @@ pub trait UdpRecv: Send + Sync {
             Ok(())
         }
     }
+
+    /// Enable UDP GRO, if available
+    fn enable_udp_gro(&self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 /// An abstraction of `send_to` for a UDP socket.
@@ -135,11 +140,6 @@ pub trait UdpSend: Send + Sync + Clone {
     /// This is applicable to UDP sockets, i.e. [tokio::net::UdpSocket].
     #[cfg(target_os = "linux")]
     fn set_fwmark(&self, _mark: u32) -> io::Result<()> {
-        Ok(())
-    }
-
-    /// Enable UDP GRO, if available
-    fn enable_udp_gro(&self) -> io::Result<()> {
         Ok(())
     }
 }
