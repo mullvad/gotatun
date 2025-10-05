@@ -399,6 +399,8 @@ mod gro {
 /// Struct representing a CMSG, including its payload
 #[derive(FromBytes, Immutable, KnownLayout, IntoBytes)]
 // TODO: Remove packed when `IntoBytes` handles DSTs properly
+// Note that the inner layout of `Hdr` is unaffected by `packed`:
+// https://doc.rust-lang.org/reference/type-layout.html#r-layout.repr.inter-field
 #[repr(C, packed)]
 pub struct Cmsg {
     pub header: Hdr,
@@ -496,60 +498,39 @@ pub static MAX_GSO_SEGMENTS: LazyLock<usize> = LazyLock::new(|| {
     }
 });
 
-/// Pointer to the first byte of data in `cmsg`.
-/// Source: ws2def.h: CMSG_DATA macro
-#[cfg(test)]
-pub unsafe fn cmsg_data(cmsg: *mut CMSGHDR) -> *mut core::ffi::c_uchar {
-    (cmsg as usize + cmsgdata_align(mem::size_of::<CMSGHDR>())) as *mut core::ffi::c_uchar
-}
-
 const _: () = {
     assert!(mem::size_of::<CMSGHDR>() == mem::size_of::<Hdr>());
     assert!(mem::align_of::<CMSGHDR>() == mem::align_of::<Hdr>());
+
+    // The data field must be aligned to `usize` (source: CMSG_DATA macro in ws2def.h)
+    // This is fortunately true even for a packed struct on x86_64 Windows if the CMSG itself is aligned to CMSGHDR:
+    // * the alignment of `Hdr` is the same as that of usize
+    // * the size of `Hdr` is a multiple of that alignment
+    // As such, no padding is required to align `data`.
+    assert!(std::mem::size_of::<Hdr>() % std::mem::align_of::<usize>() == 0);
+
+    // Assert that `Hdr` has the same alignment as `usize` to justify the above comment.
+    // This is true because the field with the highest alignment in `Hdr` is a usize
+    assert!(std::mem::align_of::<Hdr>() == std::mem::align_of::<usize>());
 };
 
 #[cfg(test)]
 mod test {
     use super::*;
 
-    // Ensure that `Cmsg` works as expected
+    /// Test that Cmsg is aligned to CMSGHDR despite being `repr(packed)`
+    ///
+    /// We pack the struct due to zerocopy DST limitations, so we're at the mercy of the allocator.
     #[test]
-    fn test_cmsg_layout() {
-        let space = 100;
-        let cmsg_len = cmsg_len(space);
+    fn test_cmsg_alignment() {
+        for size in [0, 1, 2, 8, 16, 100] {
+            let cmsg = Cmsg::new_box_zeroed_with_elems(size).unwrap();
 
-        let cmsg = Cmsg::new(space, 2, 3);
-        let zc_data = cmsg.data.as_ptr();
-        let cmsg_ptr = cmsg.as_ref() as *const Cmsg as *const u8 as *mut CMSGHDR;
-
-        assert!(
-            cmsg_ptr.align_offset(align_of::<CMSGHDR>()) == 0,
-            "cmsg is not properly aligned"
-        );
-
-        assert_eq!(
-            // SAFETY: `cmsg_ptr` points to a valid CMSGHDR
-            unsafe { cmsg_data(cmsg_ptr) } as *const u8,
-            zc_data,
-            "unexpected CMSG data ptr"
-        );
-
-        let standard_hdr = CMSGHDR {
-            cmsg_len,
-            cmsg_level: 2,
-            cmsg_type: 3,
-        };
-        // SAFETY: `cmsg_ptr` is a valid CMSGHDR and is aligned
-        let hdr = unsafe { std::ptr::read(cmsg_ptr as *const CMSGHDR) };
-        assert!(
-            // SAFETY: Both `hdr` and `standard_hdr` include at least `size_of::<CMSGHDR>()` bytes
-            unsafe {
-                libc::memcmp(
-                    &standard_hdr as *const _ as *const _,
-                    &hdr as *const _ as *const _,
-                    mem::size_of::<CMSGHDR>(),
-                )
-            } == 0
-        );
+            let align_offset = cmsg
+                .as_bytes()
+                .as_ptr()
+                .align_offset(std::mem::align_of::<Hdr>());
+            assert!(align_offset == 0, "Cmsg must be aligned to CMSGHDR");
+        }
     }
 }
