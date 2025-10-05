@@ -1,13 +1,14 @@
-use socket2::{Domain, Socket, Type};
-use std::{
-    ffi::{c_char, c_uint},
-    os::windows::io::AsRawSocket,
-};
-use std::{io, net::SocketAddr};
-use std::{mem, sync::LazyLock};
+use socket2::Domain;
+use socket2::Socket;
+use socket2::Type;
+use std::ffi::{c_char, c_uint};
+use std::os::windows::io::AsRawSocket;
+use std::{io, mem, net::SocketAddr, sync::LazyLock};
 use tokio::io::Interest;
-use windows_sys::Win32::Networking::WinSock::{self, CMSGHDR};
-use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
+use windows_sys::Win32::Networking::WinSock;
+use zerocopy::IntoBytes;
+
+use cmsg::Cmsg;
 
 use crate::{
     packet::{Packet, PacketBufPool},
@@ -161,7 +162,7 @@ impl UdpRecv for super::UdpSocket {
 mod gro {
     use super::*;
 
-    use std::ptr;
+    use std::{ffi::c_char, ptr};
 
     use socket2::{Domain, SockAddr, SockAddrStorage, Type};
     use std::{mem, os::windows::io::AsRawSocket, sync::LazyLock};
@@ -396,77 +397,123 @@ mod gro {
     }
 }
 
-/// Struct representing a CMSG, including its payload
-#[derive(FromBytes, Immutable, KnownLayout, IntoBytes)]
-// TODO: Remove packed when `IntoBytes` handles DSTs properly
-// Note that the inner layout of `Hdr` is unaffected by `packed`:
-// https://doc.rust-lang.org/reference/type-layout.html#r-layout.repr.inter-field
-#[repr(C, packed)]
-pub struct Cmsg {
-    pub header: Hdr,
-    pub data: [u8],
-}
+pub mod cmsg {
+    use std::mem;
+    use windows_sys::Win32::Networking::WinSock::{self, CMSGHDR};
+    use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
 
-/// A copy of [CMSGHDR] that implements zerocopy traits
-#[derive(FromBytes, Immutable, KnownLayout, IntoBytes)]
-#[repr(C)]
-pub struct Hdr {
-    pub cmsg_len: usize,
-    pub cmsg_level: i32,
-    pub cmsg_type: i32,
-}
-
-impl Cmsg {
-    /// Create a new with space for `space` bytes and a CMSG header
-    pub fn new(space: usize, cmsg_level: i32, cmsg_type: i32) -> Box<Self> {
-        // Allocate enough space for the header and the data
-        // This will have the same alignment as `CMSGHDR` (only ensured by unit tests)
-        let mut cmsg = Cmsg::new_box_zeroed_with_elems(cmsg_space(space) - mem::size_of::<Hdr>())
-            .expect("alloc");
-
-        cmsg.header = Hdr {
-            cmsg_len: cmsg_len(space),
-            cmsg_level,
-            cmsg_type,
-        };
-
-        cmsg
+    /// Struct representing a CMSG, including its payload
+    #[derive(FromBytes, Immutable, KnownLayout, IntoBytes)]
+    // TODO: Remove packed when `IntoBytes` handles DSTs properly
+    // Note that the inner layout of `Hdr` is unaffected by `packed`:
+    // https://doc.rust-lang.org/reference/type-layout.html#r-layout.repr.inter-field
+    #[repr(C, packed)]
+    pub struct Cmsg {
+        pub header: Hdr,
+        pub data: [u8],
     }
 
-    /// Create a new zeroed `Cmsg` with space for `space` bytes
-    pub fn zeroed(space: usize) -> Box<Self> {
-        // Allocate enough space for the header and the data
-        // This will have the same alignment as `CMSGHDR` (only ensured by unit tests)
-        Cmsg::new_box_zeroed_with_elems(cmsg_space(space) - mem::size_of::<Hdr>()).expect("alloc")
+    /// A copy of [CMSGHDR] that implements zerocopy traits
+    #[derive(FromBytes, Immutable, KnownLayout, IntoBytes)]
+    #[repr(C)]
+    pub struct Hdr {
+        pub cmsg_len: usize,
+        pub cmsg_level: i32,
+        pub cmsg_type: i32,
     }
 
-    #[cfg(feature = "windows-gro")]
-    /// Length, in bytes, of the entire `Cmsg`. Header included.
-    pub fn len(&self) -> usize {
-        std::mem::size_of_val(self)
+    impl Cmsg {
+        /// Create a new with space for `space` bytes and a CMSG header
+        pub fn new(space: usize, cmsg_level: i32, cmsg_type: i32) -> Box<Self> {
+            // Allocate enough space for the header and the data
+            // This will have the same alignment as `CMSGHDR` (only ensured by unit tests)
+            let mut cmsg =
+                Cmsg::new_box_zeroed_with_elems(cmsg_space(space) - mem::size_of::<Hdr>())
+                    .expect("alloc");
+
+            cmsg.header = Hdr {
+                cmsg_len: cmsg_len(space),
+                cmsg_level,
+                cmsg_type,
+            };
+
+            cmsg
+        }
+
+        /// Create a new zeroed `Cmsg` with space for `space` bytes
+        pub fn zeroed(space: usize) -> Box<Self> {
+            // Allocate enough space for the header and the data
+            // This will have the same alignment as `CMSGHDR` (only ensured by unit tests)
+            Cmsg::new_box_zeroed_with_elems(cmsg_space(space) - mem::size_of::<Hdr>())
+                .expect("alloc")
+        }
+
+        #[cfg(feature = "windows-gro")]
+        /// Length, in bytes, of the entire `Cmsg`. Header included.
+        pub fn len(&self) -> usize {
+            std::mem::size_of_val(self)
+        }
     }
-}
 
-/// The total size of an ancillary data object given the amount of data
-/// Source: ws2def.h: CMSG_SPACE macro
-pub fn cmsg_space(length: usize) -> usize {
-    cmsgdata_align(mem::size_of::<CMSGHDR>() + cmsghdr_align(length))
-}
+    /// The total size of an ancillary data object given the amount of data
+    /// Source: ws2def.h: CMSG_SPACE macro
+    fn cmsg_space(length: usize) -> usize {
+        cmsgdata_align(mem::size_of::<CMSGHDR>() + cmsghdr_align(length))
+    }
 
-/// Value to store in the `cmsg_len` of the CMSG header given an amount of data.
-/// Source: ws2def.h: CMSG_LEN macro
-pub fn cmsg_len(length: usize) -> usize {
-    cmsgdata_align(mem::size_of::<CMSGHDR>()) + length
-}
+    /// Value to store in the `cmsg_len` of the CMSG header given an amount of data.
+    /// Source: ws2def.h: CMSG_LEN macro
+    fn cmsg_len(length: usize) -> usize {
+        cmsgdata_align(mem::size_of::<CMSGHDR>()) + length
+    }
 
-// Taken from ws2def.h: CMSGHDR_ALIGN macro
-pub fn cmsghdr_align(length: usize) -> usize {
-    (length + mem::align_of::<WinSock::CMSGHDR>() - 1) & !(mem::align_of::<WinSock::CMSGHDR>() - 1)
-}
+    // Taken from ws2def.h: CMSGHDR_ALIGN macro
+    fn cmsghdr_align(length: usize) -> usize {
+        (length + mem::align_of::<WinSock::CMSGHDR>() - 1)
+            & !(mem::align_of::<WinSock::CMSGHDR>() - 1)
+    }
 
-// Source: ws2def.h: CMSGDATA_ALIGN macro
-pub fn cmsgdata_align(length: usize) -> usize {
-    (length + mem::align_of::<usize>() - 1) & !(mem::align_of::<usize>() - 1)
+    // Source: ws2def.h: CMSGDATA_ALIGN macro
+    fn cmsgdata_align(length: usize) -> usize {
+        (length + mem::align_of::<usize>() - 1) & !(mem::align_of::<usize>() - 1)
+    }
+
+    const _: () = {
+        assert!(mem::size_of::<CMSGHDR>() == mem::size_of::<Hdr>());
+        assert!(mem::align_of::<CMSGHDR>() == mem::align_of::<Hdr>());
+
+        // The data field must be aligned to `usize` (source: CMSG_DATA macro in ws2def.h)
+        // This is fortunately true even for a packed struct on x86_64 Windows if the CMSG itself is aligned to CMSGHDR:
+        // * the alignment of `Hdr` is the same as that of usize
+        // * the size of `Hdr` is a multiple of that alignment
+        // As such, no padding is required to align `data`.
+        assert!(std::mem::size_of::<Hdr>() % std::mem::align_of::<usize>() == 0);
+
+        // Assert that `Hdr` has the same alignment as `usize` to justify the above comment.
+        // This is true because the field with the highest alignment in `Hdr` is a usize
+        assert!(std::mem::align_of::<Hdr>() == std::mem::align_of::<usize>());
+    };
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+
+        /// Test that Cmsg is aligned to CMSGHDR despite being `repr(packed)`
+        ///
+        /// We pack the struct due to zerocopy DST limitations, so we're at the mercy of the allocator.
+        #[test]
+        fn test_cmsg_alignment() {
+            for size in [0, 1, 2, 8, 16, 100] {
+                let cmsg = Cmsg::new_box_zeroed_with_elems(size).unwrap();
+
+                let align_offset = cmsg
+                    .as_bytes()
+                    .as_ptr()
+                    .align_offset(std::mem::align_of::<Hdr>());
+                assert!(align_offset == 0, "Cmsg must be aligned to CMSGHDR");
+            }
+        }
+    }
 }
 
 /// Maximum number of segments we can send in one go using UDP GSO
@@ -497,40 +544,3 @@ pub static MAX_GSO_SEGMENTS: LazyLock<usize> = LazyLock::new(|| {
         _ => 1,
     }
 });
-
-const _: () = {
-    assert!(mem::size_of::<CMSGHDR>() == mem::size_of::<Hdr>());
-    assert!(mem::align_of::<CMSGHDR>() == mem::align_of::<Hdr>());
-
-    // The data field must be aligned to `usize` (source: CMSG_DATA macro in ws2def.h)
-    // This is fortunately true even for a packed struct on x86_64 Windows if the CMSG itself is aligned to CMSGHDR:
-    // * the alignment of `Hdr` is the same as that of usize
-    // * the size of `Hdr` is a multiple of that alignment
-    // As such, no padding is required to align `data`.
-    assert!(std::mem::size_of::<Hdr>() % std::mem::align_of::<usize>() == 0);
-
-    // Assert that `Hdr` has the same alignment as `usize` to justify the above comment.
-    // This is true because the field with the highest alignment in `Hdr` is a usize
-    assert!(std::mem::align_of::<Hdr>() == std::mem::align_of::<usize>());
-};
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    /// Test that Cmsg is aligned to CMSGHDR despite being `repr(packed)`
-    ///
-    /// We pack the struct due to zerocopy DST limitations, so we're at the mercy of the allocator.
-    #[test]
-    fn test_cmsg_alignment() {
-        for size in [0, 1, 2, 8, 16, 100] {
-            let cmsg = Cmsg::new_box_zeroed_with_elems(size).unwrap();
-
-            let align_offset = cmsg
-                .as_bytes()
-                .as_ptr()
-                .align_offset(std::mem::align_of::<Hdr>());
-            assert!(align_offset == 0, "Cmsg must be aligned to CMSGHDR");
-        }
-    }
-}
