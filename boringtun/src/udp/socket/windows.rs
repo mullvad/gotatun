@@ -487,7 +487,7 @@ pub mod cmsg {
         // * the alignment of `Hdr` is the same as that of usize
         // * the size of `Hdr` is a multiple of that alignment
         // As such, no padding is required to align `data`.
-        assert!(std::mem::size_of::<Hdr>() % std::mem::align_of::<usize>() == 0);
+        assert!(std::mem::size_of::<Hdr>().is_multiple_of(std::mem::align_of::<usize>()));
 
         // Assert that `Hdr` has the same alignment as `usize` to justify the above comment.
         // This is true because the field with the highest alignment in `Hdr` is a usize
