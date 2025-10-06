@@ -50,6 +50,22 @@ pub struct GetPeer {
     /// Indicates the number of transmitted bytes for the previously added peer entry.
     #[builder(default, setter(strip_option, into))]
     pub tx_bytes: Option<u64>,
+
+    /// Extra bytes added due to constant-size padding of data packets for the previously added peer entry.
+    #[builder(default, setter(strip_option, into))]
+    pub tx_padding_bytes: Option<u64>,
+
+    /// Bytes of standalone padding packets transmitted for the previously added peer entry.
+    #[builder(default, setter(strip_option, into))]
+    pub tx_padding_packet_bytes: Option<u64>,
+
+    /// Total extra bytes removed due to constant-size padding of data packets for the previously added peer entry.
+    #[builder(default, setter(strip_option, into))]
+    pub rx_padding_bytes: Option<u64>,
+
+    /// Bytes of standalone padding packets received for the previously added peer entry.
+    #[builder(default, setter(strip_option, into))]
+    pub rx_padding_packet_bytes: Option<u64>,
 }
 
 #[derive(TypedBuilder, Default, Debug)]
@@ -233,6 +249,10 @@ impl GetPeer {
             last_handshake_time_nsec: None,
             rx_bytes: None,
             tx_bytes: None,
+            tx_padding_bytes: None,
+            tx_padding_packet_bytes: None,
+            rx_padding_bytes: None,
+            rx_padding_packet_bytes: None,
         }
     }
 }
@@ -308,6 +328,10 @@ impl Display for GetPeer {
             last_handshake_time_nsec,
             rx_bytes,
             tx_bytes,
+            tx_padding_bytes,
+            tx_padding_packet_bytes,
+            rx_padding_bytes,
+            rx_padding_packet_bytes,
         } = self;
 
         let public_key = Some(&public_key);
@@ -321,6 +345,10 @@ impl Display for GetPeer {
             opt_to_key_and_display!(last_handshake_time_nsec),
             opt_to_key_and_display!(rx_bytes),
             opt_to_key_and_display!(tx_bytes),
+            opt_to_key_and_display!(tx_padding_bytes),
+            opt_to_key_and_display!(tx_padding_packet_bytes),
+            opt_to_key_and_display!(rx_padding_bytes),
+            opt_to_key_and_display!(rx_padding_packet_bytes),
         ]
         .into_iter()
         .flatten();
