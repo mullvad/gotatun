@@ -1,18 +1,25 @@
-//! Implementations of [UdpTransport] traits for [UdpSocket].
+//! Implementations of [super::UdpSend] and [super::UdpRecv] traits for [UdpSocket].
 
 #[cfg(unix)]
 use std::os::fd::AsFd;
 use std::{io, net::SocketAddr, sync::Arc};
 
-use super::{UdpSend, UdpTransportFactory, UdpTransportFactoryParams};
+use super::{UdpRecv, UdpTransportFactory, UdpTransportFactoryParams};
 
-/// Implementations of UdpTransport for all targets
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
+#[cfg(target_os = "linux")]
+use super::UdpSend;
+
+/// Implementations of [super::UdpSend]/[super::UdpRecv] for all targets
+#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "windows")))]
 mod generic;
 
-/// Implementations of UdpTransport for linux
+/// Implementations of [super::UdpSend]/[super::UdpRecv] for linux
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod linux;
+
+/// Implementations of [super::UdpSend]/[super::UdpRecv] for windows
+#[cfg(target_os = "windows")]
+mod windows;
 
 pub struct UdpSocketFactory;
 

@@ -16,6 +16,9 @@ edition = "2024"
 default = []
 device = ["thiserror"]
 pcap = ["dep:pcap-file"]
+# UDP GRO appears to be broken on Windows.
+# In some cases it fails to return UDP_COALESCED_INFO
+windows-gro = []
 
 [dependencies]
 base64 = "0.13"
@@ -37,7 +40,7 @@ aead = "0.5.0-pre.2"
 blake2 = "0.10"
 hmac = "0.12"
 mock_instant = { version = "0.3", optional = true }
-socket2 = { version = "0.4.7", features = ["all"] }
+socket2 = { version = "0.6.0", features = ["all"] }
 thiserror = { version = "1", optional = true }
 tokio = { version = "1.43.0", features = ["full"] }
 eyre = "0.6.12"
@@ -55,6 +58,15 @@ rand = "0.9.2"
 pcap-file = { version = "2.0.0", optional = true }
 duplicate = { version = "2.0.0", default-features = false }
 constant_time_eq = "0.4.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61.0", features = [
+    "Win32",
+    "Win32_Foundation",
+    "Win32_Networking",
+    "Win32_Networking_WinSock",
+    "Win32_System_IO",
+] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.30", default-features = false, features = [

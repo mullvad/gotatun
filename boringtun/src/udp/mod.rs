@@ -54,16 +54,10 @@ pub trait UdpRecv: Send + Sync {
         pool: &mut PacketBufPool,
     ) -> impl Future<Output = io::Result<(Packet, SocketAddr)>> + Send;
 
-    /// The maximum number of packets that can be passed to [UdpRecv::recv_many_from].
-    fn max_number_of_packets_to_recv(&self) -> usize {
-        1
-    }
-
     /// The buffer type that is passed to [UdpRecv::recv_many_from].
     type RecvManyBuf: Default + Send;
 
-    /// Receive up to `x` packets at once,
-    /// where `x` is [UdpRecv::max_number_of_packets_to_recv].
+    /// Receive up to multiple packets at once.
     ///
     /// # Arguments
     /// - `recv_buf` - Internal buffer. Should be reused between calls. Create with [Default].
@@ -83,6 +77,11 @@ pub trait UdpRecv: Send + Sync {
             packets.push((packet, source_addr));
             Ok(())
         }
+    }
+
+    /// Enable UDP GRO, if available
+    fn enable_udp_gro(&self) -> io::Result<()> {
+        Ok(())
     }
 }
 
@@ -135,11 +134,6 @@ pub trait UdpSend: Send + Sync + Clone {
     /// This is applicable to UDP sockets, i.e. [tokio::net::UdpSocket].
     #[cfg(target_os = "linux")]
     fn set_fwmark(&self, _mark: u32) -> io::Result<()> {
-        Ok(())
-    }
-
-    /// Enable UDP GRO, if available
-    fn enable_udp_gro(&self) -> io::Result<()> {
         Ok(())
     }
 }

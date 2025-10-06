@@ -90,18 +90,6 @@ impl UdpSend for super::UdpSocket {
         setsockopt(&self.inner, sockopt::Mark, &mark)?;
         Ok(())
     }
-
-    #[cfg(target_os = "linux")]
-    fn enable_udp_gro(&self) -> io::Result<()> {
-        // TODO: missing constants on Android
-        use std::os::fd::AsFd;
-        nix::sys::socket::setsockopt(
-            &self.inner.as_fd(),
-            nix::sys::socket::sockopt::UdpGroSegment,
-            &true,
-        )?;
-        Ok(())
-    }
 }
 
 #[cfg(target_os = "linux")]
@@ -144,10 +132,6 @@ mod gro {
 
     impl UdpRecv for UdpSocket {
         type RecvManyBuf = RecvManyBuf;
-
-        fn max_number_of_packets_to_recv(&self) -> usize {
-            MAX_SEGMENTS * MAX_PACKET_COUNT
-        }
 
         async fn recv_from(
             &mut self,
@@ -238,6 +222,17 @@ mod gro {
                 })
                 .await?;
 
+            Ok(())
+        }
+
+        fn enable_udp_gro(&self) -> io::Result<()> {
+            // TODO: missing constants on Android
+            use std::os::fd::AsFd;
+            nix::sys::socket::setsockopt(
+                &self.inner.as_fd(),
+                nix::sys::socket::sockopt::UdpGroSegment,
+                &true,
+            )?;
             Ok(())
         }
     }
