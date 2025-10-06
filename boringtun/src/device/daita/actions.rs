@@ -236,7 +236,8 @@ where
             .tunnel
             .encapsulate_with_session(self.create_padding_packet(mtu))
         {
-            Err(_) => Err(ErrorAction::Ignore), // TODO: error?
+            // Encapsulate can only fail when there is no session, just drop the padding packet in that case
+            Err(_) => Err(ErrorAction::Ignore),
             Ok(packet) => Ok(packet),
         }
     }

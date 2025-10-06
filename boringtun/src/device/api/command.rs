@@ -496,7 +496,7 @@ impl SetPeer {
             remove,
             update_only,
             replace_allowed_ips,
-            maybenot_machines: _, // TODO: support daita here?
+            maybenot_machines: _, // NOTE: DAITA is not supported in the string format (and probably should be)
         } = &mut set_peer;
 
         loop {
