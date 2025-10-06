@@ -11,20 +11,26 @@ use std::sync::atomic::AtomicUsize;
 use tokio::sync::mpsc::{self};
 use zerocopy::{FromBytes, IntoBytes};
 
+/// Padding overhead statistics, exposed via [`crate::device::api::command::GetPeer`].
+#[derive(Default)]
+pub struct PaddingOverhead {
+    /// Total extra bytes added due to constant-size padding of data packets.
+    pub tx_padding_bytes: usize,
+    // This is an AtomicUsize because it is updated from `ActionHandler`
+    /// Bytes of standalone padding packets transmitted.
+    pub tx_padding_packet_bytes: Arc<AtomicUsize>,
+    /// Total extra bytes removed due to constant-size padding of data packets.
+    pub rx_padding_bytes: usize,
+    /// Bytes of standalone padding packets received.
+    pub rx_padding_packet_bytes: usize,
+}
+
 pub struct DaitaHooks {
     pub(super) event_tx: mpsc::UnboundedSender<TriggerEvent>,
     pub(super) packet_count: Arc<PacketCount>,
     pub(super) blocking_watcher: BlockingWatcher,
     pub(super) mtu: LinkMtuWatcher,
-    // TODO: Export to metrics sink
-    /// Total extra bytes added due to constant-size padding of data packets.
-    pub(super) tx_padding_bytes: usize,
-    /// Bytes of standalone padding packets transmitted.
-    pub(super) tx_padding_packet_bytes: Arc<AtomicUsize>,
-    /// Total extra bytes removed due to constant-size padding of data packets.
-    pub(super) rx_padding_bytes: usize,
-    /// Bytes of standalone padding packets received.
-    pub(super) rx_padding_packet_bytes: usize,
+    pub(crate) padding_overhead: PaddingOverhead,
 }
 
 impl DaitaHooks {
@@ -36,7 +42,7 @@ impl DaitaHooks {
         let mtu = usize::from(self.mtu.get());
 
         if let Ok(padded_bytes) = pad_to_constant_size(&mut packet, mtu) {
-            self.tx_padding_bytes += padded_bytes;
+            self.padding_overhead.tx_padding_bytes += padded_bytes;
         };
 
         packet
@@ -80,7 +86,7 @@ impl DaitaHooks {
             let _ = self.event_tx.send(TriggerEvent::PaddingRecv);
 
             // Count received padding
-            self.rx_padding_packet_bytes += size_of_val(padding);
+            self.padding_overhead.rx_padding_packet_bytes += size_of_val(padding);
             return None;
         }
 
@@ -105,7 +111,7 @@ impl DaitaHooks {
         // TODO: Should we truncate the packet buffer here? It will
         // be done before handing it to the TUN device anyway, with more
         // safety checks.
-        self.rx_padding_bytes += packet.len() - ip_len;
+        self.padding_overhead.rx_padding_bytes += packet.len() - ip_len;
 
         Some(packet)
     }

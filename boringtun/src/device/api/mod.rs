@@ -13,7 +13,7 @@ use libc::EINVAL;
 use std::fmt::Debug;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::str::FromStr;
-use std::sync::Weak;
+use std::sync::{Weak, atomic};
 use tokio::sync::{RwLock, mpsc, oneshot};
 
 #[cfg(unix)]
@@ -295,6 +295,7 @@ async fn on_api_get(_: Get, d: &Device<impl DeviceTransports>) -> GetResponse {
         let peer = peer.lock().await;
         let (_, tx_bytes, rx_bytes, ..) = peer.tunnel.stats();
         let endpoint = peer.endpoint().addr;
+        let padding_overhead = peer.daita.as_ref().map(|daita| &daita.padding_overhead);
 
         peers.push(GetPeer {
             peer: Peer {
@@ -311,6 +312,11 @@ async fn on_api_get(_: Get, d: &Device<impl DeviceTransports>) -> GetResponse {
             last_handshake_time_nsec: peer.time_since_last_handshake().map(|d| d.subsec_nanos()),
             rx_bytes: Some(rx_bytes as u64),
             tx_bytes: Some(tx_bytes as u64),
+            tx_padding_bytes: padding_overhead.map(|p| p.tx_padding_bytes as u64),
+            tx_padding_packet_bytes: padding_overhead
+                .map(|p| p.tx_padding_packet_bytes.load(atomic::Ordering::SeqCst) as u64),
+            rx_padding_bytes: padding_overhead.map(|p| p.rx_padding_bytes as u64),
+            rx_padding_packet_bytes: padding_overhead.map(|p| p.rx_padding_packet_bytes as u64),
         });
     }
 

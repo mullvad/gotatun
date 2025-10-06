@@ -51,14 +51,14 @@ pub use hooks::DaitaHooks;
 
 use std::{
     str::FromStr,
-    sync::{
-        Arc, Weak,
-        atomic::{AtomicU32, AtomicUsize},
-    },
+    sync::{Arc, Weak, atomic::AtomicU32},
 };
 
 use crate::{
-    device::daita::{actions::ActionHandler, events::handle_events, types::BlockingWatcher},
+    device::daita::{
+        actions::ActionHandler, events::handle_events, hooks::PaddingOverhead,
+        types::BlockingWatcher,
+    },
     packet,
     tun::LinkMtuWatcher,
     udp::UdpSend,
@@ -109,7 +109,7 @@ impl DaitaHooks {
             outbound_normal: AtomicU32::new(0),
             replaced_normal: AtomicU32::new(0),
         });
-        let tx_padding_packet_bytes = Arc::new(AtomicUsize::new(0));
+        let padding_overhead = PaddingOverhead::default();
 
         let (blocking_queue_tx, blocking_queue_rx) = mpsc::channel(max_blocked_packets);
         let blocking_watcher = BlockingWatcher::new(blocking_queue_tx, min_blocking_capacity);
@@ -141,7 +141,7 @@ impl DaitaHooks {
             udp_send_v4: udp_send_v4.clone(),
             udp_send_v6: udp_send_v6.clone(),
             mtu: mtu.clone(),
-            tx_padding_packet_bytes: tx_padding_packet_bytes.clone(),
+            tx_padding_packet_bytes: padding_overhead.tx_padding_packet_bytes.clone(),
             event_tx: event_tx.clone().downgrade(),
         };
         // TODO: Make sure that these tasks are properly closed
@@ -160,10 +160,7 @@ impl DaitaHooks {
             packet_count,
             blocking_watcher,
             mtu,
-            tx_padding_bytes: 0,
-            tx_padding_packet_bytes,
-            rx_padding_bytes: 0,
-            rx_padding_packet_bytes: 0,
+            padding_overhead,
         }
     }
 }

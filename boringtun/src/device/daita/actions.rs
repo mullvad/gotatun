@@ -9,7 +9,10 @@ use futures::FutureExt;
 use maybenot::{MachineId, TriggerEvent};
 use std::{
     net::{IpAddr, SocketAddr},
-    sync::{Arc, Weak, atomic::AtomicUsize},
+    sync::{
+        Arc, Weak,
+        atomic::{self, AtomicUsize},
+    },
 };
 use tokio::{
     sync::{
@@ -228,7 +231,8 @@ where
         peer: &mut tokio::sync::OwnedMutexGuard<Peer>,
         mtu: u16,
     ) -> Result<Packet<WgData>> {
-        // TODO: Reuse the same padding packet each time (unless MTU changes)?
+        self.tx_padding_packet_bytes
+            .fetch_add(mtu as usize, atomic::Ordering::SeqCst);
         match peer
             .tunnel
             .encapsulate_with_session(self.create_padding_packet(mtu))
@@ -278,13 +282,13 @@ where
             IpAddr::V6(..) => &self.udp_send_v6,
         };
 
+        self.send_event(TriggerEvent::TunnelSent)?;
+
         udp_send
             .send_to(packet.into_bytes(), addr)
             .await
             .map_err(|_| ErrorAction::Close)?;
-        // self.tx_padding_packet_bytes
-        //     .fetch_add(MTU as usize, atomic::Ordering::SeqCst);
-        self.send_event(TriggerEvent::TunnelSent)?;
+
         Ok(())
     }
 
