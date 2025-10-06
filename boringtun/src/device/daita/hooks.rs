@@ -35,20 +35,10 @@ impl DaitaHooks {
 
         let mtu = usize::from(self.mtu.get());
 
-        if packet.len() > mtu {
-            if cfg!(debug_assertions) {
-                log::warn!(
-                    "Packet size {} exceeded MTU {}. Either the TUN MTU changed, or there's a bug.",
-                    packet.len(),
-                    mtu,
-                );
-            }
-            return packet;
-        }
+        if let Ok(padded_bytes) = pad_to_constant_size(&mut packet, mtu) {
+            self.tx_padding_bytes += padded_bytes;
+        };
 
-        // Pad to constant size
-        self.tx_padding_bytes += mtu - packet.len();
-        packet.buf_mut().resize(mtu, 0);
         packet
     }
 
@@ -61,11 +51,15 @@ impl DaitaHooks {
         let data_packet = match packet.into_kind() {
             Ok(WgKind::Data(packet)) => packet,
             Ok(other) => return Some(other.into()),
-            Err(_) => todo!(),
+            Err(e) => {
+                log::error!("{e}");
+                self.packet_count.dec(1);
+                return None;
+            }
         };
 
         self.blocking_watcher
-            .send_if_blocking(data_packet)
+            .maybe_block_packet(data_packet)
             .map(|packet| {
                 let _ = self.event_tx.send(TriggerEvent::TunnelSent);
                 self.packet_count.dec(1);
@@ -108,11 +102,98 @@ impl DaitaHooks {
         };
 
         // Add bytes padded due to constant-size
-        // NOTE: We don't truncate the packet buffer here, as that will
-        // to done before handing it to the TUN device anyway, with more
+        // TODO: Should we truncate the packet buffer here? It will
+        // be done before handing it to the TUN device anyway, with more
         // safety checks.
         self.rx_padding_bytes += packet.len() - ip_len;
 
         Some(packet)
+    }
+}
+
+/// Pad packet to MTU size and return the amount of added bytes.
+///
+/// If the packet is already larger than MTU, and error is returned and the packet
+/// is not modified.
+fn pad_to_constant_size(packet: &mut Packet, mtu: usize) -> Result<usize, ()> {
+    let start_len = packet.len();
+    if start_len > mtu {
+        if cfg!(debug_assertions) {
+            log::warn!(
+                "Packet size {start_len} exceeded MTU {mtu}. Either the TUN MTU changed, or there's a bug.",
+            );
+        }
+        return Err(());
+    }
+    packet.buf_mut().resize(mtu, 0);
+    let padding_bytes = mtu - start_len;
+    Ok(padding_bytes)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::packet::{IpNextProtocol, Ipv4, Ipv6VersionTrafficFlow};
+    use crate::packet::{Ipv6, Ipv6Header};
+    use bytes::BytesMut;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
+    use zerocopy::{U16, U128};
+
+    #[test]
+    fn test_constant_packet_size_ipv4() {
+        let start_len = 100;
+        let mtu = 500;
+        let mut packet = Packet::from_bytes(BytesMut::zeroed(start_len));
+        let ip_packet = Ipv4::mut_from_bytes(&mut packet).unwrap();
+
+        let ipv4_header = packet::Ipv4Header::new(
+            Ipv4Addr::new(1, 1, 1, 1),
+            Ipv4Addr::new(2, 2, 2, 2),
+            IpNextProtocol::Udp,
+            &ip_packet.payload,
+        );
+        ip_packet.header = ipv4_header;
+
+        let padding_bytes = pad_to_constant_size(&mut packet, mtu).unwrap();
+        assert_eq!(padding_bytes, mtu - start_len);
+
+        let ip_packet = packet
+            .try_into_ip()
+            .unwrap()
+            .try_into_ipvx()
+            .unwrap()
+            .unwrap_left();
+        assert_eq!(size_of_val(ip_packet.as_bytes()), start_len);
+    }
+
+    #[test]
+    fn test_constant_packet_size_ipv6() {
+        let start_len = 120;
+        let mtu = 600;
+        let mut packet = Packet::from_bytes(BytesMut::zeroed(start_len));
+        let ip_packet: &mut Ipv6<[u8]> = Ipv6::mut_from_bytes(&mut packet).unwrap();
+
+        let ipv6_header = Ipv6Header {
+            version_traffic_flow: Ipv6VersionTrafficFlow::new().with_version(6),
+            payload_length: U16::new((start_len - Ipv6Header::LEN).try_into().unwrap()),
+            next_header: IpNextProtocol::Udp,
+            hop_limit: 64,
+            source_address: U128::new(u128::from(Ipv6Addr::LOCALHOST)),
+            destination_address: U128::new(u128::from(Ipv6Addr::LOCALHOST)),
+        };
+
+        ip_packet.header = ipv6_header;
+
+        let padding_bytes = pad_to_constant_size(&mut packet, mtu).unwrap();
+        assert_eq!(padding_bytes, mtu - start_len);
+
+        let ip_packet = packet
+            .try_into_ip()
+            .unwrap()
+            .try_into_ipvx()
+            .unwrap()
+            .unwrap_right();
+        assert_eq!(size_of_val(ip_packet.as_bytes()), start_len);
     }
 }
