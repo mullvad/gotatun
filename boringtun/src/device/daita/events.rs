@@ -1,4 +1,4 @@
-use super::types::{self, MachineTimer};
+use super::types::{self, MachineTimer, MachineTimers};
 use futures::FutureExt;
 use maybenot::{Framework, Machine, MachineId, TriggerAction, TriggerEvent};
 use rand::RngCore;
@@ -14,7 +14,7 @@ where
     M: AsRef<[Machine]> + Send + 'static,
     R: RngCore,
 {
-    let mut machine_timers = types::MachineTimers::new(maybenot.num_machines() * 2);
+    let mut machine_timers = MachineTimers::new(maybenot.num_machines() * 2);
     let mut event_buf = Vec::new();
 
     loop {
