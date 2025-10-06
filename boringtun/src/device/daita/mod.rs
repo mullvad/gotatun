@@ -69,16 +69,22 @@ use maybenot::Machine;
 use rand::{SeedableRng, rngs::StdRng};
 use tokio::sync::{Mutex, mpsc};
 
-// TODO: Pick a good number
-/// Max number of blocked packets.
-const MAX_BLOCKED_PACKETS: usize = 256;
-// TODO: Pick a good number
-/// When the capacity of the blocking queue get's lower that this value, the blocking is aborted.
-const MIN_BLOCKING_CAPACITY: usize = 20;
+pub struct DaitaSettings {
+    /// The maybenot machines to use.
+    pub maybenot_machines: Vec<String>,
+    /// Maximum fraction of bandwidth that may be used for padding packets.
+    pub max_padding_frac: f64,
+    /// Maximum fraction of bandwidth that may be used for blocking packets.
+    pub max_blocking_frac: f64,
+    /// Maximum number of packets that may be blocked at any time.
+    pub max_blocked_packets: usize,
+    /// Minimum number of free slots in the blocking queue to continue blocking.
+    pub min_blocking_capacity: usize,
+}
 
 impl DaitaHooks {
     pub fn new<US>(
-        maybenot_machines: Vec<String>,
+        daita_settings: DaitaSettings,
         peer: Weak<Mutex<Peer>>,
         mtu: LinkMtuWatcher,
         udp_send_v4: US,
@@ -88,6 +94,13 @@ impl DaitaHooks {
     where
         US: UdpSend + Clone + 'static,
     {
+        let DaitaSettings {
+            maybenot_machines,
+            max_padding_frac,
+            max_blocking_frac,
+            max_blocked_packets,
+            min_blocking_capacity,
+        } = daita_settings;
         log::info!("Initializing DAITA with machines: {maybenot_machines:?}");
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
@@ -98,8 +111,8 @@ impl DaitaHooks {
         });
         let tx_padding_packet_bytes = Arc::new(AtomicUsize::new(0));
 
-        let (blocking_queue_tx, blocking_queue_rx) = mpsc::channel(MAX_BLOCKED_PACKETS);
-        let blocking_watcher = BlockingWatcher::new(blocking_queue_tx);
+        let (blocking_queue_tx, blocking_queue_rx) = mpsc::channel(max_blocked_packets);
+        let blocking_watcher = BlockingWatcher::new(blocking_queue_tx, min_blocking_capacity);
 
         let machines = maybenot_machines
             .iter()
@@ -110,8 +123,6 @@ impl DaitaHooks {
 
         let rng = StdRng::from_os_rng(); // TODO
 
-        let max_padding_frac = 0.5; // TODO
-        let max_blocking_frac = 0.5; // TODO
         let maybenot = maybenot::Framework::new(
             machines,
             max_padding_frac,
