@@ -166,12 +166,7 @@ mod test {
         let padding_bytes = pad_to_constant_size(&mut packet, mtu).unwrap();
         assert_eq!(padding_bytes, mtu - start_len);
 
-        let ip_packet = packet
-            .try_into_ip()
-            .unwrap()
-            .try_into_ipvx()
-            .unwrap()
-            .unwrap_left();
+        let ip_packet = packet.try_into_ipvx().unwrap().unwrap_left();
         assert_eq!(size_of_val(ip_packet.as_bytes()), start_len);
     }
 
@@ -196,12 +191,7 @@ mod test {
         let padding_bytes = pad_to_constant_size(&mut packet, mtu).unwrap();
         assert_eq!(padding_bytes, mtu - start_len);
 
-        let ip_packet = packet
-            .try_into_ip()
-            .unwrap()
-            .try_into_ipvx()
-            .unwrap()
-            .unwrap_right();
+        let ip_packet = packet.try_into_ipvx().unwrap().unwrap_right();
         assert_eq!(size_of_val(ip_packet.as_bytes()), start_len);
     }
 }
