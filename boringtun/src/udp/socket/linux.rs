@@ -237,12 +237,11 @@ mod gro {
 #[cfg(target_os = "android")]
 mod android {
     use crate::packet::{Packet, PacketBufPool};
-    use crate::udp::UdpRecv;
-    use crate::udp::socket::UdpSocket;
+    use crate::udp::{UdpRecv, socket::UdpSocket};
     use std::io;
     use std::net::SocketAddr;
 
-    impl UdpRecv for UdpSocket {
+    impl UdpRecv for super::UdpSocket {
         type RecvManyBuf = ();
 
         async fn recv_from(
