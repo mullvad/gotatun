@@ -186,9 +186,15 @@ pub(crate) enum Action {
     },
 }
 
+/// Type of timer for a machine, see [`MachineTimers`].
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum MachineTimer {
+    /// The internal timer does not trigger any action directly, but is used to
+    /// trigger [`maybenot::TriggerEvent::TimerEnd`], giving the machine a way
+    /// to know when the time has passed.
     Internal,
+    /// The action timer triggers a [`Action`], which can be either sending
+    /// padding packets or blocking outgoing packets.
     Action(Action),
 }
 

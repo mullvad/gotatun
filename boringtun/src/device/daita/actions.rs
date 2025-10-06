@@ -125,7 +125,6 @@ where
         match (blocking_with_bypass, replace) {
             (Some(true), true) => {
                 if let Ok(packet) = self.blocking_queue_rx.try_recv() {
-                    // self.send_event(TriggerEvent::NormalSent)?; // TODO: Already sent when queued, unclear spec
                     log::debug!("Padding packet was replaced by blocked packet which was sent");
                     let peer = self.get_peer().await?;
                     self.send(packet, peer).await?;
