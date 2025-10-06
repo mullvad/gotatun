@@ -16,10 +16,7 @@ use tokio::{
 };
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
-use crate::{
-    device::daita::MIN_BLOCKING_CAPACITY,
-    packet::{Packet, WgData},
-};
+use crate::packet::{Packet, WgData};
 
 pub(crate) const DAITA_MARKER: u8 = 0xFF;
 
@@ -105,16 +102,21 @@ pub struct BlockingWatcher {
     pub(super) blocking_queue_tx: mpsc::Sender<Packet<WgData>>,
     pub(super) blocking_state: Arc<RwLock<BlockingState>>,
     blocking_abort: Arc<Notify>,
+    min_blocking_capacity: usize,
 }
 
 impl BlockingWatcher {
-    pub fn new(blocking_queue_tx: mpsc::Sender<Packet<WgData>>) -> Self {
+    pub fn new(
+        blocking_queue_tx: mpsc::Sender<Packet<WgData>>,
+        min_blocking_capacity: usize,
+    ) -> Self {
         let blocking_state = Arc::new(RwLock::new(BlockingState::Inactive));
         let blocking_abort = Arc::new(Notify::const_new());
         Self {
             blocking_queue_tx,
             blocking_state,
             blocking_abort,
+            min_blocking_capacity,
         }
     }
 
@@ -143,7 +145,7 @@ impl BlockingWatcher {
             && blocking.is_active()
         {
             // Notify the blocking handler to abort blocking when the capacity is low
-            if self.blocking_queue_tx.capacity() < MIN_BLOCKING_CAPACITY {
+            if self.blocking_queue_tx.capacity() < self.min_blocking_capacity {
                 self.blocking_abort.notify_one();
             }
 

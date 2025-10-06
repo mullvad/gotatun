@@ -23,7 +23,7 @@ use tokio::join;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
-use crate::device::daita::DaitaHooks;
+use crate::device::daita::{DaitaHooks, DaitaSettings};
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
@@ -211,9 +211,17 @@ impl<T: DeviceTransports> Connection<T> {
         for peer_arc in device_guard.peers.values_mut() {
             let mut peer = peer_arc.lock().await;
             if !peer.maybenot_machines.is_empty() {
+                let daita_settings = DaitaSettings {
+                    maybenot_machines: peer.maybenot_machines.clone(),
+                    // TODO: make these configurable and use sane values
+                    max_padding_frac: 0.1,
+                    max_blocking_frac: 0.1,
+                    max_blocked_packets: 1024,
+                    min_blocking_capacity: 50,
+                };
                 log::error!("creating DaitaHooks");
                 peer.daita = Some(DaitaHooks::new(
-                    peer.maybenot_machines.clone(),
+                    daita_settings,
                     Arc::downgrade(peer_arc),
                     tun_rx_mtu.clone(),
                     buffered_udp_tx_v4.clone(),
