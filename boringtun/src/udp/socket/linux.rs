@@ -34,6 +34,9 @@ impl UdpSend for super::UdpSocket {
         buf: &mut SendmmsgBuf,
         packets: &mut Vec<(Packet, SocketAddr)>,
     ) -> io::Result<()> {
+        let n = packets.len();
+        debug_assert!(n <= MAX_PACKET_COUNT);
+
         let fd = self.inner.as_raw_fd();
 
         buf.targets.clear();
@@ -65,10 +68,7 @@ impl UdpSend for super::UdpSocket {
             })
             .await?;
 
-        // Don't clear the entire packets buf in case it contained more than MAX_PACKET_COUNT items
-        // Note that len = min(MAX_PACKET_COUNT, original packets.len()), due to the zip, so this
-        // will not panic.
-        packets.drain(..len);
+        packets.clear();
 
         Ok(())
     }

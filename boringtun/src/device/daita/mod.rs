@@ -8,9 +8,6 @@
 //!
 //! ## TODO
 //!
-//! - Implement correct hooks in the packet pipeline. The methods on [DaitaHooks] describe where they
-//!   should be injected. They need to operate on data packets for a particular peer, and need to have
-//!   the ability to mutate the packet (constant packet size) or withhold it (blocking).
 //! - Make encapsulation/decapsulation concurrent with IO.
 //!   The maybenot spec describes that outbound packet (i.e. those that have been received on the tunnel
 //!   interface but not yet sent on the network) can replace padding packets. However, currently there
@@ -18,11 +15,9 @@
 //!   Lacking the ability to replace padding packets with in-flight packets would be a regression
 //!   in comparison with the `wireguard-go` implementation. As far as I remember, this occurred quite
 //!   often, so it could be important for performance.
-//! - The [crate::noise::Tunn] type already has a concept for a queue of blocked packets. Consider how this
-//!   should interact/integrate with the blocking queue used by DAITA.
+//!     - Test whether we can replace egress packets.
 //! - Tests and benches
-//! - Track MTU changes from somewhere. In wg-go, there is an atomic variable in `Tun` that updates in realized
-//!   with MTU changes, that we use.
+//!     - LinkMtuWatcher
 //! - The is from the spec of "SendPadding" action:
 //!  > The replace flag determines if the padding packet MAY be replaced by a packet already queued to be sent
 //!  > at the time the padding packet would be sent. This applies for data queued to be turned into normal
@@ -32,6 +27,11 @@
 //!  > egress queue and we do not want to keep state around to distinguish padding and non-padding, hence, any
 //!  > packet. Similarly, this implies that a single blocked packet in the egress queue can replace multiple
 //!  > padding packets with the replace flag set.
+//!     - Ask Tobias about his stance on this
+//! - Pick a good number for `MAX_BLOCKED_PACKETS` and `allowed_blocked_microsec` so that the blocking queue doesn'T
+//!   fill to capacity.
+//! - Test blocking with a real machine, ask Tobias for one
+//! - Set `max_padding_frac` and `max_blocking_frac` from the daemon
 //!
 //!   We currently down't allow padding packets to replace other padding packets, or a single blocked packet
 //!   to replace multiple padding packets
@@ -138,7 +138,9 @@ impl DaitaHooks {
             tx_padding_packet_bytes: tx_padding_packet_bytes.clone(),
             event_tx: event_tx.clone().downgrade(),
         };
-        // TODO abort on drop?
+        // TODO: Make sure that these tasks are properly closed
+        // They should be, and seemingly are, from listening to closing of the channels they wrap
+        // but consider also saving a handle to their tasks and awaiting their closing.
         tokio::spawn(action_handler.handle_actions(action_rx));
         tokio::spawn(handle_events(
             maybenot,
