@@ -328,10 +328,10 @@ impl Display for GetPeer {
             last_handshake_time_nsec,
             rx_bytes,
             tx_bytes,
-            tx_padding_bytes,
-            tx_padding_packet_bytes,
-            rx_padding_bytes,
-            rx_padding_packet_bytes,
+            tx_padding_bytes: _,
+            tx_padding_packet_bytes: _,
+            rx_padding_bytes: _,
+            rx_padding_packet_bytes: _,
         } = self;
 
         let public_key = Some(&public_key);
@@ -345,10 +345,6 @@ impl Display for GetPeer {
             opt_to_key_and_display!(last_handshake_time_nsec),
             opt_to_key_and_display!(rx_bytes),
             opt_to_key_and_display!(tx_bytes),
-            opt_to_key_and_display!(tx_padding_bytes),
-            opt_to_key_and_display!(tx_padding_packet_bytes),
-            opt_to_key_and_display!(rx_padding_bytes),
-            opt_to_key_and_display!(rx_padding_packet_bytes),
         ]
         .into_iter()
         .flatten();
