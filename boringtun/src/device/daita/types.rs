@@ -1,4 +1,4 @@
-use futures::FutureExt;
+use futures::{FutureExt, future::pending};
 use maybenot::MachineId;
 use std::{
     collections::VecDeque,
@@ -122,24 +122,23 @@ impl BlockingWatcher {
     ///
     /// When this future resolves, blocked packets should be flushed.
     pub async fn wait_blocking_ended(&self) {
-        let abort = self.blocking_abort.notified();
         if let BlockingState::Active { expires_at, .. } = &*self.blocking_state.read().await {
             futures::select! {
                 _ = tokio::time::sleep_until(*expires_at).fuse() => {},
-                _ = abort.fuse() => {},
+                _ = self.blocking_abort.notified().fuse() => {},
             }
         } else {
-            abort.await;
+            pending().await
         };
     }
 
-    /// Add the packet to the queue if blocking is active, otherwise return it to be sent immediately.
+    /// Add the packet to the blocking queue if blocking is active, otherwise return it to be sent immediately.
     ///
     /// Returns `None` if the packet was queued for blocking.
     ///
     /// Returns `Some(packet)` if the packet should be sent immediately.
     /// This happens if blocking is inactive, or if the blocking queue is full/closed.
-    pub fn send_if_blocking(&self, packet: Packet<WgData>) -> Option<Packet<WgData>> {
+    pub fn maybe_block_packet(&self, packet: Packet<WgData>) -> Option<Packet<WgData>> {
         if let Ok(blocking) = self.blocking_state.try_read()
             && blocking.is_active()
         {
@@ -301,19 +300,21 @@ impl MachineTimers {
         should_update
     }
 
-    /// Wait until the next timer expires. Afterwards, use
-    /// [`MachineTimers::pop_next_timer`] to get the expired timer.
-    pub(crate) async fn wait_next_timer(&mut self) {
+    /// Wait until the next timer expires and returns it.
+    ///
+    /// ## Cancel safety
+    /// This function is cancellation safe, i.e. the timer will not
+    /// be removed if the function is cancelled.
+    pub(crate) async fn wait_next_timer(&mut self) -> (MachineId, MachineTimer) {
         if let Some((time, _, _)) = self.0.front() {
             tokio::time::sleep_until(*time).await;
+            self.0
+                .pop_front()
+                .map(|(_, m, t)| (m, t))
+                .expect("Front exists because we peeked it")
         } else {
             futures::future::pending().await
         }
-    }
-
-    /// Pop the next expired timer. Returns `None` if there is no timer.
-    pub(crate) fn pop_next_timer(&mut self) -> Option<(MachineId, MachineTimer)> {
-        self.0.pop_front().map(|(_, m, t)| (m, t))
     }
 }
 
@@ -329,11 +330,13 @@ mod tests {
             replaced_normal: AtomicU32::new(0),
         };
         std::thread::scope(|s| {
-            for _ in 0..500 {
+            for _ in 0..32 {
                 s.spawn(|| {
-                    pc.inc_outbound(2);
-                    pc.inc_replaced(1);
-                    pc.dec(2);
+                    for _ in 0..100000 {
+                        pc.inc_outbound(2);
+                        pc.inc_replaced(1);
+                        pc.dec(2);
+                    }
                 });
             }
         });

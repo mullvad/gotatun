@@ -783,15 +783,6 @@ impl<T: DeviceTransports> Device<T> {
         udp6: impl UdpSend,
         mut packet_pool: PacketBufPool,
     ) {
-        /*let hooks = {
-            let Some(device) = device.upgrade() else {
-                return;
-            };
-
-            let device = device.read().await;
-            device.hooks.clone()
-        };*/
-
         loop {
             let packets = match tun_rx.recv(&mut packet_pool).await {
                 Ok(packets) => packets,
