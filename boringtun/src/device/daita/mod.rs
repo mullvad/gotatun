@@ -2,23 +2,19 @@
 //!
 //! This is a work-in-progress implementation of DAITA version 3.
 //!
-//! The intent of the design is that DAITA will exist in the app-repo (i.e. this module will not
-//! be part of boringtun proper) and that it will be possible inject DAITA as a set of hooks/plugins
-//! into boringtun.
-//!
 //! ## TODO
 //!
-//! - Make encapsulation/decapsulation concurrent with IO.
-//!   The maybenot spec describes that outbound packet (i.e. those that have been received on the tunnel
-//!   interface but not yet sent on the network) can replace padding packets. However, currently there
-//!   are no `await`-points in `handle_outgoing` that would allow this to happen, I think.
-//!   Lacking the ability to replace padding packets with in-flight packets would be a regression
-//!   in comparison with the `wireguard-go` implementation. As far as I remember, this occurred quite
-//!   often, so it could be important for performance.
-//!     - Test whether we can replace egress packets.
-//! - Tests and benches
-//!     - LinkMtuWatcher
-//! - The is from the spec of "SendPadding" action:
+//! - Add (and log) error messages in the `ErrorAction::Ignore` variant (otherwise we might as well return `Ok(())` directly)
+//! - Look over where `ErrorAction::Ignore` is used, and see if it makes sense to return `ErrorAction::Close` instead
+//! - Remove debug logs, or lower their verbosity to TRACE
+//! - Expose the `PaddingOverhead` stats to the daemon
+//! - Support mocked time for tests (this is supported in other parts of GotaTun using `mock_instant` crate)
+//! - Make sure that machines that include blocking actions are disabled, until we have tested blocking properly
+//! - Look over atomic ordering, see if `Relaxed` is sufficient
+//! - Test whether we can reliably replace padding packets with outgoing normal packets.
+//! - Decide wether we should keep the `replaced_normal` counter, which prevents multiple padding packets from being
+//!   replaced by the same normal packet. Ask Tobias about his stance. The spec of "SendPadding" action specifically
+//!   allows this:
 //!  > The replace flag determines if the padding packet MAY be replaced by a packet already queued to be sent
 //!  > at the time the padding packet would be sent. This applies for data queued to be turned into normal
 //!  > (non-padding) packets AND any packet (padding or normal) in the egress queue yet to be sent (i.e.,
@@ -27,20 +23,10 @@
 //!  > egress queue and we do not want to keep state around to distinguish padding and non-padding, hence, any
 //!  > packet. Similarly, this implies that a single blocked packet in the egress queue can replace multiple
 //!  > padding packets with the replace flag set.
-//!     - Ask Tobias about his stance on this
-//! - Pick a good number for `MAX_BLOCKED_PACKETS` and `allowed_blocked_microsec` so that the blocking queue doesn'T
+//! - Pick good numbers for `max_blocked_packets` and `min_blocking_capacity` so that the blocking queue doesn't
 //!   fill to capacity.
 //! - Test blocking with a real machine, ask Tobias for one
-//! - Set `max_padding_frac` and `max_blocking_frac` from the daemon
-//!
-//!   We currently down't allow padding packets to replace other padding packets, or a single blocked packet
-//!   to replace multiple padding packets
-//!
-//! ## Regarding <https://mullvad.atlassian.net/wiki/spaces/PPS/pages/4285923358/DAITA+version+3>
-//! ### 1. Restore support for keep-alive packets
-//! I would prefer to completely disregard any non-data packets for DAITA. This would be
-//! less intrusive help decouple DAITA from WireGuard.
-//! Keepalives should thus be left as-is and not padded to constant packet size.
+//! - Set `max_padding_frac` and `max_blocking_frac` from the daemon using the response of ephemeral peer API.
 
 mod actions;
 mod events;
