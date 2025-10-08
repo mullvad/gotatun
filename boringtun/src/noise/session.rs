@@ -214,15 +214,19 @@ impl Session {
         let mut nonce = [0u8; 12];
         nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
         data.encrypted_encapsulated_packet_mut()
+            // TODO: unwrap
+            .unwrap()
             .copy_from_slice(&packet);
         self.sender
             .seal_in_place_separate_tag(
                 Nonce::assume_unique_for_key(nonce),
                 Aad::from(&[]),
-                data.encrypted_encapsulated_packet_mut(),
+                // TODO: unwrap
+                data.encrypted_encapsulated_packet_mut().unwrap(),
             )
             .map(|tag| {
-                data.tag_mut().copy_from_slice(tag.as_ref());
+                // TODO: Unwrap
+                data.tag_mut().unwrap().copy_from_slice(tag.as_ref());
                 packet.len() + AEAD_SIZE
             })
             .expect("encryption must succeed");
