@@ -25,22 +25,24 @@ use tokio::{
     },
     time::Instant,
 };
+use typed_builder::TypedBuilder;
 use zerocopy::IntoBytes;
 
+#[derive(TypedBuilder)]
 pub struct ActionHandler<US>
 where
     US: UdpSend + Clone + 'static,
 {
-    pub(super) packet_count: Arc<PacketCount>,
-    pub(super) blocking_queue_rx: mpsc::Receiver<Packet<WgData>>,
-    pub(super) blocking_watcher: BlockingWatcher,
-    pub(super) peer: Weak<Mutex<Peer>>,
-    pub(super) packet_pool: packet::PacketBufPool,
-    pub(super) udp_send_v4: US,
-    pub(super) udp_send_v6: US,
-    pub(super) mtu: LinkMtuWatcher,
-    pub(super) tx_padding_packet_bytes: Arc<AtomicUsize>,
-    pub(super) event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
+    packet_count: Arc<PacketCount>,
+    blocking_queue_rx: mpsc::Receiver<Packet<WgData>>,
+    blocking_watcher: BlockingWatcher,
+    peer: Weak<Mutex<Peer>>,
+    packet_pool: packet::PacketBufPool,
+    udp_send_v4: US,
+    udp_send_v6: US,
+    mtu: LinkMtuWatcher,
+    tx_padding_packet_bytes: Arc<AtomicUsize>,
+    event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
 }
 
 impl<US> ActionHandler<US>
