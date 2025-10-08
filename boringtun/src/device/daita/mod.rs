@@ -52,7 +52,7 @@ use crate::{
 
 use super::peer::Peer;
 use maybenot::Machine;
-use rand::{SeedableRng, rngs::StdRng};
+use rand::rngs::{OsRng, ReseedingRng};
 use tokio::sync::{Mutex, mpsc};
 
 pub struct DaitaSettings {
@@ -67,6 +67,16 @@ pub struct DaitaSettings {
     /// Minimum number of free slots in the blocking queue to continue blocking.
     pub min_blocking_capacity: usize,
 }
+
+/// RNG used for DAITA. Same as maybenot-ffi.
+///
+/// This setup uses [OsRng] as the source of entropy, but extrapolates each call to [OsRng] into
+/// at least [RNG_RESEED_THRESHOLD] bytes of randomness using [rand_chacha::ChaCha12Core].
+///
+/// This is the same Rng that [rand::thread_rng] uses internally,
+/// but unlike thread_rng, this is Sync.
+type Rng = ReseedingRng<rand_chacha::ChaCha12Core, OsRng>;
+const RNG_RESEED_THRESHOLD: u64 = 1024 * 64; // 64 KiB
 
 impl DaitaHooks {
     pub fn new<US>(
@@ -107,14 +117,12 @@ impl DaitaHooks {
             .collect::<::core::result::Result<Vec<_>, _>>()
             .unwrap_or_else(|_| panic!("bad machines: {maybenot_machines:?}")); // TODO
 
-        let rng = StdRng::from_os_rng(); // TODO
-
         let maybenot = maybenot::Framework::new(
             machines,
             max_padding_frac,
             max_blocking_frac,
             std::time::Instant::now(),
-            rng,
+            Rng::new(RNG_RESEED_THRESHOLD, OsRng).unwrap(),
         )
         .unwrap();
 

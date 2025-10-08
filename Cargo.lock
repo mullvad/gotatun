@@ -227,6 +227,7 @@ dependencies = [
  "pcap-file",
  "pnet_packet",
  "rand",
+ "rand_chacha",
  "rand_core 0.6.4",
  "ring",
  "socket2",
