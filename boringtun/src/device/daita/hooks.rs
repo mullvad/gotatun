@@ -99,18 +99,18 @@ impl DaitaHooks {
             Rng::new(RNG_RESEED_THRESHOLD, OsRng).unwrap(),
         )?;
 
-        let action_handler = ActionHandler {
-            peer,
-            packet_pool,
-            packet_count: packet_count.clone(),
-            blocking_queue_rx,
-            blocking_watcher: blocking_watcher.clone(),
-            udp_send_v4: udp_send_v4.clone(),
-            udp_send_v6: udp_send_v6.clone(),
-            mtu: mtu.clone(),
-            tx_padding_packet_bytes: padding_overhead.tx_padding_packet_bytes.clone(),
-            event_tx: event_tx.downgrade(),
-        };
+        let action_handler = ActionHandler::builder()
+            .packet_count(packet_count.clone())
+            .blocking_queue_rx(blocking_queue_rx)
+            .blocking_watcher(blocking_watcher.clone())
+            .peer(peer.clone())
+            .packet_pool(packet_pool.clone())
+            .udp_send_v4(udp_send_v4.clone())
+            .udp_send_v6(udp_send_v6.clone())
+            .mtu(mtu.clone())
+            .tx_padding_packet_bytes(padding_overhead.tx_padding_packet_bytes.clone())
+            .event_tx(event_tx.downgrade())
+            .build();
 
         let actions_task = Task::spawn(
             "DaitaHooks::handle_actions",
