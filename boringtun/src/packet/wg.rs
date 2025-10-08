@@ -65,7 +65,7 @@ pub struct WgDataHeader {
     // INVARIANT: Must be WgPacketType::Data
     // TODO: make private
     pub packet_type: WgPacketType,
-    _reserved_zeros: [u8; 3],
+    _reserved_zeros: [u8; 4 - size_of::<WgPacketType>()],
     pub receiver_idx: little_endian::U32,
     pub counter: little_endian::U64,
 }
