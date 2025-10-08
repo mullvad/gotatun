@@ -13,6 +13,7 @@ use std::{
         Arc, Weak,
         atomic::{self, AtomicUsize},
     },
+    time::Duration,
 };
 use tokio::{
     sync::{
@@ -85,7 +86,7 @@ where
         machine: MachineId,
         replace: bool,
         bypass: bool,
-        duration: std::time::Duration,
+        duration: Duration,
     ) -> Result<()> {
         self.send_event(TriggerEvent::BlockingBegin { machine })?;
         let mut blocking = self.blocking_watcher.blocking_state.write().await;
