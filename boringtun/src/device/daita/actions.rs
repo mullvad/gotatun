@@ -112,16 +112,9 @@ where
     ) -> Result<()> {
         self.send_event(TriggerEvent::PaddingSent { machine })?;
 
-        let blocking_with_bypass = match &*self.blocking_watcher.blocking_state.read().await {
-            BlockingState::Inactive => None,
-            BlockingState::Active {
-                bypass: blocking_bypass,
-                ..
-            } => Some(*blocking_bypass && padding_bypass), // Both must be true to bypass
-        };
-
-        match (blocking_with_bypass, replace) {
-            (Some(true), true) => {
+        let blocking_state = { *self.blocking_watcher.blocking_state.read().await };
+        match blocking_state {
+            BlockingState::Active { bypass: true, .. } if replace && padding_bypass => {
                 if let Ok(packet) = self.blocking_queue_rx.try_recv() {
                     // Replace padding with blocked packet
                     let peer = self.get_peer().await?;
@@ -131,18 +124,19 @@ where
                     self.send_padding().await
                 }
             }
-            (Some(true), false) => {
+            BlockingState::Active { bypass: true, .. } if !replace && padding_bypass => {
                 // Allow padding to bypass block
                 self.send_padding().await
             }
-            (Some(false), true)
-                if self.packet_count.outbound() > 0 || !self.blocking_queue_rx.is_empty() =>
+            BlockingState::Active { .. }
+                if replace
+                    && (self.packet_count.outbound() > 0 || !self.blocking_queue_rx.is_empty()) =>
             {
                 // Replace padding with any queued packet
                 Ok(())
             }
             // Add packet to blocking queue if it shouldn't or cannot be replaced
-            (Some(false), _) => {
+            BlockingState::Active { .. } => {
                 let mut peer = self.get_peer().await?;
                 let mtu = self.mtu.get();
                 let padding_packet = self.encapsulate_padding(&mut peer, mtu).await?;
@@ -153,11 +147,11 @@ where
                     .try_send(padding_packet);
                 Ok(())
             }
-            (None, true) if self.packet_count.outbound() > 0 => {
+            BlockingState::Inactive if replace && self.packet_count.outbound() > 0 => {
                 // Replace padding packet with in-flight packet
                 Ok(())
             }
-            (None, _) => self.send_padding().await,
+            BlockingState::Inactive => self.send_padding().await,
         }
     }
 

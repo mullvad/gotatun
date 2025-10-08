@@ -66,6 +66,7 @@ impl PacketCount {
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) enum BlockingState {
     Inactive,
     Active { bypass: bool, expires_at: Instant },
