@@ -1,4 +1,4 @@
-use super::types::{DAITA_MARKER, PacketCount, PaddingPacket};
+use super::types::{PacketCount, PaddingPacket};
 use crate::device::daita::DaitaSettings;
 use crate::device::daita::actions::ActionHandler;
 use crate::device::daita::events::handle_events;
@@ -179,7 +179,7 @@ impl DaitaHooks {
     /// Should be called on incoming decapsulated *data* packets.
     pub fn after_data_decapsulate(&mut self, packet: Packet) -> Option<Packet> {
         if let Ok(padding) = PaddingPacket::ref_from_bytes(packet.as_bytes())
-            && padding.header._daita_marker == DAITA_MARKER
+            && padding.header.is_valid()
         {
             let _ = self.event_tx.send(TriggerEvent::PaddingRecv);
 
