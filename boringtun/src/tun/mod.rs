@@ -90,7 +90,7 @@ impl LinkMtuWatcher {
     /// Raise the MTU value returned by [Self] by `value`.
     ///
     /// Any downstream (cloned) [Self] will inherit this change, but any upstream [Self] won't.
-    pub fn add(self, value: u16) -> Option<Self> {
+    pub fn increase(self, value: u16) -> Option<Self> {
         Some(Self {
             modifier: self.modifier.checked_add(i32::from(value))?,
             ..self
@@ -100,7 +100,7 @@ impl LinkMtuWatcher {
     /// Lower the MTU value returned by [Self] by `value`.
     ///
     /// Any downstream (cloned) [Self] will inherit this change, but any upstream [Self] won't.
-    pub fn sub(self, value: u16) -> Option<Self> {
+    pub fn decrease(self, value: u16) -> Option<Self> {
         Some(Self {
             modifier: self.modifier.checked_sub(i32::from(value))?,
             ..self
