@@ -225,14 +225,10 @@ where
     ) -> Result<Packet<WgData>> {
         self.tx_padding_packet_bytes
             .fetch_add(mtu as usize, atomic::Ordering::SeqCst);
-        match peer
-            .tunnel
+        peer.tunnel
             .encapsulate_with_session(self.create_padding_packet(mtu))
-        {
             // Encapsulate can only fail when there is no session, just drop the padding packet in that case
-            Err(_) => Err(ErrorAction::Ignore(IgnoreReason::NoSession)),
-            Ok(packet) => Ok(packet),
-        }
+            .map_err(|_| ErrorAction::Ignore(IgnoreReason::NoSession))
     }
 
     pub(crate) fn create_padding_packet(&self, mtu: u16) -> Packet {
