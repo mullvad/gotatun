@@ -6,7 +6,6 @@
 //!
 //! - Add (and log) error messages in the `ErrorAction::Ignore` variant (otherwise we might as well return `Ok(())` directly)
 //! - Look over where `ErrorAction::Ignore` is used, and see if it makes sense to return `ErrorAction::Close` instead
-//! - Remove debug logs, or lower their verbosity to TRACE
 //! - Expose the `PaddingOverhead` stats to the daemon
 //! - Support mocked time for tests (this is supported in other parts of GotaTun using `mock_instant` crate)
 //! - Make sure that machines that include blocking actions are disabled, until we have tested blocking properly
