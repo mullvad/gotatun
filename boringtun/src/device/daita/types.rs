@@ -22,7 +22,21 @@ pub(crate) const DAITA_MARKER: u8 = 0xFF;
 
 pub(crate) enum ErrorAction {
     Close,
-    Ignore, // TODO: log error?
+    Ignore(IgnoreReason),
+}
+
+pub(crate) enum IgnoreReason {
+    NoEndpoint,
+    NoSession,
+}
+
+impl std::fmt::Display for IgnoreReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IgnoreReason::NoEndpoint => write!(f, "No endpoint"),
+            IgnoreReason::NoSession => write!(f, "No session"),
+        }
+    }
 }
 
 pub(crate) type Result<T> = std::result::Result<T, ErrorAction>;

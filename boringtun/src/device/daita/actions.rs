@@ -1,6 +1,9 @@
 use super::types::{Action, BlockingState, ErrorAction, PacketCount, PaddingHeader, Result};
 use crate::{
-    device::{daita::types::BlockingWatcher, peer::Peer},
+    device::{
+        daita::types::{BlockingWatcher, IgnoreReason},
+        peer::Peer,
+    },
     packet::{self, Packet, WgData},
     tun::LinkMtuWatcher,
     udp::UdpSend,
@@ -74,7 +77,9 @@ where
             };
             match res {
                 Err(ErrorAction::Close) => return,
-                Err(ErrorAction::Ignore) => {}
+                Err(ErrorAction::Ignore(reason)) => {
+                    log::trace!("Ignoring DAITA action error: {reason}")
+                }
                 Ok(()) => {}
             }
         }
@@ -223,7 +228,7 @@ where
             .encapsulate_with_session(self.create_padding_packet(mtu))
         {
             // Encapsulate can only fail when there is no session, just drop the padding packet in that case
-            Err(_) => Err(ErrorAction::Ignore),
+            Err(_) => Err(ErrorAction::Ignore(IgnoreReason::NoSession)),
             Ok(packet) => Ok(packet),
         }
     }
@@ -259,8 +264,7 @@ where
     ) -> Result<()> {
         let endpoint_addr = peer.endpoint().addr;
         let Some(addr) = endpoint_addr else {
-            log::trace!("No endpoint");
-            return Err(ErrorAction::Ignore);
+            return Err(ErrorAction::Ignore(IgnoreReason::NoEndpoint));
         };
 
         let udp_send = match addr.ip() {
