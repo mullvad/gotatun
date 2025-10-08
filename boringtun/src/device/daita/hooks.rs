@@ -97,9 +97,7 @@ impl DaitaHooks {
             max_blocking_frac,
             std::time::Instant::now(),
             Rng::new(RNG_RESEED_THRESHOLD, OsRng).unwrap(),
-        )
-        // FIXME: handle error (since machines are not guaranteed to be valid)
-        .unwrap();
+        )?;
 
         let action_handler = ActionHandler {
             peer,
