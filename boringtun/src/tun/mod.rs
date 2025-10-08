@@ -35,8 +35,7 @@ pub trait IpRecv: Send + Sync + 'static {
         pool: &mut PacketBufPool,
     ) -> impl Future<Output = io::Result<impl Iterator<Item = Packet<Ip>> + Send + 'a>> + Send;
 
-    // TODO: docs
-    // something something the "link mtu" value is the maximum size of packets returned by `recv`
+    /// The largest allowed MTU for this device
     fn mtu(&self) -> LinkMtuWatcher;
 }
 
