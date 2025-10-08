@@ -127,9 +127,11 @@ where
                 if let Ok(packet) = self.blocking_queue_rx.try_recv() {
                     // Replace padding with blocked packet
                     let peer = self.get_peer().await?;
-                    self.send(packet, peer).await?;
+                    self.send(packet, peer).await
+                } else {
+                    // No blocked packet to replace, just send padding
+                    self.send_padding().await
                 }
-                self.send_padding().await
             }
             (Some(true), false) => {
                 // Allow padding to bypass block
