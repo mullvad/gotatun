@@ -125,28 +125,24 @@ where
         match (blocking_with_bypass, replace) {
             (Some(true), true) => {
                 if let Ok(packet) = self.blocking_queue_rx.try_recv() {
-                    log::debug!("Padding packet was replaced by blocked packet which was sent");
+                    // Replace padding with blocked packet
                     let peer = self.get_peer().await?;
                     self.send(packet, peer).await?;
                 }
-                log::debug!("Padding packet could not be replaced by blocked packet and was sent");
                 self.send_padding().await
             }
             (Some(true), false) => {
-                log::debug!("Padding packet was sent bypassing blocking");
+                // Allow padding to bypass block
                 self.send_padding().await
             }
             (Some(false), true)
-                if self.packet_count.replaced()
-                    < self.packet_count.outbound() + self.blocking_queue_rx.len() as u32 =>
+                if self.packet_count.outbound() > 0 || !self.blocking_queue_rx.is_empty() =>
             {
-                log::debug!("Padding packet was replaced by blocked data packet and dropped");
-                self.packet_count.inc_replaced(1);
+                // Replace padding with any queued packet
                 Ok(())
             }
-            // Padding packet should or cannot be replaced by a blocked packet, so we must added it to the blocking queue
+            // Add packet to blocking queue if it shouldn't or cannot be replaced
             (Some(false), _) => {
-                log::debug!("Padding packet was added to blocking queue");
                 let mut peer = self.get_peer().await?;
                 let mtu = self.mtu.get();
                 let padding_packet = self.encapsulate_padding(&mut peer, mtu).await?;
@@ -157,15 +153,11 @@ where
                     .try_send(padding_packet);
                 Ok(())
             }
-            (None, true) if self.packet_count.replaced() < self.packet_count.outbound() => {
-                log::debug!("Padding packet was replaced by in-flight data packet and dropped");
-                self.packet_count.inc_replaced(1);
+            (None, true) if self.packet_count.outbound() > 0 => {
+                // Replace padding packet with in-flight packet
                 Ok(())
             }
-            (None, _) => {
-                log::debug!("Padding packet was sent");
-                self.send_padding().await
-            }
+            (None, _) => self.send_padding().await,
         }
     }
 

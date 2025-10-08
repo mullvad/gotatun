@@ -39,7 +39,7 @@ impl DaitaHooks {
     /// Map an outgoing data packets before encapsulation, padding it to constant size.
     pub fn before_data_encapsulate(&mut self, mut packet: Packet) -> Packet {
         let _ = self.event_tx.send(TriggerEvent::NormalSent);
-        self.packet_count.inc_outbound(1);
+        self.packet_count.inc(1);
 
         let mtu = usize::from(self.mtu.get());
 

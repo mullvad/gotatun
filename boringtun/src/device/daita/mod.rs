@@ -37,7 +37,7 @@ pub use hooks::DaitaHooks;
 
 use std::{
     str::FromStr,
-    sync::{Arc, Weak, atomic::AtomicU32},
+    sync::{Arc, Weak},
 };
 
 use crate::{
@@ -101,10 +101,7 @@ impl DaitaHooks {
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (action_tx, action_rx) = mpsc::unbounded_channel();
-        let packet_count = Arc::new(types::PacketCount {
-            outbound_normal: AtomicU32::new(0),
-            replaced_normal: AtomicU32::new(0),
-        });
+        let packet_count = Arc::new(types::PacketCount::default());
         let padding_overhead = PaddingOverhead::default();
 
         let (blocking_queue_tx, blocking_queue_rx) = mpsc::channel(max_blocked_packets);
