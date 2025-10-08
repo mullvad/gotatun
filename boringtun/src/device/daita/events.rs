@@ -4,7 +4,7 @@ use maybenot::{Framework, Machine, MachineId, TriggerAction, TriggerEvent};
 use rand::RngCore;
 use tokio::{sync::mpsc, time::Instant};
 
-pub(super) async fn handle_events<M, R>(
+pub async fn handle_events<M, R>(
     mut maybenot: Framework<M, R>,
     mut event_rx: mpsc::UnboundedReceiver<TriggerEvent>,
     event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
