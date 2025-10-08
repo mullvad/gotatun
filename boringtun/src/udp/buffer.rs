@@ -30,6 +30,13 @@ impl BufferedUdpSend {
                 if count == 0 {
                     break;
                 }
+                if count == 1 {
+                    let (packet, addr) = buf.pop().unwrap();
+                    if let Err(e) = udp_tx.send_to(packet, addr).await {
+                        log::trace!("send_to_err: {e:#}");
+                    }
+                    continue;
+                }
                 // send all packets at once
                 let _ = udp_tx
                     .send_many_to(&mut send_many_buf, &mut buf)
