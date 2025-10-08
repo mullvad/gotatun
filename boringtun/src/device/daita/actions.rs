@@ -98,8 +98,8 @@ where
         self.send_event(TriggerEvent::BlockingBegin { machine })?;
         let mut blocking = self.blocking_watcher.blocking_state.write().await;
         let new_expiry = Instant::now() + duration;
-        match &mut *blocking {
-            BlockingState::Active { expires_at, .. } if !replace && new_expiry <= *expires_at => {}
+        match *blocking {
+            BlockingState::Active { expires_at, .. } if !replace && new_expiry <= expires_at => {}
             _ => {
                 *blocking = BlockingState::Active {
                     bypass,
