@@ -112,9 +112,10 @@ impl DaitaHooks {
         // Add bytes padded due to constant-size
         // TODO: If we implement padding all wg payloads to be multiples of 16 bytes in length
         // as described in section 5.4.6 of the wg whitepaper, then this would count that too.
-        // TODO: Should we truncate the packet buffer here? It will
-        // be done later by `try_into_ipvx` anyway, see tests below.
+        // When done, just round `ip_len` up to the next multiple of 16.
         self.padding_overhead.rx_padding_bytes += packet.len() - ip_len;
+
+        // Note: Not truncating the packet here, `try_into_ipvx` will do that later.
 
         Some(packet)
     }
