@@ -1,3 +1,5 @@
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
 use std::fmt::{self, Debug};
 use std::mem::offset_of;
 
@@ -85,22 +87,26 @@ impl WgData {
     /// Data packet overhead: header and tag (16 bytes)
     pub const OVERHEAD: usize = WgDataHeader::LEN + 16;
 
-    pub fn encrypted_encapsulated_packet_mut(&mut self) -> &mut [u8] {
+    /// Strip the tag from the encapsulated packet.
+    ///
+    /// Returns None if if the encapsulated packet + tag is less than 16 bytes.
+    pub fn encrypted_encapsulated_packet_mut(&mut self) -> Option<&mut [u8]> {
         let (encrypted_encapsulated_packet, _tag) = self
             .encrypted_encapsulated_packet_and_tag
-            .split_last_chunk_mut::<16>()
-            .unwrap(); // TODO
+            .split_last_chunk_mut::<16>()?;
 
-        encrypted_encapsulated_packet
+        Some(encrypted_encapsulated_packet)
     }
 
-    pub fn tag_mut(&mut self) -> &mut [u8] {
+    /// Get a reference to the tag of the encapsulated packet.
+    ///
+    /// Returns None if if the encapsulated packet + tag is less than 16 bytes.
+    pub fn tag_mut(&mut self) -> Option<&mut [u8; 16]> {
         let (_, tag) = self
             .encrypted_encapsulated_packet_and_tag
-            .split_last_chunk_mut::<16>()
-            .unwrap(); // TODO
+            .split_last_chunk_mut::<16>()?;
 
-        tag
+        Some(tag)
     }
 }
 
