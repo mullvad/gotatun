@@ -66,6 +66,7 @@ impl PaddingHeader {
     }
 
     /// Check if the padding header has the correct marker.
+    #[inline(always)]
     pub(crate) const fn is_valid(&self) -> bool {
         self._daita_marker == Self::MARKER
     }
