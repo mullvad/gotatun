@@ -42,8 +42,8 @@ pub struct DaitaHooks {
     blocking_watcher: BlockingWatcher,
     mtu: LinkMtuWatcher,
     padding_overhead: PaddingOverhead,
-    actions_task: Task,
-    events_task: Task,
+    _actions_task: Task,
+    _events_task: Task,
 }
 
 /// RNG used for DAITA. Same as maybenot-ffi.
@@ -129,8 +129,8 @@ impl DaitaHooks {
             blocking_watcher,
             mtu,
             padding_overhead,
-            actions_task,
-            events_task,
+            _actions_task: actions_task,
+            _events_task: events_task,
         })
     }
 
