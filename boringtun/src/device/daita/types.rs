@@ -45,8 +45,6 @@ pub(crate) struct PaddingHeader {
 /// Counter for the number of normal packets that have been received on the tunnel interface
 /// but not yet sent to the network, and the number of those packets that have replaced
 /// padding packets.
-///
-/// TODO: Is `Relaxed` atomic ordering fine?
 #[derive(Default)]
 pub(crate) struct PacketCount {
     outbound_normal: AtomicU32,

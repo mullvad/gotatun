@@ -10,19 +10,7 @@
 //! - Expose the `PaddingOverhead` stats to the daemon
 //! - Support mocked time for tests (this is supported in other parts of GotaTun using `mock_instant` crate)
 //! - Make sure that machines that include blocking actions are disabled, until we have tested blocking properly
-//! - Look over atomic ordering, see if `Relaxed` is sufficient
 //! - Test whether we can reliably replace padding packets with outgoing normal packets.
-//! - Decide wether we should keep the `replaced_normal` counter, which prevents multiple padding packets from being
-//!   replaced by the same normal packet. Ask Tobias about his stance. The spec of "SendPadding" action specifically
-//!   allows this:
-//!  > The replace flag determines if the padding packet MAY be replaced by a packet already queued to be sent
-//!  > at the time the padding packet would be sent. This applies for data queued to be turned into normal
-//!  > (non-padding) packets AND any packet (padding or normal) in the egress queue yet to be sent (i.e.,
-//!  > before the TunnelSent event is triggered). Such a packet could be in the queue due to ongoing blocking
-//!  > or just not being sent yet (e.g., due to CC). We assume that packets will be encrypted ASAP for the
-//!  > egress queue and we do not want to keep state around to distinguish padding and non-padding, hence, any
-//!  > packet. Similarly, this implies that a single blocked packet in the egress queue can replace multiple
-//!  > padding packets with the replace flag set.
 //! - Pick good numbers for `max_blocked_packets` and `min_blocking_capacity` so that the blocking queue doesn't
 //!   fill to capacity.
 //! - Test blocking with a real machine, ask Tobias for one
