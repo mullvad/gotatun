@@ -185,9 +185,10 @@ impl<T: DeviceTransports> Connection<T> {
         let pool = PacketBufPool::new(MAX_PACKET_BUFS);
 
         let mut device_guard = device.write().await;
-        let _ = device_guard.connection.take(); // clean up existing connection
-        // FIXME: wait for connection to be dropped
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // clean up existing connection
+        if let Some(conn) = device_guard.connection.take() {
+            conn.stop().await;
+        }
 
         let (udp4_tx, udp4_rx, udp6_tx, udp6_rx) = device_guard.open_listen_socket().await?;
         let buffered_ip_rx = BufferedIpRecv::new(
