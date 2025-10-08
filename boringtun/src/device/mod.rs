@@ -84,6 +84,8 @@ pub enum Error {
     ApiSocket(io::Error),
     #[error("Device error: {0}")]
     OpenDevice(#[from] tun::Error),
+    #[error("Failed to initialize DAITA hooks")]
+    DaitaHooks(#[from] maybenot::Error),
 }
 
 pub struct DeviceHandle<T: DeviceTransports> {
@@ -219,7 +221,6 @@ impl<T: DeviceTransports> Connection<T> {
                     max_blocked_packets: 1024,
                     min_blocking_capacity: 50,
                 };
-                log::error!("creating DaitaHooks");
                 peer.daita = Some(DaitaHooks::new(
                     daita_settings,
                     Arc::downgrade(peer_arc),
@@ -227,7 +228,7 @@ impl<T: DeviceTransports> Connection<T> {
                     buffered_udp_tx_v4.clone(),
                     buffered_udp_tx_v6.clone(),
                     pool.clone(),
-                ))
+                )?)
             }
         }
 

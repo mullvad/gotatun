@@ -74,7 +74,7 @@ impl DaitaHooks {
         udp_send_v4: US,
         udp_send_v6: US,
         packet_pool: packet::PacketBufPool,
-    ) -> Self
+    ) -> Result<Self, crate::device::Error>
     where
         US: UdpSend + Clone + 'static,
     {
@@ -99,8 +99,7 @@ impl DaitaHooks {
             .iter()
             .map(AsRef::as_ref)
             .map(Machine::from_str)
-            .collect::<::core::result::Result<Vec<_>, _>>()
-            .unwrap_or_else(|_| panic!("bad machines: {maybenot_machines:?}")); // TODO
+            .collect::<::core::result::Result<Vec<_>, _>>()?;
 
         let maybenot = maybenot::Framework::new(
             machines,
@@ -122,7 +121,7 @@ impl DaitaHooks {
             udp_send_v6: udp_send_v6.clone(),
             mtu: mtu.clone(),
             tx_padding_packet_bytes: padding_overhead.tx_padding_packet_bytes.clone(),
-            event_tx: event_tx.clone().downgrade(),
+            event_tx: event_tx.downgrade(),
         };
         // TODO: Make sure that these tasks are properly closed
         // They should be, and seemingly are, from listening to closing of the channels they wrap
@@ -131,16 +130,16 @@ impl DaitaHooks {
         tokio::spawn(handle_events(
             maybenot,
             event_rx,
-            event_tx.clone().downgrade(),
+            event_tx.downgrade(),
             action_tx,
         ));
 
-        DaitaHooks {
-            event_tx: event_tx.clone(),
+        Ok(DaitaHooks {
+            event_tx,
             packet_count,
             blocking_watcher,
             mtu,
             padding_overhead,
-        }
+        })
     }
 }
