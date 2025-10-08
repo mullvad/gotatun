@@ -47,38 +47,24 @@ pub(crate) struct PaddingHeader {
 /// padding packets.
 ///
 /// TODO: Is `Relaxed` atomic ordering fine?
+#[derive(Default)]
 pub(crate) struct PacketCount {
-    pub(crate) outbound_normal: AtomicU32,
-    pub(crate) replaced_normal: AtomicU32,
+    outbound_normal: AtomicU32,
 }
 
 impl PacketCount {
-    pub(crate) fn dec(&self, amount: u32) {
-        self.replaced_normal
-            .fetch_update(atomic::Ordering::Relaxed, atomic::Ordering::Relaxed, |x| {
-                Some(x.saturating_sub(amount))
-            })
-            .ok();
+    pub fn dec(&self, amount: u32) {
         self.outbound_normal
             .fetch_sub(amount, atomic::Ordering::Relaxed);
     }
 
-    pub(crate) fn inc_outbound(&self, amount: u32) {
+    pub fn inc(&self, amount: u32) {
         self.outbound_normal
             .fetch_add(amount, atomic::Ordering::Relaxed);
     }
 
-    pub(crate) fn inc_replaced(&self, amount: u32) {
-        self.replaced_normal
-            .fetch_add(amount, atomic::Ordering::Relaxed);
-    }
-
-    pub(crate) fn outbound(&self) -> u32 {
+    pub fn outbound(&self) -> u32 {
         self.outbound_normal.load(atomic::Ordering::Relaxed)
-    }
-
-    pub(crate) fn replaced(&self) -> u32 {
-        self.replaced_normal.load(atomic::Ordering::Relaxed)
     }
 }
 
@@ -333,23 +319,18 @@ mod tests {
 
     #[test]
     fn test_packet_count_concurrent() {
-        let pc = types::PacketCount {
-            outbound_normal: AtomicU32::new(0),
-            replaced_normal: AtomicU32::new(0),
-        };
+        let pc = types::PacketCount::default();
         std::thread::scope(|s| {
             for _ in 0..32 {
                 s.spawn(|| {
                     for _ in 0..100000 {
-                        pc.inc_outbound(2);
-                        pc.inc_replaced(1);
+                        pc.inc(2);
                         pc.dec(2);
                     }
                 });
             }
         });
         assert_eq!(pc.outbound(), 0);
-        assert_eq!(pc.replaced(), 0);
     }
 
     #[test]
