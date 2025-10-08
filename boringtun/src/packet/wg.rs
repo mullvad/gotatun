@@ -133,7 +133,7 @@ pub trait WgHandshakeBase:
 pub struct WgHandshakeInit {
     // INVARIANT: Must be WgPacketType::HandshakeInit
     packet_type: WgPacketType,
-    _reserved_zeros: [u8; 3],
+    _reserved_zeros: [u8; 4 - size_of::<WgPacketType>()],
     pub sender_idx: little_endian::U32,
     pub unencrypted_ephemeral: [u8; 32],
     pub encrypted_static: [u8; 48],
@@ -194,7 +194,7 @@ impl Default for WgHandshakeInit {
 pub struct WgHandshakeResp {
     // INVARIANT: Must be WgPacketType::HandshakeResp
     packet_type: WgPacketType,
-    _reserved_zeros: [u8; 3],
+    _reserved_zeros: [u8; 4 - size_of::<WgPacketType>()],
     pub sender_idx: little_endian::U32,
     pub receiver_idx: little_endian::U32,
     pub unencrypted_ephemeral: [u8; 32],
@@ -209,7 +209,7 @@ impl WgHandshakeResp {
     pub fn new(sender_idx: u32, receiver_idx: u32, unencrypted_ephemeral: [u8; 32]) -> Self {
         Self {
             packet_type: WgPacketType::HandshakeResp,
-            _reserved_zeros: [0; 3],
+            _reserved_zeros: [0; _],
             sender_idx: sender_idx.into(),
             receiver_idx: receiver_idx.into(),
             unencrypted_ephemeral,
@@ -251,7 +251,7 @@ impl WgHandshakeBase for WgHandshakeResp {
 pub struct WgCookieReply {
     // INVARIANT: Must be WgPacketType::CookieReply
     packet_type: WgPacketType,
-    _reserved_zeros: [u8; 3],
+    _reserved_zeros: [u8; 4 - size_of::<WgPacketType>()],
     pub receiver_idx: little_endian::U32,
     pub nonce: [u8; 24],
     pub encrypted_cookie: [u8; 32],
