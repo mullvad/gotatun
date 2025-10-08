@@ -438,7 +438,7 @@ mod tests {
 
     fn parse_keepalive(tun: &mut Tunn, keepalive: Packet<WgData>) {
         let result = tun.handle_incoming_packet(WgKind::Data(keepalive));
-        assert!(matches!(result, TunnResult::Done));
+        assert!(matches!(result, TunnResult::WriteToTunnel(p) if p.is_empty()));
     }
 
     fn create_two_tuns_and_handshake() -> (Tunn, Tunn) {
