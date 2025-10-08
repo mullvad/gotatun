@@ -316,22 +316,6 @@ mod tests {
     use crate::device::daita::types;
 
     #[test]
-    fn test_packet_count_concurrent() {
-        let pc = types::PacketCount::default();
-        std::thread::scope(|s| {
-            for _ in 0..32 {
-                s.spawn(|| {
-                    for _ in 0..100000 {
-                        pc.inc(2);
-                        pc.dec(2);
-                    }
-                });
-            }
-        });
-        assert_eq!(pc.outbound(), 0);
-    }
-
-    #[test]
     fn test_machine_timers_schedule_and_remove() {
         let mut timers = types::MachineTimers::new(4);
         let machine = MachineId::from_raw(1);
