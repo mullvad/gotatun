@@ -295,7 +295,7 @@ async fn on_api_get(_: Get, d: &Device<impl DeviceTransports>) -> GetResponse {
         let peer = peer.lock().await;
         let (_, tx_bytes, rx_bytes, ..) = peer.tunnel.stats();
         let endpoint = peer.endpoint().addr;
-        let padding_overhead = peer.daita.as_ref().map(|daita| &daita.padding_overhead);
+        let padding_overhead = peer.daita.as_ref().map(|daita| daita.padding_overhead());
 
         peers.push(GetPeer {
             peer: Peer {

@@ -1,13 +1,21 @@
 use super::types::{DAITA_MARKER, PacketCount, PaddingPacket};
-use crate::device::daita::types::BlockingWatcher;
+use crate::device::daita::DaitaSettings;
+use crate::device::daita::actions::ActionHandler;
+use crate::device::daita::events::handle_events;
+use crate::device::daita::types::{self, BlockingWatcher};
+use crate::device::peer::Peer;
 use crate::packet::{self, WgKind};
+use crate::udp::UdpSend;
 use crate::{
     packet::{Packet, Wg},
     tun::LinkMtuWatcher,
 };
-use maybenot::TriggerEvent;
-use std::sync::Arc;
+use maybenot::{Machine, TriggerEvent};
+use rand::rngs::{OsRng, ReseedingRng};
+use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, Weak};
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::{self};
 use zerocopy::{FromBytes, IntoBytes};
 
@@ -28,14 +36,100 @@ pub struct PaddingOverhead {
 }
 
 pub struct DaitaHooks {
-    pub(super) event_tx: mpsc::UnboundedSender<TriggerEvent>,
-    pub(super) packet_count: Arc<PacketCount>,
-    pub(super) blocking_watcher: BlockingWatcher,
-    pub(super) mtu: LinkMtuWatcher,
-    pub(crate) padding_overhead: PaddingOverhead,
+    event_tx: mpsc::UnboundedSender<TriggerEvent>,
+    packet_count: Arc<PacketCount>,
+    blocking_watcher: BlockingWatcher,
+    mtu: LinkMtuWatcher,
+    padding_overhead: PaddingOverhead,
 }
 
+/// RNG used for DAITA. Same as maybenot-ffi.
+///
+/// This setup uses [OsRng] as the source of entropy, but extrapolates each call to [OsRng] into
+/// at least [RNG_RESEED_THRESHOLD] bytes of randomness using [rand_chacha::ChaCha12Core].
+///
+/// This is the same Rng that [rand::thread_rng] uses internally,
+/// but unlike thread_rng, this is Sync.
+type Rng = ReseedingRng<rand_chacha::ChaCha12Core, OsRng>;
+const RNG_RESEED_THRESHOLD: u64 = 1024 * 64; // 64 KiB
+
 impl DaitaHooks {
+    pub fn new<US>(
+        daita_settings: DaitaSettings,
+        peer: Weak<Mutex<Peer>>,
+        mtu: LinkMtuWatcher,
+        udp_send_v4: US,
+        udp_send_v6: US,
+        packet_pool: packet::PacketBufPool,
+    ) -> Result<Self, crate::device::Error>
+    where
+        US: UdpSend + Clone + 'static,
+    {
+        let DaitaSettings {
+            maybenot_machines,
+            max_padding_frac,
+            max_blocking_frac,
+            max_blocked_packets,
+            min_blocking_capacity,
+        } = daita_settings;
+        log::info!("Initializing DAITA with machines: {maybenot_machines:?}");
+
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (action_tx, action_rx) = mpsc::unbounded_channel();
+        let packet_count = Arc::new(types::PacketCount::default());
+        let padding_overhead = PaddingOverhead::default();
+
+        let (blocking_queue_tx, blocking_queue_rx) = mpsc::channel(max_blocked_packets);
+        let blocking_watcher = BlockingWatcher::new(blocking_queue_tx, min_blocking_capacity);
+
+        let machines = maybenot_machines
+            .iter()
+            .map(AsRef::as_ref)
+            .map(Machine::from_str)
+            .collect::<::core::result::Result<Vec<_>, _>>()?;
+
+        let maybenot = maybenot::Framework::new(
+            machines,
+            max_padding_frac,
+            max_blocking_frac,
+            std::time::Instant::now(),
+            Rng::new(RNG_RESEED_THRESHOLD, OsRng).unwrap(),
+        )
+        // FIXME: handle error (since machines are not guaranteed to be valid)
+        .unwrap();
+
+        let action_handler = ActionHandler {
+            peer,
+            packet_pool,
+            packet_count: packet_count.clone(),
+            blocking_queue_rx,
+            blocking_watcher: blocking_watcher.clone(),
+            udp_send_v4: udp_send_v4.clone(),
+            udp_send_v6: udp_send_v6.clone(),
+            mtu: mtu.clone(),
+            tx_padding_packet_bytes: padding_overhead.tx_padding_packet_bytes.clone(),
+            event_tx: event_tx.downgrade(),
+        };
+        // TODO: Make sure that these tasks are properly closed
+        // They should be, and seemingly are, from listening to closing of the channels they wrap
+        // but consider also saving a handle to their tasks and awaiting their closing.
+        tokio::spawn(action_handler.handle_actions(action_rx));
+        tokio::spawn(handle_events(
+            maybenot,
+            event_rx,
+            event_tx.downgrade(),
+            action_tx,
+        ));
+
+        Ok(DaitaHooks {
+            event_tx,
+            packet_count,
+            blocking_watcher,
+            mtu,
+            padding_overhead,
+        })
+    }
+
     /// Map an outgoing data packets before encapsulation, padding it to constant size.
     pub fn before_data_encapsulate(&mut self, mut packet: Packet) -> Packet {
         let _ = self.event_tx.send(TriggerEvent::NormalSent);
@@ -118,6 +212,10 @@ impl DaitaHooks {
         // Note: Not truncating the packet here, `try_into_ipvx` will do that later.
 
         Some(packet)
+    }
+
+    pub fn padding_overhead(&self) -> &PaddingOverhead {
+        &self.padding_overhead
     }
 }
 
