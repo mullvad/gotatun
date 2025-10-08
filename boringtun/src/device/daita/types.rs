@@ -18,8 +18,6 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endi
 
 use crate::packet::{Packet, WgData};
 
-pub(crate) const DAITA_MARKER: u8 = 0xFF;
-
 pub(crate) enum ErrorAction {
     Close,
     Ignore(IgnoreReason),
@@ -51,9 +49,26 @@ pub(crate) struct PaddingPacket {
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq, Clone, Copy)]
 #[repr(C, packed)]
 pub(crate) struct PaddingHeader {
-    pub _daita_marker: u8, // Must be `DAITA_MARKER`
-    pub _reserved: u8,
-    pub length: big_endian::U16,
+    _daita_marker: u8, // Must be `DAITA_MARKER`
+    _reserved: u8,
+    length: big_endian::U16,
+}
+
+impl PaddingHeader {
+    const MARKER: u8 = 0xFF;
+
+    pub(crate) const fn new(length: big_endian::U16) -> Self {
+        Self {
+            _daita_marker: Self::MARKER,
+            _reserved: 0,
+            length,
+        }
+    }
+
+    /// Check if the padding header has the correct marker.
+    pub(crate) const fn is_valid(&self) -> bool {
+        self._daita_marker == Self::MARKER
+    }
 }
 
 /// Counter for the number of normal packets that have been received on the tunnel interface

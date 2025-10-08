@@ -232,11 +232,7 @@ where
     }
 
     pub(crate) fn create_padding_packet(&self, mtu: u16) -> Packet {
-        let padding_packet_header = PaddingHeader {
-            _daita_marker: 0xFF,
-            _reserved: 0,
-            length: mtu.into(),
-        };
+        let padding_packet_header = PaddingHeader::new(mtu.into());
         let mut padding_packet_buf = self.packet_pool.get();
         padding_packet_buf.buf_mut().clear();
         padding_packet_buf
