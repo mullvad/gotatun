@@ -237,7 +237,7 @@ mod gro {
 #[cfg(target_os = "android")]
 mod android {
     use crate::packet::{Packet, PacketBufPool};
-    use crate::udp::{UdpRecv, socket::UdpSocket};
+    use crate::udp::UdpRecv;
     use std::io;
     use std::net::SocketAddr;
 
