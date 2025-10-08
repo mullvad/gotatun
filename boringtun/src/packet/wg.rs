@@ -48,7 +48,6 @@ impl From<WgKind> for Packet {
 
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq, Clone, Copy)]
 #[repr(transparent)]
-// TODO: This is just one byte
 pub struct WgPacketType(pub u8);
 
 impl WgPacketType {
