@@ -20,14 +20,12 @@ where
     loop {
         futures::select! {
             _ = event_rx.recv_many(&mut event_buf, usize::MAX).fuse() => {
-                log::debug!("DAITA: Received events {:?}", event_buf);
                 if event_buf.is_empty() {
                     log::debug!("DAITA: event_rx channel closed, exiting handle_events");
                     return None; // channel closed
                 }
             },
             (machine, timer) = machine_timers.wait_next_timer().fuse() => {
-                log::debug!("DAITA: Timer expired {:?} for machine {:?}", timer, machine);
                 match timer {
                     MachineTimer::Action(action_type) => action_tx
                         .send((action_type, machine))
@@ -43,7 +41,6 @@ where
         let actions = maybenot.trigger_events(event_buf.as_slice(), Instant::now().into()); // TODO: support mocked time?
         event_buf.clear();
         for action in actions {
-            log::debug!("DAITA: TriggerAction: {:?}", action);
             match action {
                 TriggerAction::Cancel { machine, timer } => match timer {
                     maybenot::Timer::Action => machine_timers.remove_action(machine),

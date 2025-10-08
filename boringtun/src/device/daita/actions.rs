@@ -53,7 +53,7 @@ where
         loop {
             let res = futures::select! {
                 _ = self.blocking_watcher.wait_blocking_ended().fuse() => {
-                    log::debug!("DAITA: Blocking ended, flushing blocked packets");
+                    // Flush blocked packets
                     self.end_blocking(&mut blocked_packets_buf).await
                 }
                 res = actions.recv().fuse() => {
@@ -92,15 +92,12 @@ where
         let mut blocking = self.blocking_watcher.blocking_state.write().await;
         let new_expiry = Instant::now() + duration;
         match &mut *blocking {
-            BlockingState::Active { expires_at, .. } if !replace && new_expiry <= *expires_at => {
-                log::debug!("Current blocking was not replaced");
-            }
+            BlockingState::Active { expires_at, .. } if !replace && new_expiry <= *expires_at => {}
             _ => {
                 *blocking = BlockingState::Active {
                     bypass,
                     expires_at: new_expiry,
                 };
-                log::debug!("Blocking started");
             }
         };
         Ok(())
@@ -170,7 +167,7 @@ where
         packets: &mut Vec<(Packet, SocketAddr)>,
     ) -> Result<()> {
         let Some(addr) = self.get_peer().await?.endpoint().addr else {
-            log::error!("No endpoint");
+            log::trace!("No endpoint");
             return Err(ErrorAction::Close);
         };
 
