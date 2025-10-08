@@ -808,7 +808,6 @@ impl<T: DeviceTransports> Device<T> {
                 };
 
                 let packet = packet.into_bytes();
-                //let packet = hooks.map_outgoing_data(packet);
 
                 let Some(device) = device.upgrade() else {
                     return;
