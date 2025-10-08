@@ -4,11 +4,8 @@
 //!
 //! ## TODO
 //!
-//! - Add (and log) error messages in the `ErrorAction::Ignore` variant (otherwise we might as well return `Ok(())` directly)
-//! - Look over where `ErrorAction::Ignore` is used, and see if it makes sense to return `ErrorAction::Close` instead
 //! - Expose the `PaddingOverhead` stats to the daemon
 //! - Support mocked time for tests (this is supported in other parts of GotaTun using `mock_instant` crate)
-//! - Make sure that machines that include blocking actions are disabled, until we have tested blocking properly
 //! - Test whether we can reliably replace padding packets with outgoing normal packets.
 //! - Pick good numbers for `max_blocked_packets` and `min_blocking_capacity` so that the blocking queue doesn't
 //!   fill to capacity.
