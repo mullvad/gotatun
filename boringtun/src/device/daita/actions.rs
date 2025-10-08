@@ -63,7 +63,7 @@ where
                 }
                 res = actions.recv().fuse() => {
                     let Some((action, machine)) = res else {
-                        log::debug!("DAITA: actions channel closed, exiting handle_actions");
+                        log::trace!("DAITA: actions channel closed, exiting handle_actions");
                         let _ = self.end_blocking(&mut blocked_packets_buf).await;
                         break;
                     };
