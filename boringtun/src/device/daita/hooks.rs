@@ -5,6 +5,7 @@ use crate::device::daita::events::handle_events;
 use crate::device::daita::types::{self, BlockingWatcher};
 use crate::device::peer::Peer;
 use crate::packet::{self, WgKind};
+use crate::task::Task;
 use crate::udp::UdpSend;
 use crate::{
     packet::{Packet, Wg},
@@ -41,6 +42,8 @@ pub struct DaitaHooks {
     blocking_watcher: BlockingWatcher,
     mtu: LinkMtuWatcher,
     padding_overhead: PaddingOverhead,
+    actions_task: Task,
+    events_task: Task,
 }
 
 /// RNG used for DAITA. Same as maybenot-ffi.
@@ -110,16 +113,15 @@ impl DaitaHooks {
             tx_padding_packet_bytes: padding_overhead.tx_padding_packet_bytes.clone(),
             event_tx: event_tx.downgrade(),
         };
-        // TODO: Make sure that these tasks are properly closed
-        // They should be, and seemingly are, from listening to closing of the channels they wrap
-        // but consider also saving a handle to their tasks and awaiting their closing.
-        tokio::spawn(action_handler.handle_actions(action_rx));
-        tokio::spawn(handle_events(
-            maybenot,
-            event_rx,
-            event_tx.downgrade(),
-            action_tx,
-        ));
+
+        let actions_task = Task::spawn(
+            "DaitaHooks::handle_actions",
+            action_handler.handle_actions(action_rx),
+        );
+        let weak_event_tx = event_tx.downgrade();
+        let events_task = Task::spawn("DaitaHooks::handle_events", async move {
+            handle_events(maybenot, event_rx, weak_event_tx, action_tx).await;
+        });
 
         Ok(DaitaHooks {
             event_tx,
@@ -127,6 +129,8 @@ impl DaitaHooks {
             blocking_watcher,
             mtu,
             padding_overhead,
+            actions_task,
+            events_task,
         })
     }
 
