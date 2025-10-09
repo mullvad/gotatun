@@ -6,6 +6,7 @@ authors = [
     "Noah Kennedy <nkennedy@cloudflare.com>",
     "Andy Grover <agrover@cloudflare.com>",
     "Jeff Hiner <jhiner@cloudflare.com>",
+    "Mullvad VPN",
 ]
 license = "BSD-3-Clause"
 repository = "https://github.com/mullvad/gotatun"
