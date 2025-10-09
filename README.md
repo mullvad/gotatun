@@ -2,18 +2,12 @@
 
 A userspace [WireGuard<sup>®</sup>](https://www.wireguard.com/) implementation, and a fork of [BoringTun](https://github.com/cloudflare/boringtun).
 
-### Installation
-
-You can install this project using `cargo`:
-
-```
-cargo install gotatun-cli
-```
-
 ### Building
 
 - Library only: `cargo build --lib --no-default-features --release [--target $(TARGET_TRIPLE)]`
 - Executable: `cargo build --bin gotatun-cli --release [--target $(TARGET_TRIPLE)]`
+
+#### Installation
 
 By default the executable is placed in the `./target/release` folder. You can copy it to a desired location manually, or install it using `cargo install --bin gotatun-cli --path .`.
 
