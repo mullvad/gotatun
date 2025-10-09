@@ -38,7 +38,7 @@ mod unix {
     pub async fn main() {
         let matches = Command::new("gotatun")
             .version(env!("CARGO_PKG_VERSION"))
-            .author("Mullvad VPN") // TODO: Add an email address?
+            .author("Mullvad VPN <https://github.com/mullvad/gotatun>")
             .args(&[
                 Arg::new("INTERFACE_NAME")
                     .required(true)
