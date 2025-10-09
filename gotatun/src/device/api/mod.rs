@@ -24,7 +24,7 @@ pub struct ApiServer {
     rx: mpsc::Receiver<(Request, oneshot::Sender<Response>)>,
 }
 
-/// An api client to a boringtun [Device].
+/// An api client to a gotatun [Device].
 ///
 /// Use [ApiClient::send] or [ApiClient::send_sync] to configure the [Device] by adding peers, etc.
 #[derive(Clone)]

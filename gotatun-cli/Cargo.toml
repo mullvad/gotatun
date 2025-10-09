@@ -1,5 +1,5 @@
 [package]
-name = "boringtun-cli" # todo
+name = "gotatun-cli"
 description = "an implementation of the WireGuard® protocol designed for portability and speed"
 version = "0.6.0"
 authors = [
@@ -22,7 +22,7 @@ tracing-appender = "0.2.1"
 log = "0.4"
 tokio = { version = "1.43.0", features = ["full"] }
 
-[target.'cfg(unix)'.dependencies.boringtun]
+[target.'cfg(unix)'.dependencies.gotatun]
 version = "0.6.0"
-path = "../boringtun"
+path = "../gotatun"
 features = ["device", "tun"]

@@ -6,11 +6,11 @@
 // Unix implementation in a module
 #[cfg(unix)]
 mod unix {
-    use boringtun::device::drop_privileges::drop_privileges;
-    use boringtun::device::{DefaultDeviceTransports, DeviceConfig, DeviceHandle};
-    use boringtun::udp::socket::UdpSocketFactory;
     use clap::{Arg, Command};
     use daemonize::Daemonize;
+    use gotatun::device::drop_privileges::drop_privileges;
+    use gotatun::device::{DefaultDeviceTransports, DeviceConfig, DeviceHandle};
+    use gotatun::udp::socket::UdpSocketFactory;
     use std::fs::File;
     use std::os::unix::net::UnixDatagram;
     use std::process::exit;
@@ -21,7 +21,7 @@ mod unix {
         {
             // TODO: fix validation
             /*
-            if boringtun::device::tun::parse_utun_name(&_v).is_ok() {
+            if gotatun::device::tun::parse_utun_name(&_v).is_ok() {
                 Ok(())
             } else {
                 Err("Tunnel name must have the format 'utun[0-9]+', use 'utun' for automatic assignment".to_owned())
@@ -36,9 +36,9 @@ mod unix {
     }
 
     pub async fn main() {
-        let matches = Command::new("boringtun")
+        let matches = Command::new("gotatun")
             .version(env!("CARGO_PKG_VERSION"))
-            .author("Vlad Krasnov <vlad@cloudflare.com>")
+            .author("Mullvad VPN") // TODO: Add an email address?
             .args(&[
                 Arg::new("INTERFACE_NAME")
                     .required(true)
@@ -70,7 +70,7 @@ mod unix {
                     .short('l')
                     .env("WG_LOG_FILE")
                     .help("Log file")
-                    .default_value("/tmp/boringtun.out"),
+                    .default_value("/tmp/gotatun.out"),
                 Arg::new("disable-drop-privileges")
                     .long("disable-drop-privileges")
                     .env("WG_SUDO")
@@ -112,15 +112,15 @@ mod unix {
                 .exit_action(move || {
                     let mut b = [0u8; 1];
                     if sock2.recv(&mut b).is_ok() && b[0] == 1 {
-                        println!("BoringTun started successfully");
+                        println!("GotaTun started successfully");
                     } else {
-                        eprintln!("BoringTun failed to start");
+                        eprintln!("GotaTun failed to start");
                         exit(1);
                     };
                 });
 
             match daemonize.start() {
-                Ok(_) => log::info!("BoringTun started successfully"),
+                Ok(_) => log::info!("GotaTun started successfully"),
                 Err(e) => {
                     log::error!("error = {e:?}");
                     exit(1);
@@ -133,7 +133,7 @@ mod unix {
                 .init();
         }
 
-        let api = boringtun::device::api::ApiServer::default_unix_socket(tun_name).unwrap();
+        let api = gotatun::device::api::ApiServer::default_unix_socket(tun_name).unwrap();
 
         let config = DeviceConfig { api: Some(api) };
 
@@ -160,7 +160,7 @@ mod unix {
         sock1.send(&[1]).unwrap();
         drop(sock1);
 
-        log::info!("BoringTun started successfully"); // TODO: abort somehow
+        log::info!("GotaTun started successfully"); // TODO: abort somehow
         tokio::time::sleep(tokio::time::Duration::from_secs(1000)).await;
     }
 }
@@ -174,5 +174,5 @@ async fn main() {
 #[cfg(not(unix))]
 fn main() {
     // Empty main function for Windows
-    unimplemented!("BoringTun CLI is not supported on Windows");
+    unimplemented!("GotaTun CLI is not supported on Windows");
 }

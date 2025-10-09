@@ -1,7 +1,7 @@
-use boringtun::packet::{IpNextProtocol, Ipv4, Ipv4Header, Packet};
-use boringtun::tun::channel::Ipv4Fragments;
 use bytes::BytesMut;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use gotatun::packet::{IpNextProtocol, Ipv4, Ipv4Header, Packet};
+use gotatun::tun::channel::Ipv4Fragments;
 use rand::rngs::StdRng;
 use rand::{SeedableRng, seq::SliceRandom};
 use std::hint::black_box;
@@ -46,7 +46,7 @@ fn make_single_fragment(
     let destination_ip = Ipv4Addr::new(10, 0, 0, 2);
     ipv4.header = Ipv4Header::new(source_ip, destination_ip, IpNextProtocol::Udp, payload);
     ipv4.header.identification = identification.into();
-    let mut flags = boringtun::packet::Ipv4FlagsFragmentOffset::new();
+    let mut flags = gotatun::packet::Ipv4FlagsFragmentOffset::new();
     flags.set_more_fragments(more_fragments);
     flags.set_fragment_offset(offset);
     ipv4.header.flags_and_fragment_offset = flags;

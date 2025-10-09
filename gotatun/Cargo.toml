@@ -1,5 +1,5 @@
 [package]
-name = "boringtun" # todo
+name = "gotatun"
 description = "an implementation of the WireGuard® protocol designed for portability and speed"
 version = "0.6.0"
 authors = [
