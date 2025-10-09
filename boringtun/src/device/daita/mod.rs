@@ -10,7 +10,6 @@
 //! - Pick good numbers for `max_blocked_packets` and `min_blocking_capacity` so that the blocking queue doesn't
 //!   fill to capacity.
 //! - Test blocking with a real machine, ask Tobias for one
-//! - Set `max_padding_frac` and `max_blocking_frac` from the daemon using the response of ephemeral peer API.
 
 mod actions;
 mod events;
@@ -18,10 +17,12 @@ mod hooks;
 mod types;
 
 pub use hooks::DaitaHooks;
+use maybenot::Machine;
 
+#[derive(Debug, Clone)]
 pub struct DaitaSettings {
     /// The maybenot machines to use.
-    pub maybenot_machines: Vec<String>,
+    pub maybenot_machines: Vec<Machine>,
     /// Maximum fraction of bandwidth that may be used for padding packets.
     pub max_padding_frac: f64,
     /// Maximum fraction of bandwidth that may be used for blocking packets.
