@@ -401,7 +401,7 @@ async fn on_api_set(
             remove,
             update_only,
             replace_allowed_ips,
-            maybenot_machines,
+            daita_settings,
         } = peer;
 
         let public_key = x25519_dalek::PublicKey::from(public_key.0);
@@ -415,8 +415,8 @@ async fn on_api_set(
             command::SetUnset::Unset => todo!("not sure how to handle this"),
         });
 
-        // HACK
-        if maybenot_machines.is_some() {
+        // TODO: Check if there are any changes
+        if daita_settings.is_some() {
             reconfigure |= Reconfigure::Yes
         }
 
@@ -429,7 +429,7 @@ async fn on_api_set(
                 allowed_ip.as_slice(),
                 persistent_keepalive_interval,
                 preshared_key,
-                maybenot_machines,
+                daita_settings,
             )
             .await;
     }

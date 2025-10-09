@@ -10,7 +10,10 @@ use std::{
 use eyre::{bail, ensure, eyre};
 use typed_builder::TypedBuilder;
 
-use crate::{device::peer::AllowedIP, serialization::KeyBytes};
+use crate::{
+    device::{daita::DaitaSettings, peer::AllowedIP},
+    serialization::KeyBytes,
+};
 
 #[derive(Debug)]
 pub enum Request {
@@ -138,7 +141,7 @@ pub struct SetPeer {
     pub replace_allowed_ips: bool,
 
     #[builder(default, setter(strip_option, into))]
-    pub maybenot_machines: Option<Vec<String>>,
+    pub daita_settings: Option<DaitaSettings>,
 }
 
 #[derive(Debug)]
@@ -230,7 +233,7 @@ impl SetPeer {
             remove: false,
             update_only: false,
             replace_allowed_ips: false,
-            maybenot_machines: None,
+            daita_settings: None,
         }
     }
 
@@ -496,7 +499,7 @@ impl SetPeer {
             remove,
             update_only,
             replace_allowed_ips,
-            maybenot_machines: _, // NOTE: DAITA is not supported in the string format (and probably should be)
+            daita_settings: _, // NOTE: Non-standard feature
         } = &mut set_peer;
 
         loop {

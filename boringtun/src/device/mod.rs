@@ -14,7 +14,6 @@ pub mod peer;
 use ip_network::IpNetwork;
 use std::collections::HashMap;
 use std::io::{self};
-use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
 use std::ops::BitOrAssign;
 use std::sync::{Arc, Weak};
@@ -23,7 +22,7 @@ use tokio::join;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
-use crate::device::daita::{DaitaHooks, DaitaSettings};
+use crate::device::daita::DaitaSettings;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
@@ -208,33 +207,21 @@ impl<T: DeviceTransports> Connection<T> {
             <T::UdpTransportFactory as UdpTransportFactory>::RecvV6,
         >(MAX_PACKET_BUFS, udp6_rx, pool.clone());
 
-        // FIXME: the lifetimes of the UdpSend are getting weird.
-        // FIXME: this is a weird place to initialize DAITA.
-        let tun_rx_mtu = device_guard.tun_rx_mtu.clone();
-        for peer_arc in device_guard.peers.values_mut() {
-            let mut peer = peer_arc.lock().await;
-            if !peer.maybenot_machines.is_empty() {
-                let daita_settings = DaitaSettings {
-                    maybenot_machines: peer.maybenot_machines.clone(),
-                    // TODO: make these configurable and use sane values
-                    max_padding_frac: 0.1,
-                    max_blocking_frac: 0.1,
-                    max_blocked_packets: 1024,
-                    min_blocking_capacity: 50,
-                };
-                peer.daita = Some(DaitaHooks::new(
-                    daita_settings,
-                    Arc::downgrade(peer_arc),
-                    tun_rx_mtu.clone(),
-                    buffered_udp_tx_v4.clone(),
-                    buffered_udp_tx_v6.clone(),
-                    pool.clone(),
-                )?)
-            }
+        // Start DAITA/hooks tasks
+        for peer_arc in device_guard.peers.values() {
+            Peer::maybe_start_daita(
+                peer_arc,
+                pool.clone(),
+                device_guard.tun_rx_mtu.clone(),
+                buffered_udp_tx_v4.clone(),
+                buffered_udp_tx_v6.clone(),
+            )
+            .await?;
         }
 
         drop(device_guard);
 
+        // Start device tasks
         let outgoing = Task::spawn(
             "handle_outgoing",
             Device::handle_outgoing(
@@ -407,7 +394,7 @@ impl<T: DeviceTransports> Device<T> {
         new_allowed_ips: &[AllowedIP],
         keepalive: Option<u16>,
         preshared_key: Option<[u8; 32]>,
-        maybenot_machines: Option<Vec<String>>,
+        daita_settings: Option<DaitaSettings>,
     ) {
         if remove {
             // Completely remove a peer
@@ -415,21 +402,20 @@ impl<T: DeviceTransports> Device<T> {
             return;
         }
 
-        let (index, old_allowed_ips, old_maybenot_machines) =
+        let (index, old_allowed_ips, old_daita_settings) =
             if let Some(old_peer) = self.remove_peer(&pub_key).await {
                 // TODO: Update existing peer?
-                let mut peer = old_peer.lock().await;
+                let peer = old_peer.lock().await;
                 let index = peer.index();
                 let old_allowed_ips = peer
                     .allowed_ips()
                     .map(|(addr, cidr)| AllowedIP { addr, cidr })
                     .collect();
-                let old_maybenot_machines = mem::take(&mut peer.maybenot_machines);
+                let old_daita_settings = peer.daita_settings().cloned();
 
                 drop(peer);
 
                 // TODO: Match pubkey instead of index
-                // TODO: FIXME
                 let mut remove_list = vec![];
                 for (peer, addr, cidr) in self.peers_by_ip.iter() {
                     if peer.lock().await.index() == index {
@@ -440,9 +426,9 @@ impl<T: DeviceTransports> Device<T> {
                     self.peers_by_ip.remove_network(network);
                 }
 
-                (index, old_allowed_ips, old_maybenot_machines)
+                (index, old_allowed_ips, old_daita_settings)
             } else {
-                (self.next_index(), vec![], vec![])
+                (self.next_index(), vec![], None)
             };
 
         // Update an existing peer or add peer
@@ -470,11 +456,14 @@ impl<T: DeviceTransports> Device<T> {
             new_allowed_ips.to_vec()
         };
 
-        let mut peer = Peer::new(tunn, index, endpoint, &allowed_ips, preshared_key);
-        peer.maybenot_machines = match maybenot_machines {
-            Some(new) => new,
-            None => old_maybenot_machines,
-        };
+        let peer = Peer::new(
+            tunn,
+            index,
+            endpoint,
+            &allowed_ips,
+            preshared_key,
+            daita_settings.or_else(|| old_daita_settings),
+        );
         let peer = Arc::new(Mutex::new(peer));
 
         self.peers_by_idx.insert(index, Arc::clone(&peer));

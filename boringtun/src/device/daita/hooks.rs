@@ -11,9 +11,8 @@ use crate::{
     packet::{Packet, Wg},
     tun::LinkMtuWatcher,
 };
-use maybenot::{Machine, TriggerEvent};
+use maybenot::TriggerEvent;
 use rand::rngs::{OsRng, ReseedingRng};
-use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Weak};
 use tokio::sync::Mutex;
@@ -85,14 +84,8 @@ impl DaitaHooks {
         let (blocking_queue_tx, blocking_queue_rx) = mpsc::channel(max_blocked_packets);
         let blocking_watcher = BlockingWatcher::new(blocking_queue_tx, min_blocking_capacity);
 
-        let machines = maybenot_machines
-            .iter()
-            .map(AsRef::as_ref)
-            .map(Machine::from_str)
-            .collect::<::core::result::Result<Vec<_>, _>>()?;
-
         let maybenot = maybenot::Framework::new(
-            machines,
+            maybenot_machines,
             max_padding_frac,
             max_blocking_frac,
             std::time::Instant::now(),
