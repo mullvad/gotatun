@@ -415,10 +415,22 @@ async fn on_api_set(
             command::SetUnset::Unset => todo!("not sure how to handle this"),
         });
 
-        // TODO: Check if there are any changes
-        if daita_settings.is_some() {
-            reconfigure |= Reconfigure::Yes
-        }
+        let daita_settings = match daita_settings {
+            Some(daita_settings) => {
+                // TODO: Check if there are any changes
+                reconfigure |= Reconfigure::Yes;
+
+                // Parse from API repr to actual settings
+                match crate::device::daita::DaitaSettings::try_from(daita_settings) {
+                    Ok(settings) => Some(settings),
+                    Err(e) => {
+                        log::error!("Invalid DAITA settings: {e}");
+                        return (SetResponse { errno: EINVAL }, Reconfigure::No);
+                    }
+                }
+            }
+            None => None,
+        };
 
         device
             .update_peer(

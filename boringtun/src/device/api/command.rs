@@ -11,7 +11,7 @@ use eyre::{bail, ensure, eyre};
 use typed_builder::TypedBuilder;
 
 use crate::{
-    device::{daita::DaitaSettings, peer::AllowedIP},
+    device::{daita::api::DaitaSettings, peer::AllowedIP},
     serialization::KeyBytes,
 };
 
