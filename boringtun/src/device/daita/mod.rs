@@ -4,7 +4,6 @@
 //!
 //! ## TODO
 //!
-//! - Expose the `PaddingOverhead` stats to the daemon
 //! - Support mocked time for tests (this is supported in other parts of GotaTun using `mock_instant` crate)
 //! - Test whether we can reliably replace padding packets with outgoing normal packets.
 //! - Pick good numbers for `max_blocked_packets` and `min_blocking_capacity` so that the blocking queue doesn't
