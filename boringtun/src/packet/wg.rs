@@ -215,7 +215,7 @@ impl WgHandshakeResp {
     pub fn new(sender_idx: u32, receiver_idx: u32, unencrypted_ephemeral: [u8; 32]) -> Self {
         Self {
             packet_type: WgPacketType::HandshakeResp,
-            _reserved_zeros: [0; _],
+            _reserved_zeros: [0; 3],
             sender_idx: sender_idx.into(),
             receiver_idx: receiver_idx.into(),
             unencrypted_ephemeral,
