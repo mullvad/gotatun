@@ -23,6 +23,6 @@ log = "0.4"
 tokio = { version = "1.43.0", features = ["full"] }
 
 [target.'cfg(unix)'.dependencies.gotatun]
-version = "0.6.0"
+version = "0.1.0"
 path = "../gotatun"
 features = ["device", "tun"]
