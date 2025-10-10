@@ -462,7 +462,7 @@ impl<T: DeviceTransports> Device<T> {
             endpoint,
             &allowed_ips,
             preshared_key,
-            daita_settings.or_else(|| old_daita_settings),
+            daita_settings.or(old_daita_settings),
         );
         let peer = Arc::new(Mutex::new(peer));
 
