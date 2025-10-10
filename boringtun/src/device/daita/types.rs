@@ -186,7 +186,7 @@ impl BlockingWatcher {
 /// Use [`MachineTimers::wait_next_timer`] to wait for the next time expiration.
 // INVARIANT: VecDeque is sorted by Instant, which represents the time of expiration.
 // INVARIANT: Only one internal and one action timer per machine can exist at a time.
-pub(crate) struct MachineTimers(pub(super) VecDeque<(Instant, MachineId, MachineTimer)>);
+pub(crate) struct MachineTimers(VecDeque<(Instant, MachineId, MachineTimer)>);
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Action {
