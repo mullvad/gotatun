@@ -27,21 +27,23 @@ impl BufferedUdpSend {
                 let count = send_rx
                     .recv_many(&mut buf, max_number_of_packets_to_send)
                     .await;
-                if count == 0 {
-                    break;
-                }
-                if count == 1 {
-                    let (packet, addr) = buf.pop().unwrap();
-                    if let Err(e) = udp_tx.send_to(packet, addr).await {
-                        log::trace!("send_to_err: {e:#}");
+                match count {
+                    0 => break,
+                    1 => {
+                        let (packet, addr) = buf.pop().unwrap();
+                        let _ = udp_tx
+                            .send_to(packet, addr)
+                            .await
+                            .inspect_err(|e| log::trace!("send_to_err: {e:#}"));
                     }
-                    continue;
+                    2.. => {
+                        // send all packets at once
+                        let _ = udp_tx
+                            .send_many_to(&mut send_many_buf, &mut buf)
+                            .await
+                            .inspect_err(|e| log::trace!("send_to_many_err: {e:#}"));
+                    }
                 }
-                // send all packets at once
-                let _ = udp_tx
-                    .send_many_to(&mut send_many_buf, &mut buf)
-                    .await
-                    .inspect_err(|e| log::trace!("send_to_many_err: {e:#}"));
             }
         });
 
