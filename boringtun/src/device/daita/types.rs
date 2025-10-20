@@ -14,7 +14,7 @@ use tokio::{
     },
     time::Instant,
 };
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
+use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
 use crate::packet::{Packet, WgData};
 
@@ -39,36 +39,38 @@ impl std::fmt::Display for IgnoreReason {
 
 pub(crate) type Result<T> = std::result::Result<T, ErrorAction>;
 
-#[derive(FromBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
+#[derive(TryFromBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 #[repr(C)]
 pub(crate) struct PaddingPacket {
     pub(crate) header: PaddingHeader,
     pub(crate) payload: [u8],
 }
 
-#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq, Clone, Copy)]
+#[derive(
+    TryFromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq, Clone, Copy,
+)]
 #[repr(C, packed)]
 pub(crate) struct PaddingHeader {
-    _daita_marker: u8, // Must be `DAITA_MARKER`
+    pub marker: PaddingMarker,
     _reserved: u8,
-    length: big_endian::U16,
+    pub length: big_endian::U16,
+}
+
+#[derive(
+    TryFromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq, Clone, Copy,
+)]
+#[repr(u8)]
+pub(crate) enum PaddingMarker {
+    Padding = 0xff,
 }
 
 impl PaddingHeader {
-    const MARKER: u8 = 0xFF;
-
     pub(crate) const fn new(length: big_endian::U16) -> Self {
         Self {
-            _daita_marker: Self::MARKER,
+            marker: PaddingMarker::Padding,
             _reserved: 0,
             length,
         }
-    }
-
-    /// Check if the padding header has the correct marker.
-    #[inline(always)]
-    pub(crate) const fn is_valid(&self) -> bool {
-        self._daita_marker == Self::MARKER
     }
 }
 
