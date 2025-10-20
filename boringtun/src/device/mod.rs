@@ -32,7 +32,7 @@ use crate::task::Task;
 use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
 #[cfg(feature = "tun")]
 use crate::tun::tun_async_device::TunDevice;
-use crate::tun::{IpRecv, IpSend, LinkMtuWatcher};
+use crate::tun::{IpRecv, IpSend, MtuWatcher};
 use crate::udp::buffer::{BufferedUdpReceive, BufferedUdpSend};
 use crate::udp::{
     UdpRecv, UdpSend, UdpTransportFactory, UdpTransportFactoryParams, socket::UdpSocketFactory,
@@ -143,7 +143,7 @@ pub struct Device<T: DeviceTransports> {
     tun_rx: Arc<Mutex<T::IpRecv>>,
 
     /// Link-MTU wather of the TUN device.
-    tun_rx_mtu: LinkMtuWatcher,
+    tun_rx_mtu: MtuWatcher,
 
     peers: HashMap<x25519::PublicKey, Arc<Mutex<Peer>>>,
     peers_by_ip: AllowedIps<Arc<Mutex<Peer>>>,

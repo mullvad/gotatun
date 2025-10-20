@@ -5,7 +5,7 @@ use crate::{
         peer::Peer,
     },
     packet::{self, Packet, WgData},
-    tun::LinkMtuWatcher,
+    tun::MtuWatcher,
     udp::UdpSend,
 };
 use futures::FutureExt;
@@ -40,7 +40,7 @@ where
     packet_pool: packet::PacketBufPool,
     udp_send_v4: US,
     udp_send_v6: US,
-    mtu: LinkMtuWatcher,
+    mtu: MtuWatcher,
     tx_padding_packet_bytes: Arc<AtomicUsize>,
     event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
 }

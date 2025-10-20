@@ -13,7 +13,7 @@ use crate::device::daita::{DaitaHooks, DaitaSettings};
 use crate::noise::Tunn;
 use crate::noise::errors::WireGuardError;
 use crate::packet::{self, Packet, Wg};
-use crate::tun::LinkMtuWatcher;
+use crate::tun::MtuWatcher;
 use crate::udp::UdpSend;
 
 #[derive(Default, Debug)]
@@ -82,7 +82,7 @@ impl Peer {
     pub async fn maybe_start_daita<US: UdpSend + Clone + 'static>(
         peer: &Arc<Mutex<Peer>>,
         pool: packet::PacketBufPool,
-        tun_rx_mtu: LinkMtuWatcher,
+        tun_rx_mtu: MtuWatcher,
         udp_tx_v4: US,
         udp_tx_v6: US,
     ) -> Result<(), super::Error> {

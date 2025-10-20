@@ -5,7 +5,7 @@ use std::{io, sync::Arc};
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
     task::Task,
-    tun::{IpRecv, IpSend, LinkMtuWatcher},
+    tun::{IpRecv, IpSend, MtuWatcher},
 };
 use tokio::sync::{Mutex, mpsc};
 
@@ -50,7 +50,7 @@ pub struct BufferedIpRecv<I> {
     rx_packet_buf: Vec<Packet<Ip>>,
     _task: Arc<Task>,
     _phantom: std::marker::PhantomData<I>,
-    mtu: LinkMtuWatcher,
+    mtu: MtuWatcher,
 }
 
 impl<I: IpRecv> BufferedIpRecv<I> {
@@ -112,7 +112,7 @@ impl<I: IpRecv> IpRecv for BufferedIpRecv<I> {
         Ok(self.rx_packet_buf.drain(..n))
     }
 
-    fn mtu(&self) -> LinkMtuWatcher {
+    fn mtu(&self) -> MtuWatcher {
         self.mtu.clone()
     }
 }

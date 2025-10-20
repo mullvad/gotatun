@@ -9,7 +9,7 @@ use crate::task::Task;
 use crate::udp::UdpSend;
 use crate::{
     packet::{Packet, Wg},
-    tun::LinkMtuWatcher,
+    tun::MtuWatcher,
 };
 use maybenot::TriggerEvent;
 use rand::rngs::{OsRng, ReseedingRng};
@@ -39,7 +39,7 @@ pub struct DaitaHooks {
     event_tx: mpsc::UnboundedSender<TriggerEvent>,
     packet_count: Arc<PacketCount>,
     blocking_watcher: BlockingWatcher,
-    mtu: LinkMtuWatcher,
+    mtu: MtuWatcher,
     padding_overhead: PaddingOverhead,
     _actions_task: Task,
     _events_task: Task,
@@ -59,7 +59,7 @@ impl DaitaHooks {
     pub fn new<US>(
         daita_settings: DaitaSettings,
         peer: Weak<Mutex<Peer>>,
-        mtu: LinkMtuWatcher,
+        mtu: MtuWatcher,
         udp_send_v4: US,
         udp_send_v6: US,
         packet_pool: packet::PacketBufPool,

@@ -6,7 +6,7 @@ use tun::AbstractDevice;
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
     task::Task,
-    tun::{IpRecv, IpSend, LinkMtuWatcher},
+    tun::{IpRecv, IpSend, MtuWatcher},
 };
 
 use std::{convert::Infallible, io, iter, sync::Arc, time::Duration};
@@ -21,7 +21,7 @@ pub struct TunDevice {
 }
 
 struct TunDeviceState {
-    mtu: LinkMtuWatcher,
+    mtu: MtuWatcher,
 
     /// Task which monitors TUN device link-MTU. Aborted when dropped.
     _mtu_monitor: Task,
@@ -90,7 +90,7 @@ impl IpRecv for TunDevice {
         }
     }
 
-    fn mtu(&self) -> LinkMtuWatcher {
+    fn mtu(&self) -> MtuWatcher {
         self.state.mtu.clone()
     }
 }
