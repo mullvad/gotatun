@@ -629,6 +629,9 @@ impl<T: DeviceTransports> Device<T> {
                 match p.update_timers() {
                     Ok(Some(packet)) => {
                         drop(p);
+
+                        // NOTE: we don't bother with triggering TunnelRecv DAITA events here.
+
                         match endpoint_addr {
                             SocketAddr::V4(_) => {
                                 udp4.send_to(packet.into_bytes(), endpoint_addr).await.ok()
@@ -707,12 +710,12 @@ impl<T: DeviceTransports> Device<T> {
 
             let Peer { tunnel, daita, .. } = &mut *peer;
 
-            if let Some(daita) = daita {
-                // TODO: what about keepalives?
-                if let WgKind::Data(_) = &parsed_packet {
-                    daita.before_data_decapsulate();
-                };
-            }
+            if let Some(daita) = daita
+                && let WgKind::Data(_) = &parsed_packet
+            {
+                // NOTE: this might be a keepalive packet, but we trigger TunnelRecv anyway because it's hard to tell
+                daita.before_data_decapsulate();
+            };
 
             match tunnel.handle_incoming_packet(parsed_packet) {
                 TunnResult::Done => (),
@@ -722,6 +725,8 @@ impl<T: DeviceTransports> Device<T> {
                         log::trace!("udp.send_to failed");
                         break;
                     }
+
+                    // NOTE: we don't bother with triggering TunnelSent DAITA events here.
 
                     // Flush pending queue
                     while let Some(packet) = tunnel.next_queued_packet() {

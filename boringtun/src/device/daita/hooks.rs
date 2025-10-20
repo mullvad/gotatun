@@ -2,7 +2,7 @@ use super::types::{PacketCount, PaddingPacket};
 use crate::device::daita::DaitaSettings;
 use crate::device::daita::actions::ActionHandler;
 use crate::device::daita::events::handle_events;
-use crate::device::daita::types::{self, BlockingWatcher};
+use crate::device::daita::types::{self, BlockingWatcher, PaddingMarker};
 use crate::device::peer::Peer;
 use crate::packet::{self, WgKind};
 use crate::task::Task;
@@ -17,7 +17,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Weak};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{self};
-use zerocopy::{FromBytes, IntoBytes};
+use zerocopy::{FromBytes, IntoBytes, TryFromBytes};
 
 // TODO: Although this is included in `GetPeer`, it is not read anywhere yet.
 // Add it to `Tunnel::get_tunnel_stats`?
@@ -131,6 +131,14 @@ impl DaitaHooks {
         self.packet_count.inc(1);
 
         let mtu = usize::from(self.mtu.get());
+        let is_keepalive = packet.is_empty();
+        if is_keepalive {
+            if cfg!(debug_assertions) {
+                log::warn!("Keepalives should not end up here because xxx.");
+            }
+
+            return packet;
+        }
 
         if let Ok(padded_bytes) = pad_to_constant_size(&mut packet, mtu) {
             self.padding_overhead.tx_padding_bytes += padded_bytes;
@@ -171,17 +179,24 @@ impl DaitaHooks {
 
     /// Should be called on incoming decapsulated *data* packets.
     pub fn after_data_decapsulate(&mut self, packet: Packet) -> Option<Packet> {
-        if let Ok(padding) = PaddingPacket::ref_from_bytes(packet.as_bytes())
-            && padding.header.is_valid()
-        {
+        if packet.is_empty() {
+            // this is a keepalive packet, ignore it.
+            return Some(packet);
+        }
+
+        // Check whether this is a DAITA padding-packet.
+        if let Ok(packet) = PaddingPacket::try_ref_from_bytes(packet.as_bytes()) {
+            let PaddingMarker::Padding = packet.header.marker;
+
+            debug_assert_eq!(usize::from(packet.header.length), size_of_val(packet));
+
             let _ = self.event_tx.send(TriggerEvent::PaddingRecv);
 
             // Count received padding
-            self.padding_overhead.rx_padding_packet_bytes += size_of_val(padding);
+            self.padding_overhead.rx_padding_packet_bytes += size_of_val(packet);
+
             return None;
         }
-
-        let _ = self.event_tx.send(TriggerEvent::NormalRecv);
 
         // Inspect Ipv4/Ipv6 header to determine actual payload size
         let ip = packet::Ip::ref_from_bytes(&packet).ok()?;
@@ -195,14 +210,23 @@ impl DaitaHooks {
                 let payload_len = usize::from(ipv6.header.payload_length.get());
                 payload_len + packet::Ipv6Header::LEN
             }
-            _ => return None,
+            _ => {
+                // bad packet, let the normal packet parser deal with the error
+                if cfg!(debug_assertions) {
+                    log::debug!("Malformed IP packet");
+                }
+                return Some(packet);
+            }
         };
 
         // Add bytes padded due to constant-size
-        // TODO: If we implement padding all wg payloads to be multiples of 16 bytes in length
+        // TODO: If we start padding all wg payloads to be multiples of 16 bytes in length
         // as described in section 5.4.6 of the wg whitepaper, then this would count that too.
         // When done, just round `ip_len` up to the next multiple of 16.
+        // self.padding_overhead.rx_padding_bytes += packet.len() - ip_len.next_multiple_of(16);
         self.padding_overhead.rx_padding_bytes += packet.len() - ip_len;
+
+        let _ = self.event_tx.send(TriggerEvent::NormalRecv);
 
         // Note: Not truncating the packet here, `try_into_ipvx` will do that later.
 
