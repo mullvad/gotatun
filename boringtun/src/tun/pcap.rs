@@ -11,7 +11,7 @@ use zerocopy::IntoBytes;
 
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
-    tun::{IpRecv, IpSend, LinkMtuWatcher},
+    tun::{IpRecv, IpSend, MtuWatcher},
 };
 
 #[derive(Clone)]
@@ -74,7 +74,7 @@ impl<R: IpRecv> IpRecv for PcapSniffer<R> {
         Ok(packets)
     }
 
-    fn mtu(&self) -> LinkMtuWatcher {
+    fn mtu(&self) -> MtuWatcher {
         self.inner.mtu()
     }
 }

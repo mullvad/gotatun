@@ -35,12 +35,15 @@ pub trait IpRecv: Send + Sync + 'static {
         pool: &mut PacketBufPool,
     ) -> impl Future<Output = io::Result<impl Iterator<Item = Packet<Ip>> + Send + 'a>> + Send;
 
-    /// The largest allowed MTU for this device
-    fn mtu(&self) -> LinkMtuWatcher;
+    /// Get an MTU watcher for this [IpRecv].
+    ///
+    /// The maximum transfer unit is the max size of packets returned from [IpRecv::recv].
+    /// Don't rely on this being true though. Since the MTU might change, it is inherently racey.
+    fn mtu(&self) -> MtuWatcher;
 }
 
 #[derive(Clone)]
-pub struct LinkMtuWatcher {
+pub struct MtuWatcher {
     mtu_source: MtuSource,
     modifier: i32,
 }
@@ -51,7 +54,7 @@ enum MtuSource {
     Watch(watch::Receiver<u16>),
 }
 
-impl LinkMtuWatcher {
+impl MtuWatcher {
     /// Create an MTU watcher which always returns `mtu`.
     pub const fn new(mtu: u16) -> Self {
         Self {
@@ -108,7 +111,7 @@ impl LinkMtuWatcher {
     }
 }
 
-impl From<watch::Receiver<u16>> for LinkMtuWatcher {
+impl From<watch::Receiver<u16>> for MtuWatcher {
     fn from(mtu_rx: watch::Receiver<u16>) -> Self {
         Self {
             mtu_source: MtuSource::Watch(mtu_rx),
