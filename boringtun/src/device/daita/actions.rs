@@ -198,7 +198,7 @@ where
                         }
                     }
                     Err(TryRecvError::Disconnected) => {
-                        return Err(ErrorAction::Close); // channel closed},
+                        return Err(ErrorAction::Close); // channel closed,
                     }
                 }
             }
