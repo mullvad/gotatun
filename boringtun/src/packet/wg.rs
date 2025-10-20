@@ -1,7 +1,7 @@
 #![deny(clippy::unwrap_used)]
-#![deny(clippy::expect_used)]
 use std::fmt::{self, Debug};
 use std::mem::offset_of;
+use std::ops::Deref;
 
 use eyre::{bail, eyre};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, Unaligned, little_endian};
@@ -61,7 +61,7 @@ impl WgPacketType {
 }
 
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
-#[repr(C, packed)]
+#[repr(C)]
 pub struct WgDataHeader {
     // INVARIANT: Must be WgPacketType::Data
     // TODO: make private
@@ -80,33 +80,58 @@ impl WgDataHeader {
 #[repr(C, packed)]
 pub struct WgData {
     pub header: WgDataHeader,
-    pub encrypted_encapsulated_packet_and_tag: [u8],
+    pub encrypted_encapsulated_packet_and_tag: WgDataAndTag,
+}
+
+/// Wireguard data payload with a trailing tag.
+///
+/// This is essentially a byte slice that is at least [WgData::TAG_LEN] long.
+#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C)]
+pub struct WgDataAndTag {
+    // Don't access these field directly. The tag is actually at the end of the struct.
+    _tag_size: [u8; WgData::TAG_LEN],
+    _extra: [u8],
 }
 
 impl WgData {
     /// Data packet overhead: header and tag (16 bytes)
-    pub const OVERHEAD: usize = WgDataHeader::LEN + 16;
+    pub const OVERHEAD: usize = WgDataHeader::LEN + WgData::TAG_LEN;
+    pub const TAG_LEN: usize = 16;
 
     /// Strip the tag from the encapsulated packet.
-    ///
-    /// Returns None if if the encapsulated packet + tag is less than 16 bytes.
-    pub fn encrypted_encapsulated_packet_mut(&mut self) -> Option<&mut [u8]> {
-        let (encrypted_encapsulated_packet, _tag) = self
-            .encrypted_encapsulated_packet_and_tag
-            .split_last_chunk_mut::<16>()?;
+    fn split_encapsulated_packet_and_tag(&mut self) -> (&mut [u8], &mut [u8; WgData::TAG_LEN]) {
+        self.encrypted_encapsulated_packet_and_tag
+            .split_last_chunk_mut::<{ WgData::TAG_LEN }>()
+            .expect("WgDataAndTag is at least TAG_LEN bytes long")
+    }
 
-        Some(encrypted_encapsulated_packet)
+    /// Get a reference to the encapsulated packet, without the trailing tag.
+    pub fn encrypted_encapsulated_packet_mut(&mut self) -> &mut [u8] {
+        let (encrypted_encapsulated_packet, _) = self.split_encapsulated_packet_and_tag();
+        encrypted_encapsulated_packet
     }
 
     /// Get a reference to the tag of the encapsulated packet.
     ///
     /// Returns None if if the encapsulated packet + tag is less than 16 bytes.
-    pub fn tag_mut(&mut self) -> Option<&mut [u8; 16]> {
-        let (_, tag) = self
-            .encrypted_encapsulated_packet_and_tag
-            .split_last_chunk_mut::<16>()?;
+    pub fn tag_mut(&mut self) -> &mut [u8; WgData::TAG_LEN] {
+        let (_, tag) = self.split_encapsulated_packet_and_tag();
+        tag
+    }
+}
 
-        Some(tag)
+impl Deref for WgDataAndTag {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_bytes()
+    }
+}
+
+impl std::ops::DerefMut for WgDataAndTag {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.as_mut_bytes()
     }
 }
 
