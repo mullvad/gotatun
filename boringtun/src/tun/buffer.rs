@@ -100,7 +100,7 @@ impl<I: IpRecv> IpRecv for BufferedIpRecv<I> {
         &'a mut self,
         _pool: &mut PacketBufPool,
     ) -> io::Result<impl Iterator<Item = Packet<Ip>> + 'a> {
-        let max_n = self.rx.capacity();
+        let max_n = self.rx.max_capacity();
         let n = self.rx.recv_many(&mut self.rx_packet_buf, max_n).await;
         if n == 0 {
             // Channel is closed

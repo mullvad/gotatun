@@ -63,7 +63,7 @@ impl UdpSend for BufferedUdpSend {
     }
 
     fn max_number_of_packets_to_send(&self) -> usize {
-        self.send_tx.capacity()
+        self.send_tx.max_capacity()
     }
 }
 
