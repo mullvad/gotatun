@@ -48,7 +48,7 @@ log = "0.4"
 typed-builder = "0.21.0"
 tun = { version = "0.7.13", features = ["async"], optional = true }
 async-trait = "0.1.88"
-zerocopy = { version = "0.8.26", features = ["std", "derive"] }
+zerocopy = { version = "0.8.27", features = ["std", "derive"] }
 pnet_packet = "0.35.0"
 bytes = "1.10.1"
 either = "1.15.0"
