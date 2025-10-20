@@ -126,20 +126,24 @@ impl DaitaHooks {
     }
 
     /// Map an outgoing data packets before encapsulation, padding it to constant size.
+    ///
+    /// Must not be called on keepalive packets.
     pub fn before_data_encapsulate(&mut self, mut packet: Packet) -> Packet {
-        let _ = self.event_tx.send(TriggerEvent::NormalSent);
-        self.packet_count.inc(1);
-
-        let mtu = usize::from(self.mtu.get());
         let is_keepalive = packet.is_empty();
         if is_keepalive {
             if cfg!(debug_assertions) {
-                log::warn!("Keepalives should not end up here because xxx.");
+                // Keepalive packets are 0-length data packets.
+                // They do not contain an IP header, thus they would become malformed if padded.
+                panic!("before_data_encapsulate must not be called on keepalives");
             }
 
             return packet;
         }
 
+        let _ = self.event_tx.send(TriggerEvent::NormalSent);
+        self.packet_count.inc(1);
+
+        let mtu = usize::from(self.mtu.get());
         if let Ok(padded_bytes) = pad_to_constant_size(&mut packet, mtu) {
             self.padding_overhead.tx_padding_bytes += padded_bytes;
         };
