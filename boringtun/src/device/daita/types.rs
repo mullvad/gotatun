@@ -144,7 +144,9 @@ impl BlockingWatcher {
         if let BlockingState::Active { expires_at, .. } = &*self.blocking_state.read().await {
             futures::select! {
                 _ = tokio::time::sleep_until(*expires_at).fuse() => {},
-                _ = self.blocking_abort.notified().fuse() => {},
+                _ = self.blocking_abort.notified().fuse() => {
+                    log::trace!("Blocking aborted with remaining capacity {}", self.blocking_queue_tx.capacity());
+                },
             }
         } else {
             pending().await
@@ -169,6 +171,7 @@ impl BlockingWatcher {
             if let Err(TrySendError::Closed(packet) | TrySendError::Full(packet)) =
                 self.blocking_queue_tx.try_send(packet)
             {
+                log::trace!("Packet sent as it couldn't be blocked");
                 // If the queue is closed or full, we can't block anymore, so we
                 // send the packet anyway.
                 // TODO: this would be an out of order packet, not ideal.
