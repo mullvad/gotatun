@@ -73,10 +73,7 @@ impl DaitaHooks {
             min_blocking_capacity,
         } = daita_settings;
         log::info!("Initializing DAITA");
-        log::debug!(
-            "Using maybenot machines: {:?}",
-            maybenot_machines.iter().map(ToString::to_string)
-        );
+        log::debug!("Using maybenot machines: {:?}", maybenot_machines);
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (action_tx, action_rx) = mpsc::unbounded_channel();
