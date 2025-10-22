@@ -142,7 +142,7 @@ pub struct Device<T: DeviceTransports> {
     /// stopped.
     tun_rx: Arc<Mutex<T::IpRecv>>,
 
-    /// Link-MTU watcher of the TUN device.
+    /// MTU watcher of the TUN device.
     tun_rx_mtu: MtuWatcher,
 
     peers: HashMap<x25519::PublicKey, Arc<Mutex<Peer>>>,
