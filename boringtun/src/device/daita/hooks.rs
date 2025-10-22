@@ -124,7 +124,7 @@ impl DaitaHooks {
         })
     }
 
-    /// Map an outgoing data packets before encapsulation, padding it to constant size.
+    /// Map an outgoing data packet before encapsulation, padding it to constant size.
     ///
     /// Note:
     /// Should not be called on keepalive packets (they are 0-length data packets).
@@ -142,7 +142,7 @@ impl DaitaHooks {
         packet
     }
 
-    /// Map an encapsulated packet, before they it is sent to the network.
+    /// Map an encapsulated packet, before it is sent to the network.
     ///
     /// Returns `None` to drop/ignore the packet, e.g. when it was queued for blocking.
     /// Returns `Some(packet)` to send the packet.
