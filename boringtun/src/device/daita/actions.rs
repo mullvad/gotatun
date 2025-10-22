@@ -131,8 +131,8 @@ where
                     self.send_padding().await
                 }
             }
+            // Allow padding to bypass block
             BlockingState::Active { bypass: true, .. } if !replace && padding_bypass => {
-                // Allow padding to bypass block
                 self.send_padding().await
             }
             BlockingState::Active { .. }
@@ -154,10 +154,8 @@ where
                     .try_send(padding_packet);
                 Ok(())
             }
-            BlockingState::Inactive if replace && self.packet_count.outbound() > 0 => {
-                // Replace padding packet with in-flight packet
-                Ok(())
-            }
+            // Replace padding packet with in-flight packet
+            BlockingState::Inactive if replace && self.packet_count.outbound() > 0 => Ok(()),
             BlockingState::Inactive => self.send_padding().await,
         }
     }
