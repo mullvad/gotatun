@@ -172,7 +172,7 @@ pub struct Peer {
     #[builder(default, setter(strip_option, into))]
     pub preshared_key: Option<SetUnset<KeyBytes>>,
 
-    /// The value for this key is either IP:port for IPv4 or [IP]:port for IPv6, indicating the
+    /// The value for this key is either `IP:port` for IPv4 or `[IP]:port` for IPv6, indicating the
     /// endpoint of the previously added peer entry.
     #[builder(default, setter(strip_option, into))]
     pub endpoint: Option<SocketAddr>,

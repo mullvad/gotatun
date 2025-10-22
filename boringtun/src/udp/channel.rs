@@ -1,6 +1,6 @@
-//! Implementations of [UdpTransport] traits for tokio channels.
+//! Implementations of [UdpSend]/[UdpRecv] traits for tokio channels.
 //!
-//! See [get_packet_channels]
+//! See [new_udp_tun_channel]
 
 use bytes::BytesMut;
 use pnet_packet::ip::IpNextHeaderProtocols;
@@ -28,7 +28,7 @@ use crate::{
 use super::UdpTransportFactoryParams;
 
 /// An implementation of [`UdpSend`] using tokio channels. Create using
-/// [`get_packet_channels`].
+/// [`new_udp_tun_channel`].
 #[derive(Clone)]
 pub struct UdpChannelTx {
     source_ip_v4: Ipv4Addr,
@@ -43,14 +43,14 @@ type Ipv4UdpReceiver = mpsc::Receiver<Packet<Ipv4<Udp>>>;
 type Ipv6UdpReceiver = mpsc::Receiver<Packet<Ipv6<Udp>>>;
 
 /// An implementation of [`UdpRecv`] for IPv4 UDP packets. Create using
-/// [`get_packet_channels`].
+/// [`new_udp_tun_channel`].
 pub struct UdpChannelV4Rx {
     /// The receiver for IPv4 UDP packets. Source: [UdpChannelFactory::udp_rx_v4]
     udp_rx_v4: OwnedMutexGuard<Ipv4UdpReceiver>,
 }
 
 /// An implementation of [`UdpRecv`] for IPv6 UDP packets. Create using
-/// [`get_packet_channels`].
+/// [`new_udp_tun_channel`].
 pub struct UdpChannelV6Rx {
     /// The receiver for IPv6 UDP packets. Source: [UdpChannelFactory::udp_rx_v6].
     udp_rx_v6: OwnedMutexGuard<Ipv6UdpReceiver>,
@@ -87,21 +87,20 @@ pub struct UdpChannelFactory {
 /// use boringtun::{
 ///     device::{DeviceHandle, DeviceConfig},
 ///     tun::channel::{TunChannelTx, TunChannelRx},
-///     udp::channel::{get_packet_channels, UdpChannelFactory},
+///     udp::channel::{new_udp_tun_channel, UdpChannelFactory},
 ///     udp::socket::UdpSocketFactory,
 /// };
 /// use std::net::{Ipv4Addr, Ipv6Addr};
-/// use std::sync::Arc;
 /// use tokio::runtime::Runtime;
 ///
 /// let capacity = 100;
 /// let source_v4 = Ipv4Addr::new(10, 0, 0, 1);
 /// let source_v6 = Ipv6Addr::UNSPECIFIED;
-/// let (tun_tx, tun_rx, udp) = get_packet_channels(capacity, source_v4, source_v6);
+/// let (tun_tx, tun_rx, udp) = new_udp_tun_channel(capacity, source_v4, source_v6);
 ///
 /// // Create entry and exit devices using the returned channels
 /// let entry_device = DeviceHandle::new(UdpSocketFactory, tun_tx, tun_rx, /* device_config */);
-/// let exit_device = DeviceHandle::new(udp, Arc::new(/* async_tun */), Arc::new(/* async_tun */), /* device_config */);
+/// let exit_device = DeviceHandle::new(udp, /* TUN */, /* TUN */, /* device_config */);
 /// // Now entry_device and exit_device can communicate in-process via the channels.
 /// ```
 pub fn new_udp_tun_channel(
