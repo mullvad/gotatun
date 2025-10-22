@@ -402,8 +402,9 @@ impl<T: DeviceTransports> Device<T> {
             return;
         }
 
-        let (index, old_allowed_ips, old_daita_settings) =
-            if let Some(old_peer) = self.remove_peer(&pub_key).await {
+        let (index, old_allowed_ips, old_daita_settings) = match self.remove_peer(&pub_key).await {
+            None => (self.next_index(), vec![], None),
+            Some(old_peer) => {
                 // TODO: Update existing peer?
                 let peer = old_peer.lock().await;
                 let index = peer.index();
@@ -427,9 +428,8 @@ impl<T: DeviceTransports> Device<T> {
                 }
 
                 (index, old_allowed_ips, old_daita_settings)
-            } else {
-                (self.next_index(), vec![], None)
-            };
+            }
+        };
 
         // Update an existing peer or add peer
         let device_key_pair = self
