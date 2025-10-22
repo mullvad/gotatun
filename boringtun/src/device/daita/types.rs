@@ -85,16 +85,16 @@ pub(crate) struct PacketCount {
 impl PacketCount {
     pub fn dec(&self, amount: u32) {
         self.outbound_normal
-            .fetch_sub(amount, atomic::Ordering::Relaxed);
+            .fetch_sub(amount, atomic::Ordering::SeqCst);
     }
 
     pub fn inc(&self, amount: u32) {
         self.outbound_normal
-            .fetch_add(amount, atomic::Ordering::Relaxed);
+            .fetch_add(amount, atomic::Ordering::SeqCst);
     }
 
     pub fn outbound(&self) -> u32 {
-        self.outbound_normal.load(atomic::Ordering::Relaxed)
+        dbg!(self.outbound_normal.load(atomic::Ordering::SeqCst))
     }
 }
 
