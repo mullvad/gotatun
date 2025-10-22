@@ -94,7 +94,7 @@ impl PacketCount {
     }
 
     pub fn outbound(&self) -> u32 {
-        dbg!(self.outbound_normal.load(atomic::Ordering::SeqCst))
+        self.outbound_normal.load(atomic::Ordering::SeqCst)
     }
 }
 

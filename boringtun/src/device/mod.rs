@@ -720,16 +720,17 @@ impl<T: DeviceTransports> Device<T> {
             match tunnel.handle_incoming_packet(parsed_packet) {
                 TunnResult::Done => (),
                 TunnResult::Err(_) => continue,
+                // Flush pending queue
                 TunnResult::WriteToNetwork(packet) => {
-                    if let Err(_err) = udp_tx.send_to(packet.into_bytes(), addr).await {
-                        log::trace!("udp.send_to failed");
-                        break;
-                    }
+                    let queued_packets = std::iter::once(packet)
+                        .chain(std::iter::from_fn(|| tunnel.next_queued_packet()));
 
-                    // NOTE: we don't bother with triggering TunnelSent DAITA events here.
+                    let not_blocked_packets = queued_packets.filter_map(|p| match daita {
+                        Some(daita) => daita.after_data_encapsulate(p),
+                        None => Some(p),
+                    });
 
-                    // Flush pending queue
-                    while let Some(packet) = tunnel.next_queued_packet() {
+                    for packet in not_blocked_packets {
                         if let Err(_err) = udp_tx.send_to(packet.into_bytes(), addr).await {
                             log::trace!("udp.send_to failed");
                             break;
