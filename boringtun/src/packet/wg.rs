@@ -119,6 +119,10 @@ impl WgData {
         let (_, tag) = self.split_encapsulated_packet_and_tag();
         tag
     }
+
+    pub fn is_keepalive(&self) -> bool {
+        self.encrypted_encapsulated_packet_and_tag._extra.is_empty()
+    }
 }
 
 impl Deref for WgDataAndTag {

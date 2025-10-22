@@ -149,6 +149,9 @@ impl DaitaHooks {
     pub fn after_data_encapsulate(&self, packet: Packet<Wg>) -> Option<Packet<Wg>> {
         // DAITA only cares about data packets.
         let data_packet = match packet.into_kind() {
+            Ok(WgKind::Data(packet)) if packet.is_keepalive() => {
+                return Some(packet.into());
+            }
             Ok(WgKind::Data(packet)) => packet,
             Ok(other) => return Some(other.into()),
             Err(e) => {
