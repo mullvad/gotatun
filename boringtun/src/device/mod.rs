@@ -802,8 +802,6 @@ impl<T: DeviceTransports> Device<T> {
                     continue;
                 };
 
-                let packet = packet.into_bytes();
-
                 let Some(device) = device.upgrade() else {
                     return;
                 };
@@ -827,7 +825,7 @@ impl<T: DeviceTransports> Device<T> {
 
                 let packet = match daita {
                     Some(daita) => daita.before_data_encapsulate(packet),
-                    None => packet,
+                    None => packet.into(),
                 };
 
                 let Some(packet) = tunnel.handle_outgoing_packet(packet) else {
