@@ -14,7 +14,7 @@ pub struct PacketBufPool<const N: usize = 4096> {
 }
 
 impl<const N: usize> PacketBufPool<N> {
-    /// Create a new [PacketBufPool] that can hold up to `capacity` packets,
+    /// Create a new [PacketBufPool] with space for at least `capacity` packets,
     /// each allocated with a capacity of `N` bytes.
     pub fn new(capacity: usize) -> Self {
         let mut queue = VecDeque::with_capacity(capacity);
