@@ -273,13 +273,14 @@ impl Packet<Ip> {
 impl Packet<Ipv4> {
     /// Attempts to convert this IPv4 packet into a UDP packet.
     ///
-    /// Returns [`TryIntoUdpResult::Udp`] if the packet is a valid, non-fragmented IPv4 UDP packet
-    /// with no options (IHL == 5). Returns [`TryIntoUdpResult::NotUdp`] if the packet is a fragment
-    /// of a UDP packet.
+    /// Returns `Packet<Ipv4<Udp>>` if the packet is a valid,
+    /// non-fragmented IPv4 UDP packet with no options (IHL == 5).
     ///
     /// # Errors
-    ///
-    /// Returns an error if the IHL is invalid or if UDP validation fails.
+    /// Returns an error if
+    /// - the packet is a fragment
+    /// - the IHL is invalid
+    /// - UDP validation fails
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv4<Udp>>> {
         let ip = self.deref();
 

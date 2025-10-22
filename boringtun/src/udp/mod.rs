@@ -17,7 +17,7 @@ pub mod socket;
 
 /// An abstraction of `UdpSocket::bind`.
 ///
-/// See [UdpTransport].
+/// See [UdpSend] and [UdpRecv].
 pub trait UdpTransportFactory: Send + Sync + 'static {
     type Send: UdpSend + 'static;
     type RecvV4: UdpRecv + 'static;
