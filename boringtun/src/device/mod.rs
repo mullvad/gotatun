@@ -81,6 +81,7 @@ pub enum Error {
     DropPrivileges(String),
     #[error("API socket error: {0}")]
     ApiSocket(io::Error),
+    #[cfg(feature = "tun")]
     #[error("Device error: {0}")]
     OpenDevice(#[from] tun::Error),
     #[error("Failed to initialize DAITA hooks")]
