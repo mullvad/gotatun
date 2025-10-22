@@ -63,7 +63,7 @@ impl MtuWatcher {
         }
     }
 
-    /// Get the current link-MTU.
+    /// Get the current MTU.
     pub fn get(&mut self) -> u16 {
         let mtu = match &mut self.mtu_source {
             MtuSource::Constant(mtu) => *mtu,
@@ -76,7 +76,7 @@ impl MtuWatcher {
             .expect("MTU over/underflow")
     }
 
-    /// Wait for the link-MTU to change and return the new value.
+    /// Wait for the MTU to change and return the new value.
     pub async fn wait(&mut self) -> u16 {
         match &mut self.mtu_source {
             MtuSource::Constant(_) => return pending().await,

@@ -23,7 +23,7 @@ pub struct TunDevice {
 struct TunDeviceState {
     mtu: MtuWatcher,
 
-    /// Task which monitors TUN device link-MTU. Aborted when dropped.
+    /// Task which monitors TUN device MTU. Aborted when dropped.
     _mtu_monitor: Task,
 }
 
