@@ -19,8 +19,6 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc::{self};
 use zerocopy::{FromBytes, IntoBytes, TryFromBytes};
 
-// TODO: Although this is included in `GetPeer`, it is not read anywhere yet.
-// Add it to `Tunnel::get_tunnel_stats`?
 /// Padding overhead statistics, exposed via [`crate::device::api::command::GetPeer`].
 #[derive(Default)]
 pub struct PaddingOverhead {
