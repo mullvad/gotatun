@@ -10,7 +10,7 @@ use tokio::io::Interest;
 
 use crate::{
     packet::Packet,
-    udp::{UdpSend, socket::UdpSocket},
+    udp::{UdpSend, check_send_max_number_of_packets, socket::UdpSocket},
 };
 
 /// Max number of packets/messages for sendmmsg/recvmmsg
@@ -34,8 +34,7 @@ impl UdpSend for super::UdpSocket {
         buf: &mut SendmmsgBuf,
         packets: &mut Vec<(Packet, SocketAddr)>,
     ) -> io::Result<()> {
-        let n = packets.len();
-        debug_assert!(n <= MAX_PACKET_COUNT);
+        check_send_max_number_of_packets(MAX_PACKET_COUNT, packets)?;
 
         let fd = self.inner.as_raw_fd();
 
