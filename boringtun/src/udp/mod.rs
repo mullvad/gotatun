@@ -112,10 +112,16 @@ pub trait UdpSend: Send + Sync + Clone {
     /// - `send_buf` - Internal buffer. Should be reused between calls. Create with [Default].
     /// - `packets` - Input. Packets to send. Packets are removed from this vector when sent.
     ///
-    /// # Notes
-    /// May panic or return an error if [SocketAddr::V4]s and [SocketAddr::V6]s are mixed.
+    /// May error if [SocketAddr::V4]s and [SocketAddr::V6]s are mixed.
+    /// May error if number of `packets.len() > max_number_of_packets_to_send`.
+    ///
+    /// If successful, `packets` will be empty.
+    /// If unsuccessful any number of packets may have been sent, and `packets` may not be empty.
+    ///
+    /// # Cancel safety
+    /// This method is not cancel safe, but cancellations must never result in a panic,
+    /// or an error on a subsequent call.
     //
-    // TODO: define how many packets are sent in case of an error.
     // TODO: consider splitting into send_many_to_ipv4 and send_many_to_ipv6
     fn send_many_to(
         &self,
@@ -140,6 +146,20 @@ pub trait UdpSend: Send + Sync + Clone {
     fn set_fwmark(&self, _mark: u32) -> io::Result<()> {
         Ok(())
     }
+}
+
+fn check_send_max_number_of_packets(
+    max_number_of_packets: usize,
+    packets: &[(Packet, SocketAddr)],
+) -> io::Result<()> {
+    debug_assert!(packets.len() <= max_number_of_packets);
+    if packets.len() > max_number_of_packets {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("send_many_to: Number of packets may not exceed {max_number_of_packets}"),
+        ));
+    }
+    Ok(())
 }
 
 async fn generic_send_many_to<U: UdpSend>(

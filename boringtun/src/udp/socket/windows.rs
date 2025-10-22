@@ -12,7 +12,7 @@ use cmsg::Cmsg;
 
 use crate::{
     packet::{Packet, PacketBufPool},
-    udp::{UdpRecv, UdpSend, socket::UdpSocket},
+    udp::{UdpRecv, UdpSend, check_send_max_number_of_packets, socket::UdpSocket},
 };
 
 pub struct SendmmsgBuf {
@@ -55,7 +55,7 @@ impl UdpSend for super::UdpSocket {
         }
 
         let n = packets.len();
-        debug_assert!(n <= *MAX_GSO_SEGMENTS);
+        check_send_max_number_of_packets(*MAX_GSO_SEGMENTS, packets)?;
 
         let client_socket_ref = socket2::SockRef::from(&*self.inner);
 
