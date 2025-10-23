@@ -722,13 +722,12 @@ impl<T: DeviceTransports> Device<T> {
                 TunnResult::Err(_) => continue,
                 // Flush pending queue
                 TunnResult::WriteToNetwork(packet) => {
-                    let queued_packets = std::iter::once(packet)
-                        .chain(std::iter::from_fn(|| tunnel.next_queued_packet()));
-
-                    let not_blocked_packets = queued_packets.filter_map(|p| match daita {
-                        Some(daita) => daita.after_data_encapsulate(p),
-                        None => Some(p),
-                    });
+                    let not_blocked_packets = std::iter::once(packet)
+                        .chain(std::iter::from_fn(|| tunnel.next_queued_packet()))
+                        .filter_map(|p| match daita {
+                            Some(daita) => daita.after_data_encapsulate(p),
+                            None => Some(p),
+                        });
 
                     for packet in not_blocked_packets {
                         if let Err(_err) = udp_tx.send_to(packet.into(), addr).await {
