@@ -1,14 +1,13 @@
 //! # NOTES
 //!
-//! This is a work-in-progress implementation of DAITA version 3.
+//! This module is an implementation of DAITA version 3 for GotaTun.
+//!
+//! DAITA (Defense Against AI-guided Traffic Analysis) is MullvadVPN's implementation of
+//! an anti-fingerprinting protocol based on the [maybenot] crate.
 //!
 //! ## TODO
 //!
 //! - Support mocked time for tests (this is supported in other parts of GotaTun using `mock_instant` crate)
-//! - Test whether we can reliably replace padding packets with outgoing normal packets.
-//! - Pick good numbers for `max_blocked_packets` and `min_blocking_capacity` so that the blocking queue doesn't
-//!   fill to capacity.
-//! - Test blocking with a real machine, ask Tobias for one
 
 mod actions;
 mod events;
