@@ -34,9 +34,9 @@ use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
 use crate::tun::tun_async_device::TunDevice;
 use crate::tun::{IpRecv, IpSend, MtuWatcher};
 use crate::udp::buffer::{BufferedUdpReceive, BufferedUdpSend};
-use crate::udp::{
-    UdpRecv, UdpSend, UdpTransportFactory, UdpTransportFactoryParams, socket::UdpSocketFactory,
-};
+#[cfg(feature = "tun")]
+use crate::udp::socket::UdpSocketFactory;
+use crate::udp::{UdpRecv, UdpSend, UdpTransportFactory, UdpTransportFactoryParams};
 use crate::x25519;
 use allowed_ips::AllowedIps;
 use peer::{AllowedIP, Peer};

@@ -135,7 +135,7 @@ fn bench_assemble_ipv4_fragment_interleaved(c: &mut Criterion) {
         let mut rng = StdRng::seed_from_u64(42);
         all_frags.shuffle(&mut rng);
         group.bench_with_input(
-            BenchmarkId::from_parameter(format!("{}x{}", n_packets, payload_len)),
+            BenchmarkId::from_parameter(format!("{n_packets}x{payload_len}")),
             &all_frags,
             |b, all_frags| {
                 b.iter(|| {
