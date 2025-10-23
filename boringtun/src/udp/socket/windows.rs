@@ -120,7 +120,7 @@ impl UdpSend for super::UdpSocket {
                     // Call sendmsg with one CMSG containing the segment size.
                     // This will send all packets in `buffer`.
 
-                    buf.cmsg.data[..4].copy_from_slice(&segment_size.to_ne_bytes());
+                    buf.cmsg.data[..4].copy_from_slice(&(segment_size as u32).to_ne_bytes());
 
                     let io_slices = [IoSlice::new(&buf.buffer); 1];
                     let daddr = socket2::SockAddr::from(dest);
