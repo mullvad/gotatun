@@ -712,10 +712,9 @@ impl<T: DeviceTransports> Device<T> {
             let Peer { tunnel, daita, .. } = &mut *peer;
 
             if let Some(daita) = daita
-                && let WgKind::Data(_) = &parsed_packet
+                && let WgKind::Data(packet) = &parsed_packet
             {
-                // NOTE: this might be a keepalive packet, but we trigger TunnelRecv anyway because it's hard to tell
-                daita.before_data_decapsulate();
+                daita.before_data_decapsulate(packet);
             };
 
             match tunnel.handle_incoming_packet(parsed_packet) {
