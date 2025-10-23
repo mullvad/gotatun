@@ -4,7 +4,7 @@ use crate::device::daita::actions::ActionHandler;
 use crate::device::daita::events::handle_events;
 use crate::device::daita::types::{self, BlockingWatcher, PaddingMarker};
 use crate::device::peer::Peer;
-use crate::packet::{self, Ip, WgKind};
+use crate::packet::{self, Ip, WgData, WgKind};
 use crate::task::Task;
 use crate::udp::UdpSend;
 use crate::{
@@ -171,8 +171,10 @@ impl DaitaHooks {
     }
 
     /// Inspect an incoming encapsulated data packet.
-    pub fn before_data_decapsulate(&self) {
-        let _ = self.event_tx.send(TriggerEvent::TunnelRecv);
+    pub fn before_data_decapsulate(&self, packet: &Packet<WgData>) {
+        if !packet.is_keepalive() {
+            let _ = self.event_tx.send(TriggerEvent::TunnelRecv);
+        }
     }
 
     /// Should be called on incoming decapsulated *data* packets.
