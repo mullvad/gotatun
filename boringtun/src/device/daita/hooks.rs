@@ -7,10 +7,7 @@ use crate::device::peer::Peer;
 use crate::packet::{self, Ip, WgData, WgKind};
 use crate::task::Task;
 use crate::udp::UdpSend;
-use crate::{
-    packet::{Packet, Wg},
-    tun::MtuWatcher,
-};
+use crate::{packet::Packet, tun::MtuWatcher};
 use maybenot::TriggerEvent;
 use rand::rngs::{OsRng, ReseedingRng};
 use std::sync::atomic::AtomicUsize;
@@ -146,19 +143,14 @@ impl DaitaHooks {
     ///
     /// Returns `None` to drop/ignore the packet, e.g. when it was queued for blocking.
     /// Returns `Some(packet)` to send the packet.
-    pub fn after_data_encapsulate(&self, packet: Packet<Wg>) -> Option<Packet<Wg>> {
+    pub fn after_data_encapsulate(&self, packet: WgKind) -> Option<WgKind> {
         // DAITA only cares about data packets.
-        let data_packet = match packet.into_kind() {
-            Ok(WgKind::Data(packet)) if packet.is_keepalive() => {
+        let data_packet = match packet {
+            WgKind::Data(packet) if packet.is_keepalive() => {
                 return Some(packet.into());
             }
-            Ok(WgKind::Data(packet)) => packet,
-            Ok(other) => return Some(other.into()),
-            Err(e) => {
-                log::error!("{e}");
-                self.packet_count.dec(1);
-                return None;
-            }
+            WgKind::Data(packet) => packet,
+            other => return Some(other),
         };
 
         self.blocking_watcher

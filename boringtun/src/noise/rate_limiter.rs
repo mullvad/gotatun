@@ -1,7 +1,7 @@
 use super::handshake::{b2s_hash, b2s_keyed_mac_16, b2s_keyed_mac_16_2, b2s_mac_24};
 use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
 use crate::noise::{TunnResult, WireGuardError};
-use crate::packet::{Packet, Wg, WgCookieReply, WgHandshakeBase, WgKind};
+use crate::packet::{Packet, WgCookieReply, WgHandshakeBase, WgKind};
 
 use constant_time_eq::constant_time_eq;
 #[cfg(feature = "mock_instant")]
@@ -151,7 +151,6 @@ impl RateLimiter {
     ) -> Result<WgKind, TunnResult> {
         let packet = packet
             .try_into_wg()
-            .and_then(Packet::<Wg>::into_kind)
             .map_err(|_err| TunnResult::Err(WireGuardError::InvalidPacket))?;
 
         // Verify and rate limit handshake messages only
