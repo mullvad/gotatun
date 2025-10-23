@@ -54,7 +54,6 @@ impl UdpSend for super::UdpSocket {
             return Ok(());
         }
 
-        let n = packets.len();
         check_send_max_number_of_packets(*MAX_GSO_SEGMENTS, packets)?;
 
         let client_socket_ref = socket2::SockRef::from(&*self.inner);
@@ -441,6 +440,7 @@ pub mod cmsg {
         }
 
         /// Create a new zeroed `Cmsg` with space for `space` bytes
+        #[cfg(feature = "windows-gro")]
         pub fn zeroed(space: usize) -> Box<Self> {
             // Allocate enough space for the header and the data
             // This will have the same alignment as `CMSGHDR` (only ensured by unit tests)
