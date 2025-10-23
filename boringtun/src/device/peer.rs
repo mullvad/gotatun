@@ -12,7 +12,7 @@ use crate::device::AllowedIps;
 use crate::device::daita::{DaitaHooks, DaitaSettings};
 use crate::noise::Tunn;
 use crate::noise::errors::WireGuardError;
-use crate::packet::{self, Packet, Wg};
+use crate::packet::{self, WgKind};
 use crate::tun::MtuWatcher;
 use crate::udp::UdpSend;
 
@@ -104,7 +104,7 @@ impl Peer {
         Ok(())
     }
 
-    pub fn update_timers(&mut self) -> Result<Option<Packet<Wg>>, WireGuardError> {
+    pub fn update_timers(&mut self) -> Result<Option<WgKind>, WireGuardError> {
         self.tunnel.update_timers()
     }
 

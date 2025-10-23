@@ -81,7 +81,6 @@ impl CheckedPayload for Ip {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv6<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv4<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Udp<P> {}
-impl CheckedPayload for Wg {}
 impl CheckedPayload for WgHandshakeInit {}
 impl CheckedPayload for WgHandshakeResp {}
 impl CheckedPayload for WgCookieReply {}
@@ -138,15 +137,10 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
     [Ipv4]                  [[u8]];
     [Ipv6]                  [[u8]];
     [Ip]                    [[u8]];
-    [Wg]                    [[u8]];
     [WgData]                [[u8]];
     [WgHandshakeInit]       [[u8]];
     [WgHandshakeResp]       [[u8]];
     [WgCookieReply]         [[u8]];
-    [WgHandshakeInit]       [Wg];
-    [WgHandshakeResp]       [Wg];
-    [WgCookieReply]         [Wg];
-    [WgData]                [Wg];
 )]
 impl From<Packet<FromType>> for Packet<ToType> {
     fn from(value: Packet<FromType>) -> Packet<ToType> {

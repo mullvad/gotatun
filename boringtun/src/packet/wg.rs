@@ -11,7 +11,7 @@ use crate::packet::{CheckedPayload, Packet};
 
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
-pub struct Wg {
+struct Wg {
     pub packet_type: WgPacketType,
     rest: [u8],
 }
@@ -31,7 +31,42 @@ pub enum WgKind {
     Data(Packet<WgData>),
 }
 
-impl From<WgKind> for Packet<Wg> {
+impl Debug for WgKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::HandshakeInit(_) => f.debug_tuple("HandshakeInit").finish(),
+            Self::HandshakeResp(_) => f.debug_tuple("HandshakeResp").finish(),
+            Self::CookieReply(_) => f.debug_tuple("CookieReply").finish(),
+            Self::Data(_) => f.debug_tuple("Data").finish(),
+        }
+    }
+}
+
+impl From<Packet<WgHandshakeInit>> for WgKind {
+    fn from(p: Packet<WgHandshakeInit>) -> Self {
+        WgKind::HandshakeInit(p)
+    }
+}
+
+impl From<Packet<WgHandshakeResp>> for WgKind {
+    fn from(p: Packet<WgHandshakeResp>) -> Self {
+        WgKind::HandshakeResp(p)
+    }
+}
+
+impl From<Packet<WgCookieReply>> for WgKind {
+    fn from(p: Packet<WgCookieReply>) -> Self {
+        WgKind::CookieReply(p)
+    }
+}
+
+impl From<Packet<WgData>> for WgKind {
+    fn from(p: Packet<WgData>) -> Self {
+        WgKind::Data(p)
+    }
+}
+
+impl From<WgKind> for Packet {
     fn from(kind: WgKind) -> Self {
         match kind {
             WgKind::HandshakeInit(packet) => packet.into(),
@@ -39,12 +74,6 @@ impl From<WgKind> for Packet<Wg> {
             WgKind::CookieReply(packet) => packet.into(),
             WgKind::Data(packet) => packet.into(),
         }
-    }
-}
-
-impl From<WgKind> for Packet {
-    fn from(kind: WgKind) -> Self {
-        <Packet<Wg>>::from(kind).into()
     }
 }
 
@@ -311,18 +340,12 @@ impl Default for WgCookieReply {
 
 impl Packet {
     /// Convert into a wireguard packet while sanity-checking packet type and size.
-    pub fn try_into_wg(self) -> eyre::Result<Packet<Wg>> {
-        let _wg = Wg::ref_from_bytes(self.as_bytes())
+    pub fn try_into_wg(self) -> eyre::Result<WgKind> {
+        let wg = Wg::ref_from_bytes(self.as_bytes())
             .map_err(|_| eyre!("Not a wireguard packet, too small."))?;
 
-        Ok(self.cast())
-    }
-}
-
-impl Packet<Wg> {
-    pub fn into_kind(self) -> eyre::Result<WgKind> {
-        let len = self.as_bytes().len();
-        match (self.packet_type, len) {
+        let len = wg.as_bytes().len();
+        match (wg.packet_type, len) {
             (WgPacketType::HandshakeInit, WgHandshakeInit::LEN) => {
                 Ok(WgKind::HandshakeInit(self.cast()))
             }

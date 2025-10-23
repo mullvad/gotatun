@@ -13,7 +13,7 @@ use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
-use crate::packet::{Packet, Wg, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind};
+use crate::packet::{Packet, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind};
 use crate::x25519;
 
 use std::collections::VecDeque;
@@ -31,7 +31,7 @@ const N_SESSIONS: usize = 8;
 pub enum TunnResult {
     Done,
     Err(WireGuardError),
-    WriteToNetwork(Packet<Wg>),
+    WriteToNetwork(WgKind),
     WriteToTunnel(Packet),
 }
 
@@ -120,7 +120,7 @@ impl Tunn {
     /// If there's an active session, return the encapsulated packet. Otherwise, if needed, return
     /// a handshake initiation. `None` is returned if a handshake is already in progress. In that
     /// case, the packet is added to a queue.
-    pub fn handle_outgoing_packet(&mut self, packet: Packet) -> Option<Packet<Wg>> {
+    pub fn handle_outgoing_packet(&mut self, packet: Packet) -> Option<WgKind> {
         match self.encapsulate_with_session(packet) {
             Ok(encapsulated_packet) => Some(encapsulated_packet.into()),
             Err(packet) => {
@@ -305,7 +305,7 @@ impl Tunn {
     }
 
     /// Get the first packet from [Self::packet_queue], and try to encapsulate it.
-    pub fn next_queued_packet(&mut self) -> Option<Packet<Wg>> {
+    pub fn next_queued_packet(&mut self) -> Option<WgKind> {
         self.dequeue_packet()
             .and_then(|packet| self.handle_outgoing_packet(packet))
     }
@@ -409,9 +409,8 @@ mod tests {
             unreachable!("expected WriteToNetwork");
         };
 
-        let packet_type = handshake_resp.packet_type;
-        let Ok(WgKind::HandshakeResp(handshake_resp)) = handshake_resp.into_kind() else {
-            unreachable!("expected WgHandshakeResp, got {packet_type:?}");
+        let WgKind::HandshakeResp(handshake_resp) = handshake_resp else {
+            unreachable!("expected WgHandshakeResp, got {handshake_resp:?}");
         };
 
         handshake_resp
@@ -428,9 +427,8 @@ mod tests {
             unreachable!("expected WriteToNetwork")
         };
 
-        let packet_type = keepalive.packet_type;
-        let Ok(WgKind::Data(keepalive)) = keepalive.into_kind() else {
-            unreachable!("expected WgData, got {packet_type:?}");
+        let WgKind::Data(keepalive) = keepalive else {
+            unreachable!("expected WgData, got {keepalive:?}");
         };
 
         keepalive
@@ -468,7 +466,6 @@ mod tests {
             .update_timers()
             .expect("update_timers should succeed")
             .unwrap();
-        let packet = packet.into_kind().unwrap();
         assert!(matches!(packet, WgKind::HandshakeInit(..)));
     }
 
@@ -590,7 +587,6 @@ mod tests {
             .handle_outgoing_packet(sent_packet_buf.clone().into_bytes())
             .unwrap();
 
-        let data = data.into_kind().unwrap();
         assert!(matches!(data, WgKind::Data(..)));
 
         let data = their_tun.handle_incoming_packet(data);

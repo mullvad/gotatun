@@ -635,10 +635,10 @@ impl<T: DeviceTransports> Device<T> {
 
                         match endpoint_addr {
                             SocketAddr::V4(_) => {
-                                udp4.send_to(packet.into_bytes(), endpoint_addr).await.ok()
+                                udp4.send_to(packet.into(), endpoint_addr).await.ok()
                             }
                             SocketAddr::V6(_) => {
-                                udp6.send_to(packet.into_bytes(), endpoint_addr).await.ok()
+                                udp6.send_to(packet.into(), endpoint_addr).await.ok()
                             }
                         };
                     }
@@ -673,7 +673,7 @@ impl<T: DeviceTransports> Device<T> {
             let parsed_packet = match rate_limiter.verify_packet(Some(addr.ip()), src_buf) {
                 Ok(packet) => packet,
                 Err(TunnResult::WriteToNetwork(cookie)) => {
-                    if let Err(_err) = udp_tx.send_to(cookie.into_bytes(), addr).await {
+                    if let Err(_err) = udp_tx.send_to(cookie.into(), addr).await {
                         log::trace!("udp.send_to failed");
                         break;
                     }
@@ -731,7 +731,7 @@ impl<T: DeviceTransports> Device<T> {
                     });
 
                     for packet in not_blocked_packets {
-                        if let Err(_err) = udp_tx.send_to(packet.into_bytes(), addr).await {
+                        if let Err(_err) = udp_tx.send_to(packet.into(), addr).await {
                             log::trace!("udp.send_to failed");
                             break;
                         }
@@ -834,9 +834,9 @@ impl<T: DeviceTransports> Device<T> {
                 };
 
                 let packet = match daita {
-                    None => packet,
+                    None => packet.into(),
                     Some(daita) => match daita.after_data_encapsulate(packet) {
-                        Some(packet) => packet,
+                        Some(packet) => packet.into(),
                         None => continue,
                     },
                 };
@@ -844,8 +844,8 @@ impl<T: DeviceTransports> Device<T> {
                 drop(peer); // release lock
 
                 let result = match peer_addr {
-                    SocketAddr::V4(..) => udp4.send_to(packet.into(), peer_addr).await,
-                    SocketAddr::V6(..) => udp6.send_to(packet.into(), peer_addr).await,
+                    SocketAddr::V4(..) => udp4.send_to(packet, peer_addr).await,
+                    SocketAddr::V6(..) => udp6.send_to(packet, peer_addr).await,
                 };
 
                 if result.is_err() {
