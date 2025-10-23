@@ -361,6 +361,17 @@ impl BitOrAssign for Reconfigure {
     }
 }
 
+pub struct PeerUpdateRequest {
+    public_key: x25519::PublicKey,
+    remove: bool,
+    replace_allowed_ips: bool,
+    endpoint: Option<SocketAddr>,
+    new_allowed_ips: Vec<AllowedIP>,
+    keepalive: Option<u16>,
+    preshared_key: Option<[u8; 32]>,
+    daita_settings: Option<DaitaSettings>,
+}
+
 impl<T: DeviceTransports> Device<T> {
     fn next_index(&mut self) -> u32 {
         self.next_index.next()
@@ -385,18 +396,17 @@ impl<T: DeviceTransports> Device<T> {
     }
 
     /// Update or add peer
-    #[allow(clippy::too_many_arguments)]
-    async fn update_peer(
-        &mut self,
-        pub_key: x25519::PublicKey,
-        remove: bool,
-        replace_allowed_ips: bool,
-        endpoint: Option<SocketAddr>,
-        new_allowed_ips: &[AllowedIP],
-        keepalive: Option<u16>,
-        preshared_key: Option<[u8; 32]>,
-        daita_settings: Option<DaitaSettings>,
-    ) {
+    async fn update_peer(&mut self, update_peer: PeerUpdateRequest) {
+        let PeerUpdateRequest {
+            public_key: pub_key,
+            remove,
+            replace_allowed_ips,
+            endpoint,
+            new_allowed_ips,
+            keepalive,
+            preshared_key,
+            daita_settings,
+        } = update_peer;
         if remove {
             // Completely remove a peer
             self.remove_peer(&pub_key).await;

@@ -5,7 +5,7 @@ pub mod command;
 
 use super::peer::AllowedIP;
 use super::{Connection, Device, Reconfigure};
-use crate::device::DeviceTransports;
+use crate::device::{DeviceTransports, PeerUpdateRequest};
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
 use eyre::{Context, bail, eyre};
@@ -388,6 +388,8 @@ async fn on_api_set(
         let _ = fwmark;
     }
 
+    let mut pending_peer_updates = vec![];
+
     for peer in peers {
         let SetPeer {
             peer:
@@ -431,19 +433,21 @@ async fn on_api_set(
             }
             None => None,
         };
+        let update_peer = PeerUpdateRequest {
+            public_key,
+            remove,
+            replace_allowed_ips,
+            endpoint,
+            new_allowed_ips: allowed_ip,
+            keepalive: persistent_keepalive_interval,
+            preshared_key,
+            daita_settings,
+        };
+        pending_peer_updates.push(update_peer);
+    }
 
-        device
-            .update_peer(
-                public_key,
-                remove,
-                replace_allowed_ips,
-                endpoint,
-                allowed_ip.as_slice(),
-                persistent_keepalive_interval,
-                preshared_key,
-                daita_settings,
-            )
-            .await;
+    for update_peer in pending_peer_updates {
+        device.update_peer(update_peer).await;
     }
 
     (SetResponse { errno: 0 }, reconfigure)
