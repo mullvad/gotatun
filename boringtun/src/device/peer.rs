@@ -31,7 +31,6 @@ pub struct Peer {
     preshared_key: Option<[u8; 32]>,
 
     daita_settings: Option<DaitaSettings>,
-    // TODO: Maybe tasks should be owned by device
     pub(crate) daita: Option<DaitaHooks>,
 }
 
