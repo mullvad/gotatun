@@ -123,7 +123,7 @@ where
         match blocking_state {
             BlockingState::Active { bypass: true, .. } if replace && padding_bypass => {
                 if let Ok(packet) = self.blocking_queue_rx.try_recv() {
-                    // Replace padding with blocked packet
+                    // Replace padding with a blocked packet
                     let peer = self.get_peer().await?;
                     self.send(packet, peer).await
                 } else {
@@ -147,7 +147,7 @@ where
                 let mut peer = self.get_peer().await?;
                 let mtu = self.mtu.get();
                 let padding_packet = self.encapsulate_padding(&mut peer, mtu).await?;
-                //  Drop the padding packet if blocking queue is full
+                //  Drop the padding packet if the blocking queue is full
                 let _ = self
                     .blocking_watcher
                     .blocking_queue_tx
