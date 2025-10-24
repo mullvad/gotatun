@@ -16,14 +16,12 @@ pub fn get_saved_ids() -> Result<(uid_t, gid_t), Error> {
         Ok(uname) => match User::from_name(&uname) {
             Ok(Some(user)) => Ok((uid_t::from(user.uid), gid_t::from(user.gid))),
             Err(e) => Err(Error::DropPrivileges(format!(
-                "Failed parse user; err: {:?}",
-                e
+                "Failed parse user; err: {e:?}"
             ))),
             Ok(None) => Err(Error::DropPrivileges("Failed to find user".to_owned())),
         },
         Err(e) => Err(Error::DropPrivileges(format!(
-            "Could not get environment variable for user; err: {:?}",
-            e
+            "Could not get environment variable for user; err: {e:?}"
         ))),
     }
     #[cfg(not(target_os = "macos"))]
