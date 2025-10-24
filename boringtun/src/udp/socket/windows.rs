@@ -12,7 +12,7 @@ use cmsg::Cmsg;
 
 use crate::{
     packet::{Packet, PacketBufPool},
-    udp::{UdpRecv, UdpSend, socket::UdpSocket},
+    udp::{UdpRecv, UdpSend, check_send_max_number_of_packets, socket::UdpSocket},
 };
 
 pub struct SendmmsgBuf {
@@ -54,8 +54,7 @@ impl UdpSend for super::UdpSocket {
             return Ok(());
         }
 
-        let n = packets.len();
-        debug_assert!(n <= *MAX_GSO_SEGMENTS);
+        check_send_max_number_of_packets(*MAX_GSO_SEGMENTS, packets)?;
 
         let client_socket_ref = socket2::SockRef::from(&*self.inner);
 
@@ -120,7 +119,7 @@ impl UdpSend for super::UdpSocket {
                     // Call sendmsg with one CMSG containing the segment size.
                     // This will send all packets in `buffer`.
 
-                    buf.cmsg.data[..4].copy_from_slice(&segment_size.to_ne_bytes());
+                    buf.cmsg.data[..4].copy_from_slice(&(segment_size as u32).to_ne_bytes());
 
                     let io_slices = [IoSlice::new(&buf.buffer); 1];
                     let daddr = socket2::SockAddr::from(dest);
@@ -441,6 +440,7 @@ pub mod cmsg {
         }
 
         /// Create a new zeroed `Cmsg` with space for `space` bytes
+        #[cfg(feature = "windows-gro")]
         pub fn zeroed(space: usize) -> Box<Self> {
             // Allocate enough space for the header and the data
             // This will have the same alignment as `CMSGHDR` (only ensured by unit tests)

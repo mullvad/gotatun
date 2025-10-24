@@ -1,16 +1,13 @@
 //! Generic buffered IP send and receive implementations.
 
-use std::sync::Arc;
+use std::{io, sync::Arc};
 
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
     task::Task,
-    tun::{IpRecv, IpSend},
+    tun::{IpRecv, IpSend, MtuWatcher},
 };
-use tokio::{
-    io,
-    sync::{Mutex, mpsc},
-};
+use tokio::sync::{Mutex, mpsc};
 
 #[derive(Clone)]
 pub struct BufferedIpSend {
@@ -53,6 +50,7 @@ pub struct BufferedIpRecv<I> {
     rx_packet_buf: Vec<Packet<Ip>>,
     _task: Arc<Task>,
     _phantom: std::marker::PhantomData<I>,
+    mtu: MtuWatcher,
 }
 
 impl<I: IpRecv> BufferedIpRecv<I> {
@@ -63,6 +61,8 @@ impl<I: IpRecv> BufferedIpRecv<I> {
     /// lifetime of [Self]. Will panic if the lock is already taken.
     pub fn new(capacity: usize, mut pool: PacketBufPool, inner: Arc<Mutex<I>>) -> Self {
         let (tx, rx) = mpsc::channel::<Packet<Ip>>(capacity);
+
+        let mtu = inner.try_lock().expect("Lock must not be taken").mtu();
 
         let task = Task::spawn("buffered IP recv", async move {
             let mut inner = inner.try_lock().expect("Lock must not be taken");
@@ -90,6 +90,7 @@ impl<I: IpRecv> BufferedIpRecv<I> {
             rx_packet_buf: vec![],
             _task: Arc::new(task),
             _phantom: std::marker::PhantomData,
+            mtu,
         }
     }
 }
@@ -99,7 +100,7 @@ impl<I: IpRecv> IpRecv for BufferedIpRecv<I> {
         &'a mut self,
         _pool: &mut PacketBufPool,
     ) -> io::Result<impl Iterator<Item = Packet<Ip>> + 'a> {
-        let max_n = self.rx.capacity();
+        let max_n = self.rx.max_capacity();
         let n = self.rx.recv_many(&mut self.rx_packet_buf, max_n).await;
         if n == 0 {
             // Channel is closed
@@ -109,5 +110,9 @@ impl<I: IpRecv> IpRecv for BufferedIpRecv<I> {
             ));
         }
         Ok(self.rx_packet_buf.drain(..n))
+    }
+
+    fn mtu(&self) -> MtuWatcher {
+        self.mtu.clone()
     }
 }

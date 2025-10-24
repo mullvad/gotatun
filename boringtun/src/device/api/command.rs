@@ -10,7 +10,10 @@ use std::{
 use eyre::{bail, ensure, eyre};
 use typed_builder::TypedBuilder;
 
-use crate::{device::peer::AllowedIP, serialization::KeyBytes};
+use crate::{
+    device::{daita::api::DaitaSettings, peer::AllowedIP},
+    serialization::KeyBytes,
+};
 
 #[derive(Debug)]
 pub enum Request {
@@ -50,6 +53,22 @@ pub struct GetPeer {
     /// Indicates the number of transmitted bytes for the previously added peer entry.
     #[builder(default, setter(strip_option, into))]
     pub tx_bytes: Option<u64>,
+
+    /// Extra bytes added due to constant-size padding of data packets for the previously added peer entry.
+    #[builder(default, setter(strip_option, into))]
+    pub tx_padding_bytes: Option<u64>,
+
+    /// Bytes of standalone padding packets transmitted for the previously added peer entry.
+    #[builder(default, setter(strip_option, into))]
+    pub tx_padding_packet_bytes: Option<u64>,
+
+    /// Total extra bytes removed due to constant-size padding of data packets for the previously added peer entry.
+    #[builder(default, setter(strip_option, into))]
+    pub rx_padding_bytes: Option<u64>,
+
+    /// Bytes of standalone padding packets received for the previously added peer entry.
+    #[builder(default, setter(strip_option, into))]
+    pub rx_padding_packet_bytes: Option<u64>,
 }
 
 #[derive(TypedBuilder, Default, Debug)]
@@ -120,6 +139,9 @@ pub struct SetPeer {
     /// This key/value combo indicates that the allowed IPs (perhaps an empty list) should replace any existing ones of the previously added peer entry, rather than append to the existing allowed IPs list.
     #[builder(setter(strip_bool))]
     pub replace_allowed_ips: bool,
+
+    #[builder(default, setter(strip_option, into))]
+    pub daita_settings: Option<DaitaSettings>,
 }
 
 #[derive(Debug)]
@@ -150,7 +172,7 @@ pub struct Peer {
     #[builder(default, setter(strip_option, into))]
     pub preshared_key: Option<SetUnset<KeyBytes>>,
 
-    /// The value for this key is either IP:port for IPv4 or [IP]:port for IPv6, indicating the
+    /// The value for this key is either `IP:port` for IPv4 or `[IP]:port` for IPv6, indicating the
     /// endpoint of the previously added peer entry.
     #[builder(default, setter(strip_option, into))]
     pub endpoint: Option<SocketAddr>,
@@ -211,6 +233,7 @@ impl SetPeer {
             remove: false,
             update_only: false,
             replace_allowed_ips: false,
+            daita_settings: None,
         }
     }
 
@@ -229,6 +252,10 @@ impl GetPeer {
             last_handshake_time_nsec: None,
             rx_bytes: None,
             tx_bytes: None,
+            tx_padding_bytes: None,
+            tx_padding_packet_bytes: None,
+            rx_padding_bytes: None,
+            rx_padding_packet_bytes: None,
         }
     }
 }
@@ -304,6 +331,10 @@ impl Display for GetPeer {
             last_handshake_time_nsec,
             rx_bytes,
             tx_bytes,
+            tx_padding_bytes: _,
+            tx_padding_packet_bytes: _,
+            rx_padding_bytes: _,
+            rx_padding_packet_bytes: _,
         } = self;
 
         let public_key = Some(&public_key);
@@ -468,6 +499,7 @@ impl SetPeer {
             remove,
             update_only,
             replace_allowed_ips,
+            daita_settings: _, // NOTE: Non-standard feature
         } = &mut set_peer;
 
         loop {

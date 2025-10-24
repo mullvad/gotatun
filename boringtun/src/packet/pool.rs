@@ -14,7 +14,8 @@ pub struct PacketBufPool<const N: usize = 4096> {
 }
 
 impl<const N: usize> PacketBufPool<N> {
-    /// Create `num_packets` packets, each `N` bytes.
+    /// Create a new [PacketBufPool] with space for at least `capacity` packets,
+    /// each allocated with a capacity of `N` bytes.
     pub fn new(capacity: usize) -> Self {
         let mut queue = VecDeque::with_capacity(capacity);
 
@@ -38,7 +39,7 @@ impl<const N: usize> PacketBufPool<N> {
     /// Get a new [Packet] from the pool.
     ///
     /// This will try to re-use an already allocated packet if possible, or allocate one otherwise.
-    pub fn get(&mut self) -> Packet<[u8]> {
+    pub fn get(&self) -> Packet<[u8]> {
         while let Some(mut pointer_to_start_of_allocation) =
             { self.queue.lock().unwrap().pop_front() }
         {
@@ -114,7 +115,7 @@ mod tests {
     /// Test buffer recycle semantics of [PacketBufPool].
     #[test]
     fn pool_buffer_recycle() {
-        let mut pool = PacketBufPool::<4096>::new(1);
+        let pool = PacketBufPool::<4096>::new(1);
 
         for i in 0..10 {
             // Get a packet and record its address.

@@ -4,20 +4,21 @@ use tokio::sync::mpsc;
 
 use crate::{
     packet::{Ip, Ipv4, Ipv6, Packet, PacketBufPool, Udp},
-    tun::{IpRecv, IpSend},
+    tun::{IpRecv, IpSend, MtuWatcher},
 };
 
 pub use crate::udp::channel::new_udp_tun_channel;
 pub use fragmentation::Ipv4Fragments;
 
 /// An implementation of [`IpRecv`] using tokio channels. Create using
-/// [`get_packet_channels`].
+/// [`new_udp_tun_channel`].
 pub struct TunChannelRx {
     pub(crate) tun_rx: mpsc::Receiver<Packet<Ip>>,
+    pub(crate) mtu: MtuWatcher,
 }
 
 /// An implementation of [`IpSend`] using tokio channels. Create using
-/// [`get_packet_channels`].
+/// [`new_udp_tun_channel`].
 pub struct TunChannelTx {
     pub(crate) tun_tx_v4: mpsc::Sender<Packet<Ipv4<Udp>>>,
     pub(crate) tun_tx_v6: mpsc::Sender<Packet<Ipv6<Udp>>>,
@@ -87,6 +88,10 @@ impl IpRecv for TunChannelRx {
             unreachable!();
         };
         Ok(iter::once(packet))
+    }
+
+    fn mtu(&self) -> MtuWatcher {
+        self.mtu.clone()
     }
 }
 

@@ -229,7 +229,7 @@ impl Session {
 
         // this won't panic since we've correctly initialized a WgData packet
         let packet = buf.try_into_wg().expect("is a wireguard packet");
-        let Ok(WgKind::Data(packet)) = packet.into_kind() else {
+        let WgKind::Data(packet) = packet else {
             unreachable!("is a wireguard data packet");
         };
 

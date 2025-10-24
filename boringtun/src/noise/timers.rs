@@ -3,7 +3,7 @@
 
 use super::errors::WireGuardError;
 use crate::noise::Tunn;
-use crate::packet::{Packet, Wg};
+use crate::packet::WgKind;
 
 use std::mem;
 use std::ops::{Index, IndexMut};
@@ -171,7 +171,7 @@ impl Tunn {
     ///
     /// This returns `Ok(None)` if no action is needed, `Ok(Some(packet))` if a packet
     /// (keepalive or handshake) should be sent, or an error if something went wrong.
-    pub fn update_timers(&mut self) -> Result<Option<Packet<Wg>>, WireGuardError> {
+    pub fn update_timers(&mut self) -> Result<Option<WgKind>, WireGuardError> {
         let mut handshake_initiation_required = false;
         let mut keepalive_required = false;
 

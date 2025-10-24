@@ -1,8 +1,8 @@
 //! Generic buffered UdpTransport implementation.
 
-use std::iter;
 use std::{net::SocketAddr, sync::Arc};
 
+use futures::{FutureExt, select};
 use tokio::{io, sync::mpsc};
 
 use crate::packet::{Packet, PacketBufPool};
@@ -12,46 +12,63 @@ use crate::udp::{UdpRecv, UdpSend};
 #[derive(Clone)]
 pub struct BufferedUdpSend {
     _send_task: Arc<Task>,
-    send_tx: mpsc::Sender<(Packet, SocketAddr)>,
+
+    /// Channel where IPv4 packets are sent to `_send_task`
+    send_tx_v4: mpsc::Sender<(Packet, SocketAddr)>,
+
+    /// Channel where IPv6 packets are sent to `_send_task`
+    send_tx_v6: mpsc::Sender<(Packet, SocketAddr)>,
 }
 
 impl BufferedUdpSend {
     pub fn new(capacity: usize, udp_tx: impl UdpSend + 'static) -> Self {
-        let (send_tx, mut send_rx) = mpsc::channel::<(Packet, SocketAddr)>(capacity);
+        let (send_tx_v4, mut send_rx_v4) = mpsc::channel::<(Packet, SocketAddr)>(capacity);
+        let (send_tx_v6, mut send_rx_v6) = mpsc::channel::<(Packet, SocketAddr)>(capacity);
 
         let send_task = Task::spawn("buffered UDP send", async move {
-            let mut buf = vec![];
-            let max_number_of_packets_to_send = udp_tx.max_number_of_packets_to_send();
+            let mut buf_v4 = vec![];
+            let mut buf_v6 = vec![];
+            let max_packet_count = udp_tx.max_number_of_packets_to_send();
             let mut send_many_buf = Default::default();
 
-            while let Some((packet, addr)) = send_rx.recv().await {
-                buf.clear();
-
-                if send_rx.is_empty() {
-                    let _ = udp_tx.send_to(packet, addr).await;
-                } else {
-                    // collect as many packets as possible into a buffer, and use send_many_to
-                    [(packet, addr)]
-                        .into_iter()
-                        .chain(iter::from_fn(|| send_rx.try_recv().ok()))
-                        .take(max_number_of_packets_to_send)
-                        .for_each(|(packet_buf, target)| buf.push((packet_buf, target)));
-
-                    // send all packets at once
-                    let _ = udp_tx
-                        .send_many_to(&mut send_many_buf, &mut buf)
-                        .await
-                        .inspect_err(|e| log::trace!("send_to_many_err: {e:#}"));
-
-                    // Release borrowed buffers
-                    buf.clear();
+            loop {
+                // use seperate channels because we musn't call `send_many_to` with mixed IPv4/IPv6.
+                let (count, buf) = select! {
+                    // recv_many is cancel-safe
+                    n = send_rx_v4.recv_many(&mut buf_v4, max_packet_count).fuse() => (n, &mut buf_v4),
+                    n = send_rx_v6.recv_many(&mut buf_v6, max_packet_count).fuse() => (n, &mut buf_v6),
+                };
+                match count {
+                    0 => break,
+                    1 => {
+                        let (packet, addr) =
+                            buf.pop().expect("recv_meny received 1 packet into buf");
+                        let _ = udp_tx
+                            .send_to(packet, addr)
+                            .await
+                            .inspect_err(|e| log::trace!("send_to_err: {e:#}"));
+                    }
+                    2.. => {
+                        // send all packets at once
+                        if let Err(e) = udp_tx.send_many_to(&mut send_many_buf, buf).await {
+                            log::trace!("send_to_many_err: {e:#}");
+                            if !buf.is_empty() {
+                                log::trace!(
+                                    "send_to_many dropping {} packets due to error.",
+                                    buf.len()
+                                );
+                                buf.clear(); // give up, drop the packets we meant to send
+                            }
+                        }
+                    }
                 }
             }
         });
 
         Self {
             _send_task: Arc::new(send_task),
-            send_tx,
+            send_tx_v4,
+            send_tx_v6,
         }
     }
 }
@@ -60,12 +77,22 @@ impl UdpSend for BufferedUdpSend {
     type SendManyBuf = ();
 
     async fn send_to(&self, packet: Packet, destination: SocketAddr) -> io::Result<()> {
-        self.send_tx.send((packet, destination)).await.unwrap();
+        let tx = match destination {
+            SocketAddr::V4(..) => &self.send_tx_v4,
+            SocketAddr::V6(..) => &self.send_tx_v6,
+        };
+        tx.send((packet, destination))
+            .await
+            .expect("receiver task is never stopped while Self exists");
         Ok(())
     }
 
     fn max_number_of_packets_to_send(&self) -> usize {
-        self.send_tx.capacity()
+        debug_assert_eq!(
+            self.send_tx_v4.max_capacity(),
+            self.send_tx_v6.max_capacity(),
+        );
+        self.send_tx_v4.max_capacity()
     }
 }
 
