@@ -148,6 +148,7 @@ pub trait UdpSend: Send + Sync + Clone {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn check_send_max_number_of_packets(
     max_number_of_packets: usize,
     packets: &[(Packet, SocketAddr)],
