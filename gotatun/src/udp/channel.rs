@@ -84,7 +84,7 @@ pub struct UdpChannelFactory {
 ///
 /// # Example
 /// ```ignore
-/// use boringtun::{
+/// use gotatun::{
 ///     device::{DeviceHandle, DeviceConfig},
 ///     tun::channel::{TunChannelTx, TunChannelRx},
 ///     udp::channel::{new_udp_tun_channel, UdpChannelFactory},

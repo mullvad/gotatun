@@ -1,11 +1,15 @@
 [package]
-name = "boringtun-cli"
+name = "gotatun-cli"
 description = "an implementation of the WireGuard® protocol designed for portability and speed"
-version = "0.6.0"
-authors = ["Noah Kennedy <nkennedy@cloudflare.com>", "Andy Grover <agrover@cloudflare.com>", "Jeff Hiner <jhiner@cloudflare.com>"]
+version = "0.1.0"
+authors = [
+    "Noah Kennedy <nkennedy@cloudflare.com>",
+    "Andy Grover <agrover@cloudflare.com>",
+    "Jeff Hiner <jhiner@cloudflare.com>",
+    "Mullvad VPN",
+]
 license = "BSD-3-Clause"
-repository = "https://github.com/cloudflare/boringtun"
-documentation = "https://docs.rs/boringtun/0.5.2/boringtun/"
+repository = "https://github.com/mullvad/gotatun"
 edition = "2024"
 
 
@@ -18,7 +22,7 @@ tracing-appender = "0.2.1"
 log = "0.4"
 tokio = { version = "1.43.0", features = ["full"] }
 
-[target.'cfg(unix)'.dependencies.boringtun]
-version = "0.6.0"
-path = "../boringtun"
+[target.'cfg(unix)'.dependencies.gotatun]
+version = "0.1.0"
+path = "../gotatun"
 features = ["device", "tun"]

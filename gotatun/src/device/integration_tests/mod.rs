@@ -1,7 +1,7 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-// This module contains some integration tests for boringtun
+// This module contains some integration tests for gotatun
 // Those tests require docker and sudo privileges to run
 #[cfg(all(test, not(target_os = "macos"), not(target_os = "windows")))]
 mod tests {
