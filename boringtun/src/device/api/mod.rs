@@ -146,7 +146,7 @@ impl ApiServer {
 
         // Bind a new socket to the path
         let api_listener =
-            UnixListener::bind(&path).map_err(|e| eyre!("Failed to bidd unix socket: {e}"))?;
+            UnixListener::bind(&path).map_err(|e| eyre!("Failed to bind unix socket: {e}"))?;
 
         let (tx, rx) = ApiServer::new();
 
