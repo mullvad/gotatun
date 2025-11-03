@@ -11,7 +11,7 @@ authors = [
 license = "BSD-3-Clause"
 repository = "https://github.com/mullvad/gotatun"
 edition = "2024"
-
+rust-version = "1.88"
 
 [target.'cfg(unix)'.dependencies]
 daemonize = "0.4.1"
