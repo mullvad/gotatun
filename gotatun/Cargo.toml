@@ -8,10 +8,13 @@ authors = [
     "Jeff Hiner <jhiner@cloudflare.com>",
     "Mullvad VPN",
 ]
-license = "BSD-3-Clause"
-repository = "https://github.com/mullvad/gotatun"
-edition = "2024"
-rust-version = "1.88"
+rust-version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+categories.workspace = true
+keywords.workspace = true
+workspace = ".."
 
 [features]
 default = []
