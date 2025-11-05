@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 /// Check that the size of type `T` is `size`. If not, panic.
 ///
 /// Returns `size` for convenience.

@@ -1,3 +1,8 @@
+// Modified by Mullvad VPN.
+// Copyright (c) 2025 Mullvad VPN.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+
 use std::time::Duration;
 
 use nix::sys::time::TimeSpec;

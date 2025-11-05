@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 //! Implementations of [UdpSend]/[UdpRecv] traits for tokio channels.
 //!
 //! See [new_udp_tun_channel]

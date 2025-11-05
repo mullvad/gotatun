@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 use futures::{FutureExt, future::pending};
 use maybenot::MachineId;
 use std::{

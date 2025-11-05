@@ -1,3 +1,8 @@
+// Modified by Mullvad VPN.
+// Copyright (c) 2025 Mullvad VPN.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+
 pub struct KeyBytes(pub [u8; 32]);
 
 impl std::str::FromStr for KeyBytes {
