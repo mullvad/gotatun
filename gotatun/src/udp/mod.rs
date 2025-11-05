@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 //! Trait abstractions for UDP sockets.
 //!
 //! [socket] contains implementation for actual UDP sockets.

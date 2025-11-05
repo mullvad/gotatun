@@ -1,4 +1,8 @@
 // Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+//
+// Modified by Mullvad VPN.
+// Copyright (c) 2025 Mullvad VPN.
+//
 // SPDX-License-Identifier: BSD-3-Clause
 
 use super::errors::WireGuardError;

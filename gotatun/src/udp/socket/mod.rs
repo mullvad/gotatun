@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 //! Implementations of [super::UdpSend] and [super::UdpRecv] traits for [UdpSocket].
 
 #[cfg(unix)]

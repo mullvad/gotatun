@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 #![deny(clippy::unwrap_used)]
 use std::fmt::{self, Debug};
 use std::mem::offset_of;
