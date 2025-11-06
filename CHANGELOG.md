@@ -15,10 +15,10 @@ Create initial release of GotaTun, a userspace [WireGuard]<sup>®</sup> implemen
 - Add support for Android.
 
 ### Changed
-- Replaced custom event loop with tokio.
+- Replace custom event loop with tokio.
 
 ### Removed
-- Removed FFI bindings.
+- Remove FFI bindings.
 
 [Boringtun]: https://github.com/cloudflare/boringtun
 [WireGuard]: https://www.wireguard.com/
