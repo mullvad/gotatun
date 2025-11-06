@@ -7,8 +7,6 @@ rust-version = "1.88"
 edition = "2024"
 repository = "https://github.com/mullvad/gotatun"
 license = "BSD-3-Clause"
-categories = ["network-programming", "asynchronous"]
-keywords = ["wireguard", "vpn"]
 
 [profile.release]
 lto = true        # Enable full link-time optimization.

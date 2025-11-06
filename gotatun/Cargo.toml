@@ -12,9 +12,8 @@ rust-version.workspace = true
 edition.workspace = true
 repository.workspace = true
 license.workspace = true
-categories.workspace = true
-keywords.workspace = true
-workspace = ".."
+categories = ["network-programming", "asynchronous"]
+keywords = ["wireguard", "vpn"]
 
 [features]
 default = []
