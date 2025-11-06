@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 use bytes::BytesMut;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use gotatun::packet::{IpNextProtocol, Ipv4, Ipv4Header, Packet};

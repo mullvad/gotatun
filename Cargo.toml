@@ -2,6 +2,12 @@
 members = ["gotatun", "gotatun-cli"]
 resolver = "2"
 
+[workspace.package]
+rust-version = "1.88"
+edition = "2024"
+repository = "https://github.com/mullvad/gotatun"
+license = "BSD-3-Clause"
+
 [profile.release]
 lto = true        # Enable full link-time optimization.
 codegen-units = 1 # Use only 1 codegen-unit to enable full optimizations.

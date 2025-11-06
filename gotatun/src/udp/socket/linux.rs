@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
 use nix::sys::socket::{MsgFlags, MultiHeaders, SockaddrStorage};
 #[cfg(target_os = "linux")]
 use nix::sys::socket::{setsockopt, sockopt};
