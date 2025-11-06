@@ -7,10 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+Create initial release of GotaTun, a userspace [WireGuard]<sup>®</sup> implementation based on [Boringtun] v.0.6.0.
 
-- Create initial release based on [Boringtun] v.0.6.0.
+### Added
 - Add DAITA V3.
 - Add multihop.
+- Add support for Android.
+
+### Changed
+- Replaced custom event loop with tokio.
+
+### Removed
+- Removed FFI bindings.
 
 [Boringtun]: https://github.com/cloudflare/boringtun
+[WireGuard]: https://www.wireguard.com/
