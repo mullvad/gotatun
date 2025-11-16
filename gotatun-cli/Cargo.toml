@@ -15,6 +15,9 @@ categories = ["command-line-utilities", "network-programming"]
 name = "gotatun"
 path = "src/main.rs"
 
+[dependencies]
+mimalloc = { workspace = true, default-features = false, optional = true }
+
 [target.'cfg(unix)'.dependencies]
 clap = { workspace = true, features = ["derive", "env"] }
 daemonize = { workspace = true }
@@ -45,8 +48,10 @@ tracing-subscriber = { workspace = true }
 
 [features]
 default = ["aws-lc-rs"]
+# Use the `aws-lc-rs` crate as the AEAD backend. Default.
+aws-lc-rs = ["gotatun/aws-lc-rs"]
+# Use mimalloc as allocator instead of system default.
+mimalloc = ["dep:mimalloc"]
 # Use the `ring` crate as the AEAD backend. Combine with
 # `--no-default-features` to avoid also pulling in `aws-lc-rs`.
 ring = ["gotatun/ring"]
-# Use the `aws-lc-rs` crate as the AEAD backend. Default.
-aws-lc-rs = ["gotatun/aws-lc-rs"]
