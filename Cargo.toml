@@ -41,6 +41,7 @@ ipnetwork = "0.21.1"
 libc = "0.2.180"
 log = "0.4.29"
 maybenot = "2.2.2"
+mimalloc = { version = "0.1", default-features = false }
 mock_instant = "0.6"
 nix = { version = "0.31", default-features = false }
 parking_lot = "0.12.5"
