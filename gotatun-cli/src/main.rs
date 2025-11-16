@@ -11,6 +11,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
 // Common imports that are used on both platforms
+#[cfg(feature = "mimalloc")]
+mod allocator;
 
 // Unix implementation
 #[cfg(unix)]
