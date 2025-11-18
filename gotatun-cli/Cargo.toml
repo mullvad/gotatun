@@ -16,6 +16,10 @@ categories = ["network-programming", "command-line-utilities"]
 keywords = ["wireguard", "vpn"]
 readme = "../README.md"
 
+[[bin]]
+name = "gotatun"
+path = "src/main.rs"
+
 [target.'cfg(unix)'.dependencies]
 daemonize = "0.4.1"
 clap = { version = "3.1.6", features = ["env"] }
