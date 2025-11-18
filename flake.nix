@@ -23,7 +23,7 @@
       nixpkgsFor = forAllSystems (system: nixpkgs.legacyPackages.${system});
     in
     {
-      formatter = forAllSystems (system: nixpkgsFor.${system}.nixfmt-rfc-style);
+      formatter = forAllSystems (system: nixpkgsFor.${system}.nixfmt-tree);
 
       devShells = forAllSystems (
         system:
@@ -34,7 +34,12 @@
         in
         {
           default = pkgs.mkShell {
-            packages = [ rust-toolchain ];
+            packages = with pkgs; [
+              toolchain
+              nixfmt-tree
+              deadnix
+              statix
+            ];
           };
         }
       );
