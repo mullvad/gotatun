@@ -11,6 +11,10 @@ A userspace [WireGuard<sup>®</sup>](https://www.wireguard.com/) implementation,
 
 By default the executable is placed in the `./target/release` folder. You can copy it to a desired location manually, or install it using `cargo install --bin gotatun --path .`.
 
+#### Nix
+
+To build the executable, simply run `nix build .#gotatun`. The final binary will be located in `result/bin/gotatun`.
+
 ### Running
 
 As per the specification, to start a tunnel use:
