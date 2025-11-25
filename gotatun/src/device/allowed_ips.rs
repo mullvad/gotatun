@@ -26,7 +26,7 @@ impl<'a, D> FromIterator<(&'a AllowedIP, D)> for AllowedIps<D> {
         let mut allowed_ips = AllowedIps::new();
 
         for (ip, data) in iter {
-            allowed_ips.insert(ip.addr, ip.cidr as u32, data);
+            allowed_ips.insert(ip.addr, u32::from(ip.cidr), data);
         }
 
         allowed_ips
