@@ -564,7 +564,7 @@ impl Handshake {
             },
         );
 
-        self.format_handshake_response(packet.into_bytes())
+        Ok(self.format_handshake_response(packet.into_bytes()))
     }
 
     pub(super) fn receive_handshake_response(
@@ -789,7 +789,7 @@ impl Handshake {
     fn format_handshake_response(
         &mut self,
         buf: crate::packet::Packet,
-    ) -> Result<(crate::packet::Packet<WgHandshakeResp>, Session), WireGuardError> {
+    ) -> (crate::packet::Packet<WgHandshakeResp>, Session) {
         let state = std::mem::replace(&mut self.state, HandshakeState::None);
         let (mut chaining_key, mut hash, peer_ephemeral_public, peer_index) = match state {
             HandshakeState::InitReceived {
@@ -868,7 +868,7 @@ impl Handshake {
 
         let packet = buf.overwrite_with(&resp);
 
-        Ok((packet, Session::new(local_index, peer_index, temp2, temp3)))
+        (packet, Session::new(local_index, peer_index, temp2, temp3))
     }
 }
 

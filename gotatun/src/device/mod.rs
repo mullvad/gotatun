@@ -588,8 +588,8 @@ impl<T: DeviceTransports> Device<T> {
 
         if let Some(conn) = &mut self.connection {
             // TODO: errors
-            conn.udp4.set_fwmark(mark).unwrap();
-            conn.udp6.set_fwmark(mark).unwrap();
+            conn.udp4.set_fwmark(mark)?;
+            conn.udp6.set_fwmark(mark)?;
         }
 
         // // Then on all currently connected sockets
