@@ -27,8 +27,8 @@ pub struct TunChannelTx {
     pub(crate) tun_tx_v6: mpsc::Sender<Packet<Ipv6<Udp>>>,
 
     /// A map of fragments, keyed by a tuple of (identification, source IP, destination IP).
-    /// The value is a BTreeMap of fragment offsets to the corresponding fragments.
-    /// The BTreeMap is used to ensure that fragments are kept in order, even if they arrive out of
+    /// The value is a `BTreeMap` of fragment offsets to the corresponding fragments.
+    /// The `BTreeMap` is used to ensure that fragments are kept in order, even if they arrive out of
     /// order. This is used to efficiently check if all fragments have been received.
     pub(crate) fragments_v4: Ipv4Fragments,
     // TODO: Ipv6 fragments?

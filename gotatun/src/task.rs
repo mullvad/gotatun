@@ -4,17 +4,17 @@
 use std::pin::Pin;
 use tokio::task::JoinHandle;
 
-/// A wrapper around [JoinHandle] that.
+/// A wrapper around [`JoinHandle`] that.
 /// - Aborts the task on Drop.
 /// - If the task returns an `Err`, logs it.
 pub struct Task {
     name: &'static str,
 
-    /// [JoinHandle] for the tokio task.
+    /// [`JoinHandle`] for the tokio task.
     ///
     /// INVARIANT: This will be `Some` until either of:
     /// - Self is dropped.
-    /// - [Self::stop] is called.
+    /// - [`Self::stop`] is called.
     handle: Option<JoinHandle<()>>,
 }
 

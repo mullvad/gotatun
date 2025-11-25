@@ -20,7 +20,7 @@ pub mod socket;
 
 /// An abstraction of `UdpSocket::bind`.
 ///
-/// See [UdpSend] and [UdpRecv].
+/// See [`UdpSend`] and [`UdpRecv`].
 pub trait UdpTransportFactory: Send + Sync + 'static {
     type Send: UdpSend + 'static;
     type RecvV4: UdpRecv + 'static;
@@ -36,7 +36,7 @@ pub trait UdpTransportFactory: Send + Sync + 'static {
     ) -> impl Future<Output = io::Result<((Self::Send, Self::RecvV4), (Self::Send, Self::RecvV6))>> + Send;
 }
 
-/// Arguments to [UdpTransportFactory::bind].
+/// Arguments to [`UdpTransportFactory::bind`].
 #[derive(Clone)]
 pub struct UdpTransportFactoryParams {
     pub addr_v4: Ipv4Addr,
@@ -57,13 +57,13 @@ pub trait UdpRecv: Send + Sync {
         pool: &mut PacketBufPool,
     ) -> impl Future<Output = io::Result<(Packet, SocketAddr)>> + Send;
 
-    /// The buffer type that is passed to [UdpRecv::recv_many_from].
+    /// The buffer type that is passed to [`UdpRecv::recv_many_from`].
     type RecvManyBuf: Default + Send;
 
     /// Receive up to multiple packets at once.
     ///
     /// # Arguments
-    /// - `recv_buf` - Internal buffer. Should be reused between calls. Create with [Default].
+    /// - `recv_buf` - Internal buffer. Should be reused between calls. Create with [`Default`].
     /// - `pool` - A pool that allocates packet buffers.
     /// - `packets` - Output. UDP datagrams and source addresses will be appended to this vector.
     ///
@@ -104,7 +104,7 @@ pub trait UdpSend: Send + Sync + Clone {
 
     // --- Optional Methods ---
 
-    /// The maximum number of packets that can be passed to [UdpSend::send_many_to].
+    /// The maximum number of packets that can be passed to [`UdpSend::send_many_to`].
     fn max_number_of_packets_to_send(&self) -> usize {
         1
     }
@@ -112,10 +112,10 @@ pub trait UdpSend: Send + Sync + Clone {
     /// Send up to [`UdpSend::max_number_of_packets_to_send`] UDP packets to the destination.
     ///
     /// # Arguments
-    /// - `send_buf` - Internal buffer. Should be reused between calls. Create with [Default].
+    /// - `send_buf` - Internal buffer. Should be reused between calls. Create with [`Default`].
     /// - `packets` - Input. Packets to send. Packets are removed from this vector when sent.
     ///
-    /// May error if [SocketAddr::V4]s and [SocketAddr::V6]s are mixed.
+    /// May error if [`SocketAddr::V4`]s and [`SocketAddr::V6`]s are mixed.
     /// May error if number of `packets.len() > max_number_of_packets_to_send`.
     ///
     /// If successful, `packets` will be empty.
@@ -137,14 +137,14 @@ pub trait UdpSend: Send + Sync + Clone {
 
     /// Get the port in use, if any.
     ///
-    /// This is applicable to UDP sockets, i.e. [tokio::net::UdpSocket].
+    /// This is applicable to UDP sockets, i.e. [`tokio::net::UdpSocket`].
     fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
         Ok(None)
     }
 
     /// Set `fwmark`.
     ///
-    /// This is applicable to UDP sockets, i.e. [tokio::net::UdpSocket].
+    /// This is applicable to UDP sockets, i.e. [`tokio::net::UdpSocket`].
     #[cfg(target_os = "linux")]
     fn set_fwmark(&self, _mark: u32) -> io::Result<()> {
         Ok(())

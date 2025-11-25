@@ -117,7 +117,7 @@ pub struct WgData {
 
 /// Wireguard data payload with a trailing tag.
 ///
-/// This is essentially a byte slice that is at least [WgData::TAG_LEN] long.
+/// This is essentially a byte slice that is at least [`WgData::TAG_LEN`] long.
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C)]
 pub struct WgDataAndTag {
@@ -179,7 +179,7 @@ pub trait WgHandshakeBase:
     const MAC1_OFF: usize;
     const MAC2_OFF: usize;
 
-    /// Get sender_id
+    /// Get `sender_id`
     fn sender_idx(&self) -> u32;
 
     /// Get a mutable reference to MAC1
