@@ -121,7 +121,7 @@ mod gro {
         fn default() -> Self {
             let mut gro_buf = BytesMut::zeroed(MAX_PACKET_COUNT * MAX_GRO_SIZE);
             let gro_bufs = [(); MAX_PACKET_COUNT];
-            let gro_bufs = gro_bufs.map(|_| gro_buf.split_to(MAX_GRO_SIZE));
+            let gro_bufs = gro_bufs.map(|()| gro_buf.split_to(MAX_GRO_SIZE));
             let gro_bufs = Box::new(gro_bufs);
 
             Self { gro_bufs }
