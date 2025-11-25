@@ -123,7 +123,7 @@ pub struct WgData {
 pub struct WgDataAndTag {
     // Don't access these field directly. The tag is actually at the end of the struct.
     _tag_size: [u8; WgData::TAG_LEN],
-    _extra: [u8],
+    extra: [u8],
 }
 
 impl WgData {
@@ -153,7 +153,7 @@ impl WgData {
     }
 
     pub fn is_keepalive(&self) -> bool {
-        self.encrypted_encapsulated_packet_and_tag._extra.is_empty()
+        self.encrypted_encapsulated_packet_and_tag.extra.is_empty()
     }
 }
 
