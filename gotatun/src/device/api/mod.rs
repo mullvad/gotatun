@@ -209,7 +209,7 @@ fn create_sock_dir() {
             // The directory is under the root user, but we want to be able to
             // delete the files there when we exit, so we need to change the owner
             libc::chown(
-                c_path.as_bytes_with_nul().as_ptr() as _,
+                c_path.as_bytes_with_nul().as_ptr().cast(),
                 saved_uid,
                 saved_gid,
             );
