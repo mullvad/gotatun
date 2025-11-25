@@ -23,14 +23,14 @@ use tokio::sync::{RwLock, mpsc, oneshot};
 #[cfg(unix)]
 const SOCK_DIR: &str = "/var/run/wireguard/";
 
-/// A server that receives [Request]s. Should be passed a [Device] when created.
+/// A server that receives [`Request`]s. Should be passed a [`Device`] when created.
 pub struct ApiServer {
     rx: mpsc::Receiver<(Request, oneshot::Sender<Response>)>,
 }
 
-/// An api client to a gotatun [Device].
+/// An api client to a gotatun [`Device`].
 ///
-/// Use [ApiClient::send] or [ApiClient::send_sync] to configure the [Device] by adding peers, etc.
+/// Use [`ApiClient::send`] or [`ApiClient::send_sync`] to configure the [`Device`] by adding peers, etc.
 #[derive(Clone)]
 pub struct ApiClient {
     tx: mpsc::Sender<(Request, oneshot::Sender<Response>)>,
@@ -171,7 +171,7 @@ impl ApiServer {
         //self.cleanup_paths.push(path.clone());
     }
 
-    /// Create an [ApiServer] from a reader+writer that speaks the official
+    /// Create an [`ApiServer`] from a reader+writer that speaks the official
     /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
     pub fn from_read_write<RW>(rw: RW) -> Self
     where
@@ -183,7 +183,7 @@ impl ApiServer {
         rx
     }
 
-    /// Wait for a [Request]. The response should be sent on the provided [`oneshot`].
+    /// Wait for a [`Request`]. The response should be sent on the provided [`oneshot`].
     pub(crate) async fn recv(&mut self) -> Option<(Request, oneshot::Sender<Response>)> {
         let (request, response_tx) = self.rx.recv().await?;
 

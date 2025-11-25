@@ -60,7 +60,7 @@ pub(crate) fn b2s_hmac(key: &[u8], data1: &[u8]) -> [u8; 32] {
 }
 
 #[inline]
-/// Like b2s_hmac, but chain data1 and data2 together
+/// Like [`b2s_hmac`], but chain data1 and data2 together
 pub(crate) fn b2s_hmac2(key: &[u8], data1: &[u8], data2: &[u8]) -> [u8; 32] {
     use blake2::digest::Update;
     type HmacBlake2s = hmac::SimpleHmac<Blake2s256>;
@@ -164,21 +164,21 @@ fn aead_chacha20_open_inner(
 }
 
 #[derive(Debug)]
-/// This struct represents a 12 byte [Tai64N](https://cr.yp.to/libtai/tai64.html) timestamp
+/// This struct represents a 12 byte [`Tai64N`](https://cr.yp.to/libtai/tai64.html) timestamp
 struct Tai64N {
     secs: u64,
     nano: u32,
 }
 
 #[derive(Debug)]
-/// This struct computes a [Tai64N](https://cr.yp.to/libtai/tai64.html) timestamp from current system time
+/// This struct computes a [`Tai64N`](https://cr.yp.to/libtai/tai64.html) timestamp from current system time
 struct TimeStamper {
     duration_at_start: Duration,
     instant_at_start: Instant,
 }
 
 impl TimeStamper {
-    /// Create a new TimeStamper
+    /// Create a new [`TimeStamper`]
     pub fn new() -> TimeStamper {
         TimeStamper {
             duration_at_start: SystemTime::now()
@@ -241,9 +241,9 @@ struct NoiseParams {
     static_private: x25519::StaticSecret,
     /// Static public key of the other party
     peer_static_public: x25519::PublicKey,
-    /// A shared key = DH(static_private, peer_static_public)
+    /// A shared key = DH(`static_private`, `peer_static_public`)
     static_shared: x25519::SharedSecret,
-    /// A pre-computation of HASH("mac1----", peer_static_public) for this peer
+    /// A pre-computation of HASH("mac1----", `peer_static_public`) for this peer
     sending_mac1_key: [u8; KEY_LEN],
     /// An optional preshared key
     preshared_key: Option<[u8; KEY_LEN]>,

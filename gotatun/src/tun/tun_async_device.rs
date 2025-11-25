@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! Implementations of [IpSend] and [IpRecv] for the [tun] crate.
+//! Implementations of [`IpSend`] and [`IpRecv`] for the [`tun`] crate.
 
 use tokio::{sync::watch, time::sleep};
 use tun::AbstractDevice;
@@ -16,7 +16,7 @@ use std::{convert::Infallible, io, iter, sync::Arc, time::Duration};
 
 /// A kernel virtual network device; a TUN device.
 ///
-/// Implements [IpSend] and [IpRecv].
+/// Implements [`IpSend`] and [`IpRecv`].
 #[derive(Clone)]
 pub struct TunDevice {
     tun: Arc<tun::AsyncDevice>,
@@ -31,7 +31,7 @@ struct TunDeviceState {
 }
 
 impl TunDevice {
-    /// Construct from a [tun::AsyncDevice].
+    /// Construct from a [`tun::AsyncDevice`].
     pub fn from_tun_device(tun: tun::AsyncDevice) -> io::Result<Self> {
         if tun.packet_information() {
             return Err(io::Error::other("packet_information is not supported"));

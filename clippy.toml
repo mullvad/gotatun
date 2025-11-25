@@ -1,0 +1,2 @@
+# Allow certain words without special formatting in doc-comments.
+doc-valid-idents = ["WireGuard", "GotaTun", "MiB", "IPv4", "IPv6", "PoT", "DoS", "Mullvad", "MullvadVPN"]

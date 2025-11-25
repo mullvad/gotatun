@@ -45,11 +45,11 @@ pub struct DaitaHooks {
 
 /// RNG used for DAITA. Same as maybenot-ffi.
 ///
-/// This setup uses [OsRng] as the source of entropy, but extrapolates each call to [OsRng] into
-/// at least [RNG_RESEED_THRESHOLD] bytes of randomness using [rand_chacha::ChaCha12Core].
+/// This setup uses [`OsRng`] as the source of entropy, but extrapolates each call to [`OsRng`] into
+/// at least [`RNG_RESEED_THRESHOLD`] bytes of randomness using [`rand_chacha::ChaCha12Core`].
 ///
-/// This is the same Rng that [rand::thread_rng] uses internally,
-/// but unlike thread_rng, this is Sync.
+/// This is the same Rng that [`rand::thread_rng`] uses internally,
+/// but unlike `thread_rng`, this is Sync.
 type Rng = ReseedingRng<rand_chacha::ChaCha12Core, OsRng>;
 const RNG_RESEED_THRESHOLD: u64 = 1024 * 64; // 64 KiB
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #![forbid(unsafe_code)]
-//! Attempts to provide the same functionality as std::time::Instant, except it
+//! Attempts to provide the same functionality as `std::time::Instant`, except it
 //! uses a timer which accounts for time when the system is asleep
 use std::time::Duration;
 
