@@ -124,7 +124,7 @@ mod unix {
                 });
 
             match daemonize.start() {
-                Ok(_) => log::info!("GotaTun started successfully"),
+                Ok(()) => log::info!("GotaTun started successfully"),
                 Err(e) => {
                     log::error!("error = {e:?}");
                     exit(1);

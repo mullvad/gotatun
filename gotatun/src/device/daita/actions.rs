@@ -60,7 +60,7 @@ where
 
         loop {
             let res = futures::select! {
-                _ = self.blocking_watcher.wait_blocking_ended().fuse() => {
+                () = self.blocking_watcher.wait_blocking_ended().fuse() => {
                     // Flush blocked packets
                     self.end_blocking(&mut blocked_packets_buf).await
                 }
