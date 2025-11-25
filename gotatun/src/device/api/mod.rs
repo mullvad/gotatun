@@ -295,7 +295,7 @@ impl<T: DeviceTransports> Device<T> {
 /// Handle a [Get] request.
 async fn on_api_get(_: Get, d: &Device<impl DeviceTransports>) -> GetResponse {
     let mut peers = vec![];
-    for (public_key, peer) in d.peers.iter() {
+    for (public_key, peer) in &d.peers {
         let peer = peer.lock().await;
         let (_, tx_bytes, rx_bytes, ..) = peer.tunnel.stats();
         let endpoint = peer.endpoint().addr;
