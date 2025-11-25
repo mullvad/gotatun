@@ -372,7 +372,7 @@ async fn on_api_set(
     }
 
     if let Some(listen_port) = listen_port {
-        reconfigure |= device.set_port(listen_port).await;
+        reconfigure |= device.set_port(listen_port);
     }
 
     if let Some(fwmark) = fwmark {
