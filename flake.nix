@@ -30,7 +30,9 @@
         let
           pkgs = nixpkgsFor.${system};
           rust-bin = rust-overlay.lib.mkRustBin { } pkgs;
-          toolchain = rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+          toolchain = (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
+            extensions = [ "rust-analyzer" ];
+          };
         in
         {
           default = pkgs.mkShell {
