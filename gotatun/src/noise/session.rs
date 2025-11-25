@@ -99,10 +99,10 @@ impl ReceivingKeyCounterValidator {
             // Drop if too far back
             return Err(WireGuardError::InvalidCounter);
         }
-        if !self.check_bit(counter) {
-            Ok(())
-        } else {
+        if self.check_bit(counter) {
             Err(WireGuardError::DuplicateCounter)
+        } else {
+            Ok(())
         }
     }
 
