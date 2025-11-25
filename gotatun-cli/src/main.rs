@@ -120,7 +120,7 @@ mod unix {
                     } else {
                         eprintln!("GotaTun failed to start");
                         exit(1);
-                    };
+                    }
                 });
 
             match daemonize.start() {

@@ -153,7 +153,7 @@ impl BlockingWatcher {
             }
         } else {
             pending().await
-        };
+        }
     }
 
     /// Add the packet to the blocking queue if blocking is active, otherwise return it to be sent immediately.

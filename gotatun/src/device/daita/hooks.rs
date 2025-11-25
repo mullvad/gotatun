@@ -137,7 +137,7 @@ impl DaitaHooks {
         let mut packet: Packet = packet.into();
         if let Ok(padded_bytes) = pad_to_constant_size(&mut packet, mtu) {
             self.padding_overhead.tx_padding_bytes += padded_bytes;
-        };
+        }
 
         packet
     }

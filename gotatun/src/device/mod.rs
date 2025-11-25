@@ -322,7 +322,7 @@ impl<T: DeviceTransports> DeviceHandle<T> {
 
         if let Some(api_task) = device.api.take() {
             api_task.stop().await;
-        };
+        }
 
         if let Some(connection) = device.connection.take() {
             connection.stop().await;
@@ -658,7 +658,7 @@ impl<T: DeviceTransports> Device<T> {
                     Ok(None) => {}
                     Err(WireGuardError::ConnectionExpired) => {}
                     Err(e) => log::error!("Timer error = {e:?}: {e:?}"),
-                };
+                }
             }
         }
     }
@@ -728,7 +728,7 @@ impl<T: DeviceTransports> Device<T> {
                 && let WgKind::Data(packet) = &parsed_packet
             {
                 daita.before_data_decapsulate(packet);
-            };
+            }
 
             match tunnel.handle_incoming_packet(parsed_packet) {
                 TunnResult::Done => (),
@@ -786,7 +786,7 @@ impl<T: DeviceTransports> Device<T> {
                         break;
                     }
                 }
-            };
+            }
         }
 
         Ok(())
