@@ -461,14 +461,14 @@ impl<T: DeviceTransports> Device<T> {
             None,
         );
 
-        let allowed_ips = if !replace_allowed_ips {
+        let allowed_ips = if replace_allowed_ips {
+            new_allowed_ips.to_vec()
+        } else {
             // append old allowed IPs
             old_allowed_ips
                 .into_iter()
                 .chain(new_allowed_ips.iter().copied())
                 .collect()
-        } else {
-            new_allowed_ips.to_vec()
         };
 
         let peer = Peer::new(
@@ -525,11 +525,11 @@ impl<T: DeviceTransports> Device<T> {
     }
 
     fn set_port(&mut self, port: u16) -> Reconfigure {
-        if self.port != port {
+        if self.port == port {
+            Reconfigure::No
+        } else {
             self.port = port;
             Reconfigure::Yes
-        } else {
-            Reconfigure::No
         }
     }
 
