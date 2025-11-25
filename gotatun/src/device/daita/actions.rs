@@ -109,7 +109,7 @@ where
                     expires_at: new_expiry,
                 };
             }
-        };
+        }
         Ok(())
     }
 

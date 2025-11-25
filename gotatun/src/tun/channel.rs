@@ -417,7 +417,7 @@ mod fragmentation {
                     } else {
                         assert_eq!(*count, 4, "Should reassemble on last fragment");
                         assert_eq!(udp_packet.payload.as_bytes(), &payload2[..]);
-                    };
+                    }
                     assert_eq!(udp_packet.header.fragment_offset(), 0);
                     assert!(!udp_packet.header.more_fragments());
                     assert_eq!(

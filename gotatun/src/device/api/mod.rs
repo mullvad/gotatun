@@ -88,7 +88,7 @@ impl ApiClient {
                 log::info!("{:?}", response.to_string());
                 if let Err(e) = writeln!(&rw, "{response}") {
                     log::error!("Failed to write API response: {e}");
-                };
+                }
 
                 Ok(())
             };
@@ -102,7 +102,7 @@ impl ApiClient {
                     {
                         log::error!("Failed to handle UAPI request: {e:#}");
                         return;
-                    };
+                    }
                     return;
                 };
 
@@ -121,7 +121,7 @@ impl ApiClient {
                 if let Err(e) = make_request(&lines) {
                     log::error!("Failed to handle UAPI request: {e:#}");
                     return;
-                };
+                }
 
                 lines.clear();
             }
