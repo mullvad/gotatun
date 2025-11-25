@@ -524,7 +524,7 @@ impl<T: DeviceTransports> Device<T> {
         device
     }
 
-    async fn set_port(&mut self, port: u16) -> Reconfigure {
+    fn set_port(&mut self, port: u16) -> Reconfigure {
         if self.port != port {
             self.port = port;
             Reconfigure::Yes
