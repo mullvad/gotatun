@@ -60,7 +60,7 @@ where
 
         loop {
             let res = futures::select! {
-                _ = self.blocking_watcher.wait_blocking_ended().fuse() => {
+                () = self.blocking_watcher.wait_blocking_ended().fuse() => {
                     // Flush blocked packets
                     self.end_blocking(&mut blocked_packets_buf).await
                 }
@@ -109,7 +109,7 @@ where
                     expires_at: new_expiry,
                 };
             }
-        };
+        }
         Ok(())
     }
 
@@ -149,7 +149,7 @@ where
             BlockingState::Active { .. } => {
                 let mut peer = self.get_peer().await?;
                 let mtu = self.mtu.get();
-                let padding_packet = self.encapsulate_padding(&mut peer, mtu).await?;
+                let padding_packet = self.encapsulate_padding(&mut peer, mtu)?;
                 //  Drop the padding packet if the blocking queue is full
                 let _ = self
                     .blocking_watcher
@@ -219,7 +219,7 @@ where
         }
     }
 
-    pub(crate) async fn encapsulate_padding(
+    pub(crate) fn encapsulate_padding(
         &self,
         peer: &mut tokio::sync::OwnedMutexGuard<Peer>,
         mtu: u16,
@@ -247,7 +247,7 @@ where
         let mtu = self.mtu.get();
         let mut peer = self.get_peer().await?;
 
-        let packet = self.encapsulate_padding(&mut peer, mtu).await?;
+        let packet = self.encapsulate_padding(&mut peer, mtu)?;
         self.send(packet, peer).await?;
         Ok(())
     }

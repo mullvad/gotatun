@@ -1,9 +1,9 @@
 // Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! Implementations of [UdpSend]/[UdpRecv] traits for tokio channels.
+//! Implementations of [`UdpSend`]/[`UdpRecv`] traits for tokio channels.
 //!
-//! See [new_udp_tun_channel]
+//! See [`new_udp_tun_channel`]
 
 use bytes::BytesMut;
 use pnet_packet::ip::IpNextHeaderProtocols;
@@ -48,22 +48,22 @@ type Ipv6UdpReceiver = mpsc::Receiver<Packet<Ipv6<Udp>>>;
 /// An implementation of [`UdpRecv`] for IPv4 UDP packets. Create using
 /// [`new_udp_tun_channel`].
 pub struct UdpChannelV4Rx {
-    /// The receiver for IPv4 UDP packets. Source: [UdpChannelFactory::udp_rx_v4]
+    /// The receiver for IPv4 UDP packets. Source: [`UdpChannelFactory::udp_rx_v4`]
     udp_rx_v4: OwnedMutexGuard<Ipv4UdpReceiver>,
 }
 
 /// An implementation of [`UdpRecv`] for IPv6 UDP packets. Create using
 /// [`new_udp_tun_channel`].
 pub struct UdpChannelV6Rx {
-    /// The receiver for IPv6 UDP packets. Source: [UdpChannelFactory::udp_rx_v6].
+    /// The receiver for IPv6 UDP packets. Source: [`UdpChannelFactory::udp_rx_v6`].
     udp_rx_v6: OwnedMutexGuard<Ipv6UdpReceiver>,
 }
 
 /// An implementation of [`UdpTransportFactory`], producing [`UdpSend`] and
 /// [`UdpRecv`] implementations that use channels to send and receive packets.
 ///
-/// Calling [UdpChannelFactory::bind] will claim exclusive access to the inner channels for the
-/// lifetime of the [UdpChannelTx], [UdpChannelV6Rx] and [UdpChannelV4Rx]. Another call to `bind`
+/// Calling [`UdpChannelFactory::bind`] will claim exclusive access to the inner channels for the
+/// lifetime of the [`UdpChannelTx`], [`UdpChannelV6Rx`] and [`UdpChannelV4Rx`]. Another call to `bind`
 /// will *block* until those have been dropped.
 pub struct UdpChannelFactory {
     source_ip_v4: Ipv4Addr,
@@ -76,7 +76,7 @@ pub struct UdpChannelFactory {
 
 /// Create a set of channel-based TUN and UDP endpoints for in-process device communication.
 ///
-/// This function returns a tuple of ([TunChannelTx], [TunChannelRx], [UdpChannelFactory]), which
+/// This function returns a tuple of ([`TunChannelTx`], [`TunChannelRx`], [`UdpChannelFactory`]), which
 /// can be used to connect two wireguard devices (e.g. for a multihop tunnel or for testing)
 /// entirely in memory.
 ///

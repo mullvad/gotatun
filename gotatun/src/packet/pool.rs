@@ -17,7 +17,7 @@ pub struct PacketBufPool<const N: usize = 4096> {
 }
 
 impl<const N: usize> PacketBufPool<N> {
-    /// Create a new [PacketBufPool] with space for at least `capacity` packets,
+    /// Create a new [`PacketBufPool`] with space for at least `capacity` packets,
     /// each allocated with a capacity of `N` bytes.
     pub fn new(capacity: usize) -> Self {
         let mut queue = VecDeque::with_capacity(capacity);
@@ -39,7 +39,7 @@ impl<const N: usize> PacketBufPool<N> {
         self.capacity
     }
 
-    /// Get a new [Packet] from the pool.
+    /// Get a new [`Packet`] from the pool.
     ///
     /// This will try to re-use an already allocated packet if possible, or allocate one otherwise.
     pub fn get(&self) -> Packet<[u8]> {
@@ -86,9 +86,9 @@ impl<const N: usize> PacketBufPool<N> {
     }
 }
 
-/// This sends a previously allocated [BytesMut] back to [PacketBufPool] when its dropped.
+/// This sends a previously allocated [`BytesMut`] back to [`PacketBufPool`] when its dropped.
 pub struct ReturnToPool {
-    /// This is a pointer to the allocation allocated by [PacketBufPool::get].
+    /// This is a pointer to the allocation allocated by [`PacketBufPool::get`].
     /// By making sure we never modify this (by calling reserve, etc), we can efficiently re-use this allocation later.
     ///
     /// INVARIANT:

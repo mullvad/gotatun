@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! Implementations of [super::UdpSend] and [super::UdpRecv] traits for [UdpSocket].
+//! Implementations of [`super::UdpSend`] and [`super::UdpRecv`] traits for [`UdpSocket`].
 
 #[cfg(unix)]
 use std::os::fd::AsFd;
@@ -12,15 +12,15 @@ use super::{UdpRecv, UdpTransportFactory, UdpTransportFactoryParams};
 #[cfg(target_os = "linux")]
 use super::UdpSend;
 
-/// Implementations of [super::UdpSend]/[super::UdpRecv] for all targets
+/// Implementations of [`super::UdpSend`]/[`super::UdpRecv`] for all targets
 #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "windows")))]
 mod generic;
 
-/// Implementations of [super::UdpSend]/[super::UdpRecv] for linux
+/// Implementations of [`super::UdpSend`]/[`super::UdpRecv`] for linux
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod linux;
 
-/// Implementations of [super::UdpSend]/[super::UdpRecv] for windows
+/// Implementations of [`super::UdpSend`]/[`super::UdpRecv`] for windows
 #[cfg(target_os = "windows")]
 mod windows;
 

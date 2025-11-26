@@ -23,14 +23,14 @@ use tokio::sync::{RwLock, mpsc, oneshot};
 #[cfg(unix)]
 const SOCK_DIR: &str = "/var/run/wireguard/";
 
-/// A server that receives [Request]s. Should be passed a [Device] when created.
+/// A server that receives [`Request`]s. Should be passed a [`Device`] when created.
 pub struct ApiServer {
     rx: mpsc::Receiver<(Request, oneshot::Sender<Response>)>,
 }
 
-/// An api client to a gotatun [Device].
+/// An api client to a gotatun [`Device`].
 ///
-/// Use [ApiClient::send] or [ApiClient::send_sync] to configure the [Device] by adding peers, etc.
+/// Use [`ApiClient::send`] or [`ApiClient::send_sync`] to configure the [`Device`] by adding peers, etc.
 #[derive(Clone)]
 pub struct ApiClient {
     tx: mpsc::Sender<(Request, oneshot::Sender<Response>)>,
@@ -88,7 +88,7 @@ impl ApiClient {
                 log::info!("{:?}", response.to_string());
                 if let Err(e) = writeln!(&rw, "{response}") {
                     log::error!("Failed to write API response: {e}");
-                };
+                }
 
                 Ok(())
             };
@@ -102,7 +102,7 @@ impl ApiClient {
                     {
                         log::error!("Failed to handle UAPI request: {e:#}");
                         return;
-                    };
+                    }
                     return;
                 };
 
@@ -121,7 +121,7 @@ impl ApiClient {
                 if let Err(e) = make_request(&lines) {
                     log::error!("Failed to handle UAPI request: {e:#}");
                     return;
-                };
+                }
 
                 lines.clear();
             }
@@ -171,7 +171,7 @@ impl ApiServer {
         //self.cleanup_paths.push(path.clone());
     }
 
-    /// Create an [ApiServer] from a reader+writer that speaks the official
+    /// Create an [`ApiServer`] from a reader+writer that speaks the official
     /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
     pub fn from_read_write<RW>(rw: RW) -> Self
     where
@@ -183,7 +183,7 @@ impl ApiServer {
         rx
     }
 
-    /// Wait for a [Request]. The response should be sent on the provided [`oneshot`].
+    /// Wait for a [`Request`]. The response should be sent on the provided [`oneshot`].
     pub(crate) async fn recv(&mut self) -> Option<(Request, oneshot::Sender<Response>)> {
         let (request, response_tx) = self.rx.recv().await?;
 
@@ -209,7 +209,7 @@ fn create_sock_dir() {
             // The directory is under the root user, but we want to be able to
             // delete the files there when we exit, so we need to change the owner
             libc::chown(
-                c_path.as_bytes_with_nul().as_ptr() as _,
+                c_path.as_bytes_with_nul().as_ptr().cast(),
                 saved_uid,
                 saved_gid,
             );
@@ -295,7 +295,7 @@ impl<T: DeviceTransports> Device<T> {
 /// Handle a [Get] request.
 async fn on_api_get(_: Get, d: &Device<impl DeviceTransports>) -> GetResponse {
     let mut peers = vec![];
-    for (public_key, peer) in d.peers.iter() {
+    for (public_key, peer) in &d.peers {
         let peer = peer.lock().await;
         let (_, tx_bytes, rx_bytes, ..) = peer.tunnel.stats();
         let endpoint = peer.endpoint().addr;
@@ -372,7 +372,7 @@ async fn on_api_set(
     }
 
     if let Some(listen_port) = listen_port {
-        reconfigure |= device.set_port(listen_port).await;
+        reconfigure |= device.set_port(listen_port);
     }
 
     if let Some(fwmark) = fwmark {

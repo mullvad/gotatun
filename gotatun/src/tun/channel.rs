@@ -27,8 +27,8 @@ pub struct TunChannelTx {
     pub(crate) tun_tx_v6: mpsc::Sender<Packet<Ipv6<Udp>>>,
 
     /// A map of fragments, keyed by a tuple of (identification, source IP, destination IP).
-    /// The value is a BTreeMap of fragment offsets to the corresponding fragments.
-    /// The BTreeMap is used to ensure that fragments are kept in order, even if they arrive out of
+    /// The value is a `BTreeMap` of fragment offsets to the corresponding fragments.
+    /// The `BTreeMap` is used to ensure that fragments are kept in order, even if they arrive out of
     /// order. This is used to efficiently check if all fragments have been received.
     pub(crate) fragments_v4: Ipv4Fragments,
     // TODO: Ipv6 fragments?
@@ -417,7 +417,7 @@ mod fragmentation {
                     } else {
                         assert_eq!(*count, 4, "Should reassemble on last fragment");
                         assert_eq!(udp_packet.payload.as_bytes(), &payload2[..]);
-                    };
+                    }
                     assert_eq!(udp_packet.header.fragment_offset(), 0);
                     assert!(!udp_packet.header.more_fragments());
                     assert_eq!(

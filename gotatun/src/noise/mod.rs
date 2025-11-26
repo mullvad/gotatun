@@ -50,7 +50,7 @@ impl From<WireGuardError> for TunnResult {
 pub struct Tunn {
     /// The handshake currently in progress
     handshake: handshake::Handshake,
-    /// The N_SESSIONS most recent sessions, index is session id modulo N_SESSIONS
+    /// The [`N_SESSIONS`] most recent sessions, index is session id modulo [`N_SESSIONS`]
     sessions: [Option<session::Session>; N_SESSIONS],
     /// Index of most recently used session
     current: usize,
@@ -137,7 +137,7 @@ impl Tunn {
         }
     }
 
-    /// Encapsulate a single packet into a [WgData].
+    /// Encapsulate a single packet into a [`WgData`].
     ///
     /// Returns `Err(original_packet)` if there is no active session.
     pub fn encapsulate_with_session(&mut self, packet: Packet) -> Result<Packet<WgData>, Packet> {
@@ -246,7 +246,7 @@ impl Tunn {
         }
     }
 
-    /// Decrypt a data packet, and return a [TunnResult::WriteToTunnelV4] (or `*V6`) if successful.
+    /// Decrypt a data packet, and return a [`TunnResult::WriteToTunnel`] (`Ipv4` or `Ipv6`) if successful.
     fn handle_data(&mut self, packet: Packet<WgData>) -> Result<TunnResult, WireGuardError> {
         let decapsulated_packet = self.decapsulate_with_session(packet)?;
 
@@ -283,7 +283,7 @@ impl Tunn {
 
     /// Return a new handshake if appropriate, or `None` otherwise.
     ///
-    /// If force_resend is true will send a new handshake, even if a handshake
+    /// If `force_resend` is true will send a new handshake, even if a handshake
     /// is already in progress (for example when a handshake times out)
     pub fn format_handshake_initiation(
         &mut self,
@@ -309,7 +309,7 @@ impl Tunn {
         Some(packet)
     }
 
-    /// Get the first packet from [Self::packet_queue], and try to encapsulate it.
+    /// Get the first packet from [`Self::packet_queue`], and try to encapsulate it.
     pub fn next_queued_packet(&mut self) -> Option<WgKind> {
         self.dequeue_packet()
             .and_then(|packet| self.handle_outgoing_packet(packet))

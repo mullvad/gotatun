@@ -120,11 +120,11 @@ mod unix {
                     } else {
                         eprintln!("GotaTun failed to start");
                         exit(1);
-                    };
+                    }
                 });
 
             match daemonize.start() {
-                Ok(_) => log::info!("GotaTun started successfully"),
+                Ok(()) => log::info!("GotaTun started successfully"),
                 Err(e) => {
                     log::error!("error = {e:?}");
                     exit(1);

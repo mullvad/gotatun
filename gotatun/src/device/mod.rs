@@ -140,7 +140,7 @@ pub struct Device<T: DeviceTransports> {
     /// The tun device reader.
     ///
     /// This is `Arc<Mutex>`:ed because:
-    /// - The task responsible from reading from the tun_rx must have ownership of it.
+    /// - The task responsible from reading from the `tun_rx` must have ownership of it.
     /// - We must be able to claim the ownership after that task is stopped.
     ///
     /// This is implemented by the task taking the lock upon startup, and holding it until it is
@@ -322,7 +322,7 @@ impl<T: DeviceTransports> DeviceHandle<T> {
 
         if let Some(api_task) = device.api.take() {
             api_task.stop().await;
-        };
+        }
 
         if let Some(connection) = device.connection.take() {
             connection.stop().await;
@@ -461,14 +461,14 @@ impl<T: DeviceTransports> Device<T> {
             None,
         );
 
-        let allowed_ips = if !replace_allowed_ips {
+        let allowed_ips = if replace_allowed_ips {
+            new_allowed_ips.to_vec()
+        } else {
             // append old allowed IPs
             old_allowed_ips
                 .into_iter()
                 .chain(new_allowed_ips.iter().copied())
                 .collect()
-        } else {
-            new_allowed_ips.to_vec()
         };
 
         let peer = Peer::new(
@@ -484,9 +484,9 @@ impl<T: DeviceTransports> Device<T> {
         self.peers_by_idx.insert(index, Arc::clone(&peer));
         self.peers.insert(pub_key, Arc::clone(&peer));
 
-        for AllowedIP { addr, cidr } in &allowed_ips {
+        for AllowedIP { addr, cidr } in allowed_ips {
             self.peers_by_ip
-                .insert(*addr, *cidr as _, Arc::clone(&peer));
+                .insert(addr, u32::from(cidr), Arc::clone(&peer));
         }
 
         log::info!("Peer added");
@@ -524,12 +524,12 @@ impl<T: DeviceTransports> Device<T> {
         device
     }
 
-    async fn set_port(&mut self, port: u16) -> Reconfigure {
-        if self.port != port {
+    fn set_port(&mut self, port: u16) -> Reconfigure {
+        if self.port == port {
+            Reconfigure::No
+        } else {
             self.port = port;
             Reconfigure::Yes
-        } else {
-            Reconfigure::No
         }
     }
 
@@ -587,9 +587,8 @@ impl<T: DeviceTransports> Device<T> {
         self.fwmark = Some(mark);
 
         if let Some(conn) = &mut self.connection {
-            // TODO: errors
-            conn.udp4.set_fwmark(mark).unwrap();
-            conn.udp6.set_fwmark(mark).unwrap();
+            conn.udp4.set_fwmark(mark)?;
+            conn.udp6.set_fwmark(mark)?;
         }
 
         // // Then on all currently connected sockets
@@ -659,7 +658,7 @@ impl<T: DeviceTransports> Device<T> {
                     Ok(None) => {}
                     Err(WireGuardError::ConnectionExpired) => {}
                     Err(e) => log::error!("Timer error = {e:?}: {e:?}"),
-                };
+                }
             }
         }
     }
@@ -729,7 +728,7 @@ impl<T: DeviceTransports> Device<T> {
                 && let WgKind::Data(packet) = &parsed_packet
             {
                 daita.before_data_decapsulate(packet);
-            };
+            }
 
             match tunnel.handle_incoming_packet(parsed_packet) {
                 TunnResult::Done => (),
@@ -787,7 +786,7 @@ impl<T: DeviceTransports> Device<T> {
                         break;
                     }
                 }
-            };
+            }
         }
 
         Ok(())

@@ -132,7 +132,7 @@ impl Peer {
     }
 
     pub fn allowed_ips(&self) -> impl Iterator<Item = (IpAddr, u8)> + '_ {
-        self.allowed_ips.iter().map(|(_, ip, cidr)| (ip, cidr))
+        self.allowed_ips.iter().map(|((), ip, cidr)| (ip, cidr))
     }
 
     pub fn time_since_last_handshake(&self) -> Option<std::time::Duration> {

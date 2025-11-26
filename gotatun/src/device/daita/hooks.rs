@@ -45,11 +45,11 @@ pub struct DaitaHooks {
 
 /// RNG used for DAITA. Same as maybenot-ffi.
 ///
-/// This setup uses [OsRng] as the source of entropy, but extrapolates each call to [OsRng] into
-/// at least [RNG_RESEED_THRESHOLD] bytes of randomness using [rand_chacha::ChaCha12Core].
+/// This setup uses [`OsRng`] as the source of entropy, but extrapolates each call to [`OsRng`] into
+/// at least [`RNG_RESEED_THRESHOLD`] bytes of randomness using [`rand_chacha::ChaCha12Core`].
 ///
-/// This is the same Rng that [rand::thread_rng] uses internally,
-/// but unlike thread_rng, this is Sync.
+/// This is the same Rng that [`rand::thread_rng`] uses internally,
+/// but unlike `thread_rng`, this is Sync.
 type Rng = ReseedingRng<rand_chacha::ChaCha12Core, OsRng>;
 const RNG_RESEED_THRESHOLD: u64 = 1024 * 64; // 64 KiB
 
@@ -95,10 +95,10 @@ impl DaitaHooks {
             .packet_count(packet_count.clone())
             .blocking_queue_rx(blocking_queue_rx)
             .blocking_watcher(blocking_watcher.clone())
-            .peer(peer.clone())
-            .packet_pool(packet_pool.clone())
-            .udp_send_v4(udp_send_v4.clone())
-            .udp_send_v6(udp_send_v6.clone())
+            .peer(peer)
+            .packet_pool(packet_pool)
+            .udp_send_v4(udp_send_v4)
+            .udp_send_v6(udp_send_v6)
             .mtu(mtu.clone())
             .tx_padding_packet_bytes(padding_overhead.tx_padding_packet_bytes.clone())
             .event_tx(event_tx.downgrade())
@@ -137,7 +137,7 @@ impl DaitaHooks {
         let mut packet: Packet = packet.into();
         if let Ok(padded_bytes) = pad_to_constant_size(&mut packet, mtu) {
             self.padding_overhead.tx_padding_bytes += padded_bytes;
-        };
+        }
 
         packet
     }

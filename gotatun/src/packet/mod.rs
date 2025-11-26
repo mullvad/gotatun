@@ -35,7 +35,7 @@ pub use wg::*;
 /// It can be safely decoded into a `Packet<Ipv4>` using [`Packet::try_into_ip`],
 /// and further decoded into a `Packet<Ipv4<Udp>>` using [`Packet::try_into_udp`].
 ///
-/// [Packet] uses [BytesMut] as the backing buffer.
+/// [`Packet`] uses [`BytesMut`] as the backing buffer.
 ///
 /// ```
 /// use gotatun::packet::*;
@@ -74,7 +74,7 @@ pub struct PacketInner {
 
 /// A marker trait that indicates that a [Packet] contains a valid payload of a specific type.
 ///
-/// For example, [CheckedPayload] is implemented for [`Ipv4<[u8]>`], and a [`Packet<Ipv4<[u8]>>>`]
+/// For example, [`CheckedPayload`] is implemented for [`Ipv4<[u8]>`], and a [`Packet<Ipv4<[u8]>>>`]
 /// can only be constructed through [`Packet::<[u8]>::try_into_ip`], which checks that the IPv4
 /// header is valid.
 pub trait CheckedPayload: FromBytes + IntoBytes + KnownLayout + Immutable + Unaligned {}
@@ -207,8 +207,8 @@ impl Packet<[u8]> {
 
     /// Convert this untyped packet into either an IPv4 or IPv6 packet.
     ///
-    /// This will truncate to [Ipv4Header::total_len](crate::packet::Ipv4Header::total_len)
-    /// or [Ipv6Header::payload_length](crate::packet::Ipv6Header::payload_length).
+    /// This will truncate to [`Ipv4Header::total_len`](crate::packet::Ipv4Header::total_len)
+    /// or [`Ipv6Header::payload_length`](crate::packet::Ipv6Header::payload_length).
     pub fn try_into_ipvx(self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
         self.try_into_ip()?.try_into_ipvx()
     }

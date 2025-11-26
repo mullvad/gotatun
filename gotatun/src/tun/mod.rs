@@ -38,9 +38,9 @@ pub trait IpRecv: Send + Sync + 'static {
         pool: &mut PacketBufPool,
     ) -> impl Future<Output = io::Result<impl Iterator<Item = Packet<Ip>> + Send + 'a>> + Send;
 
-    /// Get an MTU watcher for this [IpRecv].
+    /// Get an MTU watcher for this [`IpRecv`].
     ///
-    /// The maximum transfer unit is the max size of packets returned from [IpRecv::recv].
+    /// The maximum transfer unit is the max size of packets returned from [`IpRecv::recv`].
     /// Don't rely on this being true though. Since the MTU might change, it is inherently racey.
     fn mtu(&self) -> MtuWatcher;
 }

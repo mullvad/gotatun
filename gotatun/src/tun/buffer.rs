@@ -57,7 +57,7 @@ pub struct BufferedIpRecv<I> {
 }
 
 impl<I: IpRecv> BufferedIpRecv<I> {
-    /// Create a new [BufferedIpRecv].
+    /// Create a new [`BufferedIpRecv`].
     ///
     /// This takes an `Arc<Mutex<I>>` because the inner `I` will be re-used after [Self] is
     /// dropped. We will take the mutex lock when this function is called, and hold onto it for the

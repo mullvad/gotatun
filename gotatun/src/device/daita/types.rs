@@ -146,14 +146,14 @@ impl BlockingWatcher {
     pub async fn wait_blocking_ended(&self) {
         if let BlockingState::Active { expires_at, .. } = &*self.blocking_state.read().await {
             futures::select! {
-                _ = tokio::time::sleep_until(*expires_at).fuse() => {},
-                _ = self.blocking_abort.notified().fuse() => {
+                () = tokio::time::sleep_until(*expires_at).fuse() => {},
+                () = self.blocking_abort.notified().fuse() => {
                     log::trace!("Blocking aborted with remaining capacity {}", self.blocking_queue_tx.capacity());
                 },
             }
         } else {
             pending().await
-        };
+        }
     }
 
     /// Add the packet to the blocking queue if blocking is active, otherwise return it to be sent immediately.

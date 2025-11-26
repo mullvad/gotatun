@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! Generic buffered UdpTransport implementation.
+//! Generic buffered `UdpTransport` implementation.
 
 use std::{net::SocketAddr, sync::Arc};
 
@@ -128,7 +128,7 @@ impl BufferedUdpReceive {
 
                 for (packet_buf, src) in packet_bufs.drain(..) {
                     match recv_tx.try_send((packet_buf, src)) {
-                        Ok(_) => (),
+                        Ok(()) => (),
                         Err(mpsc::error::TrySendError::Full((packet_buf, addr))) => {
                             if recv_tx.send((packet_buf, addr)).await.is_err() {
                                 // Buffer dropped

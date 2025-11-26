@@ -39,13 +39,13 @@ pub struct Get;
 pub struct GetPeer {
     pub peer: Peer,
 
-    /// This and [Self::last_handshake_time_nsec] indicate in the number of seconds and
+    /// This and [`Self::last_handshake_time_nsec`] indicate in the number of seconds and
     /// nano-seconds of the most recent handshake for the previously added peer entry, expressed
     /// relative to the Unix epoch.
     #[builder(default, setter(strip_option, into))]
     pub last_handshake_time_sec: Option<u64>,
 
-    /// See [Self::last_handshake_time_sec].
+    /// See [`Self::last_handshake_time_sec`].
     #[builder(default, setter(strip_option, into))]
     pub last_handshake_time_nsec: Option<u32>,
 
@@ -229,7 +229,7 @@ impl Peer {
 }
 
 impl SetPeer {
-    /// Create a new [SetPeer] with only `public_key` set.
+    /// Create a new [`SetPeer`] with only `public_key` set.
     pub fn new(public_key: impl Into<KeyBytes>) -> Self {
         Self {
             peer: Peer::new(public_key),
@@ -247,7 +247,7 @@ impl SetPeer {
 }
 
 impl GetPeer {
-    /// Create a new [GetPeer] with only `public_key` set.
+    /// Create a new [`GetPeer`] with only `public_key` set.
     pub fn new(public_key: impl Into<KeyBytes>) -> Self {
         Self {
             peer: Peer::new(public_key),
@@ -474,7 +474,7 @@ impl FromStr for Set {
 impl<T: FromStr> FromStr for SetUnset<T> {
     type Err = T::Err;
 
-    /// Parse an empty str to [SetUnset::Unset], and a non-empty str `T`.
+    /// Parse an empty str to [`SetUnset::Unset`], and a non-empty str `T`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(if s.is_empty() {
             SetUnset::Unset
