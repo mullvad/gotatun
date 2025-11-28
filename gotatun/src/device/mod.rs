@@ -132,6 +132,8 @@ where
     type IpRecv = IP;
 }
 
+const WORKER_THREADS: usize = 8;
+
 pub struct Device<T: DeviceTransports> {
     key_pair: Option<(x25519::StaticSecret, x25519::PublicKey)>,
     fwmark: Option<u32>,
@@ -180,7 +182,7 @@ pub(crate) struct Connection<T: DeviceTransports> {
     /// The task that handles keepalives/heartbeats/etc.
     timers: Task,
 
-    outgoing_encapsulate: Task,
+    outgoing_encapsulate: Vec<Task>,
 
     outgoing_lookup_peer: Task,
 }
@@ -227,8 +229,23 @@ impl<T: DeviceTransports> Connection<T> {
 
         drop(device_guard);
 
+        let mut outgoing_encapsulate = vec![];
+        let encryption_txs = [(); WORKER_THREADS].map(|_| {
+            let (tx, rx) = mpsc::channel(100);
+            let task = Task::spawn(
+                "outgoing_encapsulate",
+                // TODO: remove T
+                Device::<T>::outgoing_encapsulate(
+                    buffered_udp_tx_v4.clone(),
+                    buffered_udp_tx_v6.clone(),
+                    rx,
+                ),
+            );
+            outgoing_encapsulate.push(task);
+            tx
+        });
+
         // Start device tasks
-        let (encapsulate_tx, encapsulate_rx) = mpsc::channel(1000);
         let outgoing_lookup_peer = Task::spawn(
             "outgoing_lookup_peer",
             Device::outgoing_lookup_peer(
@@ -237,19 +254,12 @@ impl<T: DeviceTransports> Connection<T> {
                 buffered_udp_tx_v4.clone(),
                 buffered_udp_tx_v6.clone(),
                 pool.clone(),
-                encapsulate_tx,
+                encryption_txs,
             ),
         );
+
         // TODO: spawn one per cpu core and pin?
-        let outgoing_encapsulate = Task::spawn(
-            "outgoing_encapsulate",
-            // TODO: remove T
-            Device::<T>::outgoing_encapsulate(
-                buffered_udp_tx_v4.clone(),
-                buffered_udp_tx_v6.clone(),
-                encapsulate_rx,
-            ),
-        );
+
         let timers = Task::spawn(
             "handle_timers",
             Device::handle_timers(
@@ -814,8 +824,10 @@ impl<T: DeviceTransports> Device<T> {
         udp4: impl UdpSend,
         udp6: impl UdpSend,
         mut packet_pool: PacketBufPool,
-        encapsulate_tx: mpsc::Sender<(Arc<Session>, Packet, SocketAddr)>,
+        encapsulate_txs: [mpsc::Sender<(Arc<Session>, Packet, SocketAddr)>; WORKER_THREADS],
     ) {
+        let mut encapsulate_i = 0;
+
         loop {
             let packets = match tun_rx.recv(&mut packet_pool).await {
                 Ok(packets) => packets,
@@ -859,10 +871,11 @@ impl<T: DeviceTransports> Device<T> {
 
                 tunnel.update_timers_for_outgoing(&packet);
                 if let Some(session) = tunnel.get_current_session() {
-                    encapsulate_tx
-                        .send((session, packet, peer_addr))
-                        .await
-                        .unwrap();
+                    encapsulate_i = (encapsulate_i + 1) % WORKER_THREADS;
+                    let tx = &encapsulate_txs[encapsulate_i];
+                    if tx.send((session, packet, peer_addr)).await.is_err() {
+                        return;
+                    }
                 } else {
                     // If there is no session, queue the packet for future retry
                     tunnel.queue_packet(packet);
@@ -976,8 +989,12 @@ impl<T: DeviceTransports> Connection<T> {
             incoming_ipv4.stop(),
             incoming_ipv6.stop(),
             timers.stop(),
-            outgoing_encapsulate.stop(),
             outgoing_lookup_peer.stop(),
+            async {
+                for task in outgoing_encapsulate {
+                    task.stop().await
+                }
+            }
         );
     }
 }
