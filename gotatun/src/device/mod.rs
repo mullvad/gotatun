@@ -23,15 +23,15 @@ use std::ops::BitOrAssign;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::join;
-use tokio::sync::Mutex;
 use tokio::sync::RwLock;
+use tokio::sync::{Mutex, mpsc};
 
 use crate::device::daita::DaitaSettings;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
-use crate::noise::{Tunn, TunnResult};
-use crate::packet::{PacketBufPool, WgKind};
+use crate::noise::{Tunn, TunnResult, session::Session};
+use crate::packet::{Packet, PacketBufPool, WgKind};
 use crate::task::Task;
 use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
 #[cfg(feature = "tun")]
@@ -180,8 +180,9 @@ pub(crate) struct Connection<T: DeviceTransports> {
     /// The task that handles keepalives/heartbeats/etc.
     timers: Task,
 
-    /// The task that reads traffic from the TUN device.
-    outgoing: Task,
+    outgoing_encapsulate: Task,
+
+    outgoing_lookup_peer: Task,
 }
 
 impl<T: DeviceTransports> Connection<T> {
@@ -227,14 +228,26 @@ impl<T: DeviceTransports> Connection<T> {
         drop(device_guard);
 
         // Start device tasks
-        let outgoing = Task::spawn(
-            "handle_outgoing",
-            Device::handle_outgoing(
+        let (encapsulate_tx, encapsulate_rx) = mpsc::channel(1000);
+        let outgoing_lookup_peer = Task::spawn(
+            "outgoing_lookup_peer",
+            Device::outgoing_lookup_peer(
                 Arc::downgrade(&device),
                 buffered_ip_rx,
                 buffered_udp_tx_v4.clone(),
                 buffered_udp_tx_v6.clone(),
                 pool.clone(),
+                encapsulate_tx,
+            ),
+        );
+        // TODO: spawn one per cpu core and pin?
+        let outgoing_encapsulate = Task::spawn(
+            "outgoing_encapsulate",
+            // TODO: remove T
+            Device::<T>::outgoing_encapsulate(
+                buffered_udp_tx_v4.clone(),
+                buffered_udp_tx_v6.clone(),
+                encapsulate_rx,
             ),
         );
         let timers = Task::spawn(
@@ -274,7 +287,8 @@ impl<T: DeviceTransports> Connection<T> {
             incoming_ipv4,
             incoming_ipv6,
             timers,
-            outgoing,
+            outgoing_encapsulate,
+            outgoing_lookup_peer,
         })
     }
 }
@@ -794,12 +808,13 @@ impl<T: DeviceTransports> Device<T> {
     }
 
     /// Read from tunnel device, encapsulate, and write to UDP socket for the corresponding peer
-    async fn handle_outgoing(
+    async fn outgoing_lookup_peer(
         device: Weak<RwLock<Self>>,
         mut tun_rx: impl IpRecv,
         udp4: impl UdpSend,
         udp6: impl UdpSend,
         mut packet_pool: PacketBufPool,
+        encapsulate_tx: mpsc::Sender<(Arc<Session>, Packet, SocketAddr)>,
     ) {
         loop {
             let packets = match tun_rx.recv(&mut packet_pool).await {
@@ -842,28 +857,53 @@ impl<T: DeviceTransports> Device<T> {
                     None => packet.into(),
                 };
 
-                let Some(packet) = tunnel.handle_outgoing_packet(packet) else {
-                    continue;
-                };
-
-                let packet = match daita {
-                    None => packet.into(),
-                    Some(daita) => match daita.after_data_encapsulate(packet) {
-                        Some(packet) => packet.into(),
-                        None => continue,
-                    },
-                };
-
-                drop(peer); // release lock
-
-                let result = match peer_addr {
-                    SocketAddr::V4(..) => udp4.send_to(packet, peer_addr).await,
-                    SocketAddr::V6(..) => udp6.send_to(packet, peer_addr).await,
-                };
-
-                if result.is_err() {
-                    break;
+                tunnel.update_timers_for_outgoing(&packet);
+                if let Some(session) = tunnel.get_current_session() {
+                    encapsulate_tx
+                        .send((session, packet, peer_addr))
+                        .await
+                        .unwrap();
+                } else {
+                    // If there is no session, queue the packet for future retry
+                    tunnel.queue_packet(packet);
+                    // Initiate a new handshake if none is in progress
+                    if let Some(handshake) = tunnel.format_handshake_initiation(false) {
+                        let result = match peer_addr {
+                            SocketAddr::V4(..) => udp4.send_to(handshake.into(), peer_addr).await,
+                            SocketAddr::V6(..) => udp6.send_to(handshake.into(), peer_addr).await,
+                        };
+                        if result.is_err() {
+                            // TODO: incorrect?
+                            break;
+                        }
+                    }
                 }
+            }
+        }
+    }
+
+    /// Encapsulate packets, and forward to UDP socket
+    // TODO: consider preserving packet ordering
+    async fn outgoing_encapsulate(
+        udp4: impl UdpSend,
+        udp6: impl UdpSend,
+        mut encapsulate_rx: mpsc::Receiver<(Arc<Session>, Packet, SocketAddr)>,
+    ) {
+        loop {
+            let Some((session, packet, peer_addr)) = encapsulate_rx.recv().await else {
+                break;
+            };
+
+            let packet = session.format_packet_data(packet);
+
+            let packet = packet.into();
+            let result = match peer_addr {
+                SocketAddr::V4(..) => udp4.send_to(packet, peer_addr).await,
+                SocketAddr::V6(..) => udp6.send_to(packet, peer_addr).await,
+            };
+
+            if result.is_err() {
+                break;
             }
         }
     }
@@ -927,7 +967,8 @@ impl<T: DeviceTransports> Connection<T> {
             incoming_ipv4,
             incoming_ipv6,
             timers,
-            outgoing,
+            outgoing_encapsulate,
+            outgoing_lookup_peer,
         } = self;
         drop((udp4, udp6));
 
@@ -935,7 +976,8 @@ impl<T: DeviceTransports> Connection<T> {
             incoming_ipv4.stop(),
             incoming_ipv6.stop(),
             timers.stop(),
-            outgoing.stop(),
+            outgoing_encapsulate.stop(),
+            outgoing_lookup_peer.stop(),
         );
     }
 }

@@ -199,7 +199,7 @@ impl Session {
     }
 
     /// Encapsulate `packet` into a [WgData].
-    pub(super) fn format_packet_data(&self, packet: Packet) -> Packet<WgData> {
+    pub fn format_packet_data(&self, packet: Packet) -> Packet<WgData> {
         let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
 
         let len = DATA_OFFSET + AEAD_SIZE + packet.len();
