@@ -326,12 +326,7 @@ mod fragmentation {
             let total_len = Ipv4Header::LEN + payload.len();
             let mut buf = BytesMut::zeroed(total_len);
             let ipv4 = Ipv4::<[u8]>::mut_from_bytes(&mut buf).unwrap();
-            ipv4.header = Ipv4Header::new_for_length(
-                source_ip,
-                destination_ip,
-                IpNextProtocol::Udp,
-                payload.len() as u16,
-            );
+            ipv4.header = Ipv4Header::new(source_ip, destination_ip, IpNextProtocol::Udp, payload);
             ipv4.header.identification = identification.into();
             let mut flags = Ipv4FlagsFragmentOffset::new();
             flags.set_more_fragments(more_fragments);
