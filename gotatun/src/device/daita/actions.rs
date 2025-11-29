@@ -206,8 +206,9 @@ where
             let count = packets.len();
             if let Ok(()) = udp_send.send_many_to(&mut send_many_bufs, packets).await {
                 // In case not all packets are drained from `packets`, we count remaining items
-                let sent = count - packets.len();
-                self.packet_count.dec(sent as u32);
+                let sent =
+                    u32::try_from(count - packets.len()).expect("Queued packets exceeds u32::MAX");
+                self.packet_count.dec(sent);
                 let event_tx = self.event_tx.upgrade().ok_or(ErrorAction::Close)?;
                 // Trigger a TunnelSent for each packet sent
                 for _ in 0..sent {
