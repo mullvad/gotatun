@@ -202,9 +202,10 @@ mod fragmentation {
             // Note that the fragments are sorted by fragment_offset, so we only need to check
             // the previous and next fragments.
             if let Some(prev_i) = i.checked_sub(1)
-                && let prev_frag_offset = &fragments[prev_i].header.fragment_offset()
+                && let prev_frag_offset = fragments[prev_i].header.fragment_offset()
                 && let prev_frag_len = &fragments[prev_i].payload.len()
-                && prev_frag_offset + (prev_frag_len / 8) as u16 > fragment_offset
+                && usize::from(prev_frag_offset) + (prev_frag_len / 8usize)
+                    > usize::from(fragment_offset)
             {
                 log::trace!(
                     "Fragment with offset {fragment_offset} overlaps with existing fragment with offset {prev_frag_offset} and length {prev_frag_len} for ID {id:?}, dropping",
@@ -213,7 +214,8 @@ mod fragmentation {
             }
             if let Some(next_frag) = fragments.get(i)
                 && let next_frag_offset = next_frag.header.fragment_offset()
-                && fragment_offset + (fragment_len / 8) as u16 > next_frag_offset
+                && usize::from(fragment_offset) + (fragment_len / 8usize)
+                    > usize::from(next_frag_offset)
             {
                 log::trace!(
                     "Fragment with offset {fragment_offset} and length {fragment_len} overlaps with existing fragment with offset {next_frag_offset} for ID {id:?}, dropping",
