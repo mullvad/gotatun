@@ -67,6 +67,10 @@ impl Ipv4Header {
     /// Construct an IPv4 header with the reasonable defaults.
     ///
     /// `payload` field is used to set the length and compute the checksum.
+    ///
+    /// # Panics
+    ///
+    /// If `payload` length exceed [`u16::MAX`].
     #[allow(dead_code)]
     pub const fn new(
         source: Ipv4Addr,
@@ -74,7 +78,14 @@ impl Ipv4Header {
         protocol: IpNextProtocol,
         payload: &[u8],
     ) -> Self {
-        Self::new_for_length(source, destination, protocol, payload.len() as u16)
+        let payload_len = payload.len();
+        // TODO: For correctness, should we subtract the header size?
+        assert!(payload_len <= (u16::MAX as usize));
+        // We've checked that casting payload_len from a usize to u16
+        // will not truncate the value.
+        #[allow(clippy::cast_possible_truncation)]
+        let payload_len = payload_len as u16;
+        Self::new_for_length(source, destination, protocol, payload_len)
     }
 
     pub const fn new_for_length(
@@ -83,7 +94,9 @@ impl Ipv4Header {
         protocol: IpNextProtocol,
         payload_len: u16,
     ) -> Self {
-        let header_len = size_of::<Ipv4Header>() as u16;
+        // Ipv4Header::LEN has a known size.
+        #[allow(clippy::cast_possible_truncation)]
+        let header_len = Ipv4Header::LEN as u16;
         let total_len = header_len + payload_len;
 
         Self {
