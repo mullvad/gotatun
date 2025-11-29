@@ -239,7 +239,7 @@ mod fragmentation {
             let fragment_offsets = fragments.iter().map(|f| f.header.fragment_offset());
             let fragment_ends = fragments
                 .iter()
-                .map(|f| f.header.fragment_offset() + (f.payload.len() / 8) as u16);
+                .map(|f| f.header.fragment_offset() + u16::try_from(f.payload.len() / 8).unwrap());
             if !fragment_offsets
                 .skip(1)
                 .eq(fragment_ends.take(fragments.len() - 1))
@@ -270,7 +270,9 @@ mod fragmentation {
             // longer fragmented.
             {
                 let ip = Ipv4::<Udp>::mut_from_bytes(&mut bytes).expect("valid IP packet buffer");
-                ip.header.total_len = (len as u16).into();
+                ip.header.total_len = u16::try_from(len)
+                    .expect("IPv4 packet length does not exceed u16::MAX")
+                    .into();
 
                 // This set `more_fragments`, `dont_fragment`, and `fragment_offset` to zero.
                 ip.header.flags_and_fragment_offset.zero();
