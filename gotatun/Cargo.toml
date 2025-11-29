@@ -99,3 +99,8 @@ harness = false
 [[bench]]
 name = "throughput_benches"
 harness = false
+
+[lints.clippy]
+cast_lossless = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
