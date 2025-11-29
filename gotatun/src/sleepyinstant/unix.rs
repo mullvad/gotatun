@@ -44,7 +44,9 @@ impl Instant {
         if tv_sec < 0 {
             None
         } else {
-            Some(Duration::new(tv_sec as _, tv_nsec as _))
+            let tv_sec = tv_sec.try_into().ok()?;
+            let tv_nsec = tv_nsec.try_into().ok()?;
+            Some(Duration::new(tv_sec, tv_nsec))
         }
     }
 
