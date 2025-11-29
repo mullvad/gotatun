@@ -346,7 +346,9 @@ mod fragmentation {
             let udp = Udp::<[u8]>::mut_from_bytes(&mut buf).unwrap();
             udp.header.source_port = 1234u16.into();
             udp.header.destination_port = 5678u16.into();
-            udp.header.length = (len as u16).into();
+            udp.header.length = u16::try_from(len)
+                .expect("UDP size does not exceed u16::MAX")
+                .into();
             udp.header.checksum = 0.into();
             assert_eq!(udp.payload.len(), payload.len());
             udp.payload.copy_from_slice(payload);
@@ -500,7 +502,8 @@ mod fragmentation {
 
             let mut second_halves = Vec::new();
             for i in 0..super::MAX_CONCURRENT_FRAGS {
-                let id = 1000 + i as u16;
+                let id = u16::try_from(1000 + i)
+                    .expect("The number of concurrent fragmentations are in the order of ~100");
                 // Each packet will be split into 2 fragments
                 let frag1 = make_ip_fragment(id, src, dst, 0, true, &payload[0..8]);
                 let frag2 = make_ip_fragment(id, src, dst, 1, false, &payload[8..]);
