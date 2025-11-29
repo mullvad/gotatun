@@ -485,8 +485,7 @@ impl<T: DeviceTransports> Device<T> {
         self.peers.insert(pub_key, Arc::clone(&peer));
 
         for AllowedIP { addr, cidr } in allowed_ips {
-            self.peers_by_ip
-                .insert(addr, u32::from(cidr), Arc::clone(&peer));
+            self.peers_by_ip.insert(addr, cidr, Arc::clone(&peer));
         }
 
         log::info!("Peer added");
