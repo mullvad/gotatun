@@ -202,9 +202,10 @@ mod fragmentation {
             // Note that the fragments are sorted by fragment_offset, so we only need to check
             // the previous and next fragments.
             if let Some(prev_i) = i.checked_sub(1)
-                && let prev_frag_offset = &fragments[prev_i].header.fragment_offset()
+                && let prev_frag_offset = fragments[prev_i].header.fragment_offset()
                 && let prev_frag_len = &fragments[prev_i].payload.len()
-                && prev_frag_offset + (prev_frag_len / 8) as u16 > fragment_offset
+                && usize::from(prev_frag_offset) + (prev_frag_len / 8usize)
+                    > usize::from(fragment_offset)
             {
                 log::trace!(
                     "Fragment with offset {fragment_offset} overlaps with existing fragment with offset {prev_frag_offset} and length {prev_frag_len} for ID {id:?}, dropping",
@@ -213,7 +214,8 @@ mod fragmentation {
             }
             if let Some(next_frag) = fragments.get(i)
                 && let next_frag_offset = next_frag.header.fragment_offset()
-                && fragment_offset + (fragment_len / 8) as u16 > next_frag_offset
+                && usize::from(fragment_offset) + (fragment_len / 8usize)
+                    > usize::from(next_frag_offset)
             {
                 log::trace!(
                     "Fragment with offset {fragment_offset} and length {fragment_len} overlaps with existing fragment with offset {next_frag_offset} for ID {id:?}, dropping",
@@ -237,7 +239,7 @@ mod fragmentation {
             let fragment_offsets = fragments.iter().map(|f| f.header.fragment_offset());
             let fragment_ends = fragments
                 .iter()
-                .map(|f| f.header.fragment_offset() + (f.payload.len() / 8) as u16);
+                .map(|f| f.header.fragment_offset() + u16::try_from(f.payload.len() / 8).unwrap());
             if !fragment_offsets
                 .skip(1)
                 .eq(fragment_ends.take(fragments.len() - 1))
@@ -268,7 +270,9 @@ mod fragmentation {
             // longer fragmented.
             {
                 let ip = Ipv4::<Udp>::mut_from_bytes(&mut bytes).expect("valid IP packet buffer");
-                ip.header.total_len = (len as u16).into();
+                ip.header.total_len = u16::try_from(len)
+                    .expect("IPv4 packet length does not exceed u16::MAX")
+                    .into();
 
                 // This set `more_fragments`, `dont_fragment`, and `fragment_offset` to zero.
                 ip.header.flags_and_fragment_offset.zero();
@@ -322,12 +326,7 @@ mod fragmentation {
             let total_len = Ipv4Header::LEN + payload.len();
             let mut buf = BytesMut::zeroed(total_len);
             let ipv4 = Ipv4::<[u8]>::mut_from_bytes(&mut buf).unwrap();
-            ipv4.header = Ipv4Header::new_for_length(
-                source_ip,
-                destination_ip,
-                IpNextProtocol::Udp,
-                payload.len() as u16,
-            );
+            ipv4.header = Ipv4Header::new(source_ip, destination_ip, IpNextProtocol::Udp, payload);
             ipv4.header.identification = identification.into();
             let mut flags = Ipv4FlagsFragmentOffset::new();
             flags.set_more_fragments(more_fragments);
@@ -347,7 +346,9 @@ mod fragmentation {
             let udp = Udp::<[u8]>::mut_from_bytes(&mut buf).unwrap();
             udp.header.source_port = 1234u16.into();
             udp.header.destination_port = 5678u16.into();
-            udp.header.length = (len as u16).into();
+            udp.header.length = u16::try_from(len)
+                .expect("UDP size does not exceed u16::MAX")
+                .into();
             udp.header.checksum = 0.into();
             assert_eq!(udp.payload.len(), payload.len());
             udp.payload.copy_from_slice(payload);
@@ -501,7 +502,8 @@ mod fragmentation {
 
             let mut second_halves = Vec::new();
             for i in 0..super::MAX_CONCURRENT_FRAGS {
-                let id = 1000 + i as u16;
+                let id = u16::try_from(1000 + i)
+                    .expect("The number of concurrent fragmentations are in the order of ~100");
                 // Each packet will be split into 2 fragments
                 let frag1 = make_ip_fragment(id, src, dst, 0, true, &payload[0..8]);
                 let frag2 = make_ip_fragment(id, src, dst, 1, false, &payload[8..]);
