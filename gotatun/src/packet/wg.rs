@@ -27,10 +27,18 @@ impl Debug for Wg {
     }
 }
 
+/// An owned WireGuard [`Packet`] where its [`WgPacketType`] is known. See [`Packet::try_into_wg`].
 pub enum WgKind {
+    /// An owned [`WgHandshakeInit`] packet.
     HandshakeInit(Packet<WgHandshakeInit>),
+
+    /// An owned [`WgHandshakeResp`] packet.
     HandshakeResp(Packet<WgHandshakeResp>),
+
+    /// An owned [`WgCookieReply`] packet.
     CookieReply(Packet<WgCookieReply>),
+
+    /// An owned [`WgData`] packet.
     Data(Packet<WgData>),
 }
 
@@ -80,18 +88,28 @@ impl From<WgKind> for Packet {
     }
 }
 
+/// The first byte of a WireGuard packet. This indentifies its type.
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq, Clone, Copy)]
 #[repr(transparent)]
 pub struct WgPacketType(pub u8);
 
 impl WgPacketType {
     #![allow(non_upper_case_globals)]
+
+    /// The type discriminant of a [`WgHandshakeInit`] packet.
     pub const HandshakeInit: WgPacketType = WgPacketType(1);
+
+    /// The type discriminant of a [`WgHandshakeResp`] packet.
     pub const HandshakeResp: WgPacketType = WgPacketType(2);
+
+    /// The type discriminant of a [`WgCookieReply`] packet.
     pub const CookieReply: WgPacketType = WgPacketType(3);
+
+    /// The type discriminant of a [`WgData`] packet.
     pub const Data: WgPacketType = WgPacketType(4);
 }
 
+/// Header of [`WgData`].
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C)]
 pub struct WgDataHeader {
@@ -99,7 +117,11 @@ pub struct WgDataHeader {
     // TODO: make private
     pub packet_type: WgPacketType,
     _reserved_zeros: [u8; 4 - size_of::<WgPacketType>()],
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub receiver_idx: little_endian::U32,
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub counter: little_endian::U64,
 }
 
@@ -108,14 +130,19 @@ impl WgDataHeader {
     pub const LEN: usize = size_must_be::<Self>(16);
 }
 
+/// WireGuard data packet.
+/// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 pub struct WgData {
+    /// Data packet header.
     pub header: WgDataHeader,
+
+    /// Data packet payload and tag.
     pub encrypted_encapsulated_packet_and_tag: WgDataAndTag,
 }
 
-/// Wireguard data payload with a trailing tag.
+/// WireGuard data payload with a trailing tag.
 ///
 /// This is essentially a byte slice that is at least [`WgData::TAG_LEN`] long.
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
@@ -129,6 +156,8 @@ pub struct WgDataAndTag {
 impl WgData {
     /// Data packet overhead: header and tag (16 bytes)
     pub const OVERHEAD: usize = WgDataHeader::LEN + WgData::TAG_LEN;
+
+    /// Length of the trailing `tag` field, in bytes.
     pub const TAG_LEN: usize = 16;
 
     /// Strip the tag from the encapsulated packet.
@@ -152,8 +181,14 @@ impl WgData {
         tag
     }
 
-    pub fn is_keepalive(&self) -> bool {
+    /// Returns true if the payload is empty.
+    pub const fn is_empty(&self) -> bool {
         self.encrypted_encapsulated_packet_and_tag._extra.is_empty()
+    }
+
+    /// [`Self::is_empty`]. Keepalive packets are just data packets with no payload.
+    pub const fn is_keepalive(&self) -> bool {
+        self.is_empty()
     }
 }
 
@@ -171,27 +206,34 @@ impl std::ops::DerefMut for WgDataAndTag {
     }
 }
 
-/// Trait for common handshake fields
+/// Trait for fields common to both [`WgHandshakeInit`] and [`WgHandshakeResp`].
 pub trait WgHandshakeBase:
     FromBytes + IntoBytes + KnownLayout + Unaligned + Immutable + CheckedPayload
 {
+    /// Length of the handshake packet, in bytes.
     const LEN: usize;
+
+    /// Offset of the `mac1` field.
+    /// This is used for getting a byte slice up until `mac1`, i.e. `&packet[..MAC1_OFF]`.
     const MAC1_OFF: usize;
+
+    /// Offset of the `mac2` field.
+    /// This is used for getting a byte slice up until `mac2`, i.e. `&packet[..MAC2_OFF]`.
     const MAC2_OFF: usize;
 
-    /// Get `sender_id`
+    /// Get `sender_id`.
     fn sender_idx(&self) -> u32;
 
-    /// Get a mutable reference to MAC1
+    /// Get a mutable reference to `mac1`.
     fn mac1_mut(&mut self) -> &mut [u8; 16];
 
-    /// Get a mutable reference to MAC2
+    /// Get a mutable reference to `mac2`.
     fn mac2_mut(&mut self) -> &mut [u8; 16];
 
-    /// Get MAC1
+    /// Get `mac1`.
     fn mac1(&self) -> &[u8; 16];
 
-    /// Get MAC2
+    /// Get `mac2`.
     fn mac2(&self) -> &[u8; 16];
 
     /// Get packet until MAC1. Precisely equivalent to `packet[0..offsetof(packet.mac1)]`.
@@ -207,32 +249,44 @@ pub trait WgHandshakeBase:
     }
 }
 
+/// WireGuard handshake initialization packet.
+/// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 pub struct WgHandshakeInit {
     // INVARIANT: Must be WgPacketType::HandshakeInit
     packet_type: WgPacketType,
     _reserved_zeros: [u8; 4 - size_of::<WgPacketType>()],
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub sender_idx: little_endian::U32,
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub unencrypted_ephemeral: [u8; 32],
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub encrypted_static: [u8; 48],
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub encrypted_timestamp: [u8; 28],
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub mac1: [u8; 16],
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub mac2: [u8; 16],
 }
 
 impl WgHandshakeInit {
+    /// Length of the packet, in bytes.
     pub const LEN: usize = size_must_be::<Self>(148);
 
+    /// Construct a [`WgHandshakeInit`] where all fields except `packet_type` are zeroed.
     pub fn new() -> Self {
         Self {
             packet_type: WgPacketType::HandshakeInit,
             ..WgHandshakeInit::new_zeroed()
         }
-    }
-
-    pub fn packet_type(&self) -> WgPacketType {
-        self.packet_type
     }
 }
 
@@ -268,23 +322,39 @@ impl Default for WgHandshakeInit {
     }
 }
 
+/// WireGuard handshake response packet.
+/// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 pub struct WgHandshakeResp {
     // INVARIANT: Must be WgPacketType::HandshakeResp
     packet_type: WgPacketType,
     _reserved_zeros: [u8; 4 - size_of::<WgPacketType>()],
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub sender_idx: little_endian::U32,
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub receiver_idx: little_endian::U32,
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub unencrypted_ephemeral: [u8; 32],
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub encrypted_nothing: [u8; 16],
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub mac1: [u8; 16],
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub mac2: [u8; 16],
 }
 
 impl WgHandshakeResp {
+    /// Length of the packet, in bytes.
     pub const LEN: usize = size_must_be::<Self>(92);
 
+    /// Construct a [`WgHandshakeResp`].
     pub fn new(sender_idx: u32, receiver_idx: u32, unencrypted_ephemeral: [u8; 32]) -> Self {
         Self {
             packet_type: WgPacketType::HandshakeResp,
@@ -325,20 +395,30 @@ impl WgHandshakeBase for WgHandshakeResp {
     }
 }
 
+/// WireGuard cookie reply packet.
+/// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 pub struct WgCookieReply {
     // INVARIANT: Must be WgPacketType::CookieReply
     packet_type: WgPacketType,
     _reserved_zeros: [u8; 4 - size_of::<WgPacketType>()],
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub receiver_idx: little_endian::U32,
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub nonce: [u8; 24],
+
+    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub encrypted_cookie: [u8; 32],
 }
 
 impl WgCookieReply {
-    const LEN: usize = size_must_be::<Self>(64);
+    /// Length of the packet, in bytes.
+    pub const LEN: usize = size_must_be::<Self>(64);
 
+    /// Construct a [`WgCookieReply`] where all fields except `packet_type` are zeroed.
     pub fn new() -> Self {
         Self {
             packet_type: WgPacketType::CookieReply,
@@ -354,7 +434,7 @@ impl Default for WgCookieReply {
 }
 
 impl Packet {
-    /// Convert into a wireguard packet while sanity-checking packet type and size.
+    /// Try to cast to a WireGuard packet while sanity-checking packet type and size.
     pub fn try_into_wg(self) -> eyre::Result<WgKind> {
         let wg = Wg::ref_from_bytes(self.as_bytes())
             .map_err(|_| eyre!("Not a wireguard packet, too small."))?;
