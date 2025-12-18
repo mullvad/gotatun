@@ -65,7 +65,7 @@ pub struct Packet<Kind: ?Sized = [u8]> {
     _kind: PhantomData<Kind>,
 }
 
-pub struct PacketInner {
+struct PacketInner {
     buf: BytesMut,
 
     // If the [BytesMut] was allocated by a [PacketBufPool], this will return the buffer to be re-used later.
