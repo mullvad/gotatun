@@ -9,6 +9,12 @@
 //!
 //! <code>git clone <https://github.com/mullvad/gotatun.git></code>
 
+// Warn on missing docs when running `cargo doc`
+#![cfg_attr(doc, warn(missing_docs))]
+// Deny all rustdoc warnings when running `cargo doc --release`
+#![cfg_attr(all(doc, profile = "release"), deny(missing_docs))]
+#![cfg_attr(all(doc, profile = "release"), deny(rustdoc::all))]
+
 #[cfg(feature = "device")]
 pub mod device;
 
