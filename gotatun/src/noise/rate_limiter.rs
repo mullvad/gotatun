@@ -15,6 +15,7 @@ use constant_time_eq::constant_time_eq;
 use mock_instant::Instant;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 #[cfg(not(feature = "mock_instant"))]
 use crate::sleepyinstant::Instant;
@@ -30,7 +31,7 @@ const COOKIE_SIZE: usize = 16;
 const COOKIE_NONCE_SIZE: usize = 24;
 
 /// How often should reset count in seconds
-const RESET_PERIOD: u64 = 1;
+const RESET_PERIOD: Duration = Duration::from_secs(1);
 
 type Cookie = [u8; COOKIE_SIZE];
 
@@ -88,7 +89,7 @@ impl RateLimiter {
         // The rate limiter is not very accurate, but at the scale we care about it doesn't matter much
         let current_time = Instant::now();
         let mut last_reset_time = self.last_reset.lock();
-        if current_time.duration_since(*last_reset_time).as_secs() >= RESET_PERIOD {
+        if current_time.duration_since(*last_reset_time) >= RESET_PERIOD {
             self.count.store(0, Ordering::SeqCst);
             *last_reset_time = current_time;
         }
