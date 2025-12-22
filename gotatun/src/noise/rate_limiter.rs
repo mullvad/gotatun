@@ -152,11 +152,7 @@ impl RateLimiter {
 
     /// Decode the packet as wireguard packet.
     /// Then, verify the MAC fields on the packet (if any), and apply rate limiting if needed.
-    pub fn verify_packet(
-        &self,
-        src_addr: IpAddr,
-        packet: Packet,
-    ) -> Result<WgKind, TunnResult> {
+    pub fn verify_packet(&self, src_addr: IpAddr, packet: Packet) -> Result<WgKind, TunnResult> {
         let packet = packet
             .try_into_wg()
             .map_err(|_err| TunnResult::Err(WireGuardError::InvalidPacket))?;
