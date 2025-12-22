@@ -5,18 +5,15 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! Simple implementation of the client-side of the WireGuard protocol.
-//!
-//! <code>git clone <https://github.com/mullvad/gotatun.git></code>
+//! A library implementation of [WireGuard](https://www.wireguard.com/>).
 
 #[cfg(feature = "device")]
 pub mod device;
 
-pub mod udp;
-
 pub mod noise;
 pub mod packet;
 pub mod tun;
+pub mod udp;
 
 mod task;
 
