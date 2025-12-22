@@ -46,7 +46,8 @@ use allowed_ips::AllowedIps;
 use peer::{AllowedIP, Peer};
 use rand_core::{OsRng, RngCore};
 
-const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
+/// The number of handshakes per second to tolerate before using cookies
+const HANDSHAKE_RATE_LIMIT: u64 = 100;
 
 /// Maximum number of packet buffers that each channel may contain
 const MAX_PACKET_BUFS: usize = 4000;
@@ -451,6 +452,11 @@ impl<T: DeviceTransports> Device<T> {
             .key_pair
             .as_ref()
             .expect("Private key must be set first");
+        let rate_limiter = self
+            .rate_limiter
+            .as_ref()
+            .expect("Setting private key creates rate limiter")
+            .clone();
 
         let tunn = Tunn::new(
             device_key_pair.0.clone(),
@@ -458,7 +464,7 @@ impl<T: DeviceTransports> Device<T> {
             preshared_key,
             keepalive,
             index,
-            None,
+            rate_limiter,
         );
 
         let allowed_ips = if replace_allowed_ips {
@@ -572,7 +578,7 @@ impl<T: DeviceTransports> Device<T> {
             peer.lock().await.tunnel.set_static_private(
                 private_key.clone(),
                 public_key,
-                Some(Arc::clone(&rate_limiter)),
+                Arc::clone(&rate_limiter),
             )
         }
 
@@ -617,11 +623,6 @@ impl<T: DeviceTransports> Device<T> {
             let device = device.read().await;
             // TODO: pass in peers instead?
             let peer_map = &device.peers;
-
-            if let Some(rate_limiter) = &device.rate_limiter {
-                // Reset rate limiter timer if needed
-                rate_limiter.try_reset_count();
-            }
 
             // Go over each peer and invoke the timer function
             for peer in peer_map.values() {
