@@ -6,7 +6,43 @@
 //! See [`Packet`] for an implementation of a [`bytes`]-backed owned packet buffer.
 //!
 //! Any of the [`zerocopy`]-enabled definitions such as [`Ipv4`] or [`Udp`] can be used to cheaply
-//! construct or parse packets.
+//! construct or parse packets:
+//! ```
+//! let example_ipv4_icmp: &mut [u8] = &mut [
+//!     0x45, 0x83, 0x0, 0x54, 0xa3, 0x13, 0x40, 0x0, 0x40, 0x1, 0xc6, 0x26, 0xa, 0x8c, 0xc2, 0xdd,
+//!     0x1, 0x2, 0x3, 0x4, 0x8, 0x0, 0x51, 0x13, 0x0, 0x2b, 0x0, 0x1, 0xb1, 0x5c, 0x87, 0x68, 0x0,
+//!     0x0, 0x0, 0x0, 0xa8, 0x28, 0x7, 0x0, 0x0, 0x0, 0x0, 0x0, 0x10, 0x11, 0x12, 0x13, 0x14,
+//!     0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23,
+//!     0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32,
+//!     0x33, 0x34, 0x35, 0x36, 0x37,
+//! ];
+//!
+//! use gotatun::packet::{Ipv4, Ipv4Header, IpNextProtocol};
+//! use zerocopy::FromBytes;
+//! use std::net::Ipv4Addr;
+//!
+//! // Cast the `&[u8]` to an &Ipv4.
+//! // Note that this doesn't validate anything about the packet,
+//! // except that it's at least Ipv4Header::LEN bytes long.
+//! let packet = Ipv4::<[u8]>::mut_from_bytes(example_ipv4_icmp)
+//!     .expect("Packet must be large enough to be IPv4");
+//! let header: &mut Ipv4Header = &mut packet.header;
+//! let payload: &mut [u8] = &mut packet.payload;
+//!
+//! // Read stuff from the IPv4 header
+//! assert_eq!(header.version(), 4);
+//! assert_eq!(header.source(), Ipv4Addr::new(10, 140, 194, 221));
+//! assert_eq!(header.destination(), Ipv4Addr::new(1, 2, 3, 4));
+//! assert_eq!(header.header_checksum, 0xc626);
+//! assert_eq!(header.protocol, IpNextProtocol::Icmp);
+//!
+//! // Write stuff to the header. Note that this invalidates the checksum.
+//! header.time_to_live = 123;
+//!
+//! // Write stuff to the payload. Note that this clobbers the ICMP packet stored here.
+//! payload[..12].copy_from_slice(b"Hello there!");
+//! assert_eq!(&example_ipv4_icmp[20..][..12], b"Hello there!");
+//! ```
 
 use std::{
     fmt::{self, Debug},
