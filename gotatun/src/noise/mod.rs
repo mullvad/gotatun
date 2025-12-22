@@ -25,9 +25,6 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// The default value to use for rate limiting, when no other rate limiter is defined
-const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
-
 const MAX_QUEUE_DEPTH: usize = 256;
 /// number of sessions in the ring, better keep a PoT
 const N_SESSIONS: usize = 8;
@@ -76,7 +73,7 @@ impl Tunn {
         preshared_key: Option<[u8; 32]>,
         persistent_keepalive: Option<u16>,
         index: u32,
-        rate_limiter: Option<Arc<RateLimiter>>,
+        rate_limiter: Arc<RateLimiter>,
     ) -> Self {
         let static_public = x25519::PublicKey::from(&static_private);
 
@@ -94,11 +91,9 @@ impl Tunn {
             rx_bytes: Default::default(),
 
             packet_queue: VecDeque::new(),
-            timers: Timers::new(persistent_keepalive, rate_limiter.is_none()),
+            timers: Timers::new(persistent_keepalive),
 
-            rate_limiter: rate_limiter.unwrap_or_else(|| {
-                Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
-            }),
+            rate_limiter,
         }
     }
 
@@ -107,12 +102,9 @@ impl Tunn {
         &mut self,
         static_private: x25519::StaticSecret,
         static_public: x25519::PublicKey,
-        rate_limiter: Option<Arc<RateLimiter>>,
+        rate_limiter: Arc<RateLimiter>,
     ) {
-        self.timers.should_reset_rr = rate_limiter.is_none();
-        self.rate_limiter = rate_limiter.unwrap_or_else(|| {
-            Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
-        });
+        self.rate_limiter = rate_limiter;
         self.handshake
             .set_static_private(static_private, static_public);
         for s in &mut self.sessions {
@@ -378,7 +370,7 @@ mod tests {
 
     #[cfg(feature = "mock_instant")]
     use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT};
-    use crate::packet::Ipv4;
+    use crate::{device::HANDSHAKE_RATE_LIMIT, packet::Ipv4};
 
     use super::*;
     use bytes::BytesMut;
@@ -393,9 +385,25 @@ mod tests {
         let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
         let their_idx = OsRng.next_u32();
 
-        let my_tun = Tunn::new(my_secret_key, their_public_key, None, None, my_idx, None);
+        let rate_limiter = Arc::new(RateLimiter::new(&my_public_key, HANDSHAKE_RATE_LIMIT));
+        let my_tun = Tunn::new(
+            my_secret_key,
+            their_public_key,
+            None,
+            None,
+            my_idx,
+            rate_limiter,
+        );
 
-        let their_tun = Tunn::new(their_secret_key, my_public_key, None, None, their_idx, None);
+        let rate_limiter = Arc::new(RateLimiter::new(&their_public_key, HANDSHAKE_RATE_LIMIT));
+        let their_tun = Tunn::new(
+            their_secret_key,
+            my_public_key,
+            None,
+            None,
+            their_idx,
+            rate_limiter,
+        );
 
         (my_tun, their_tun)
     }
