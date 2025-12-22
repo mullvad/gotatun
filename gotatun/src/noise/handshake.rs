@@ -22,7 +22,7 @@ use std::convert::TryInto;
 use std::time::{Duration, SystemTime};
 
 #[cfg(feature = "mock_instant")]
-use mock_instant::Instant;
+use mock_instant::global::Instant;
 
 pub(crate) const LABEL_MAC1: &[u8; 8] = b"mac1----";
 pub(crate) const LABEL_COOKIE: &[u8; 8] = b"cookie--";
