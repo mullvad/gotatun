@@ -154,7 +154,7 @@ impl RateLimiter {
     /// Then, verify the MAC fields on the packet (if any), and apply rate limiting if needed.
     pub fn verify_packet(
         &self,
-        src_addr: Option<IpAddr>,
+        src_addr: IpAddr,
         packet: Packet,
     ) -> Result<WgKind, TunnResult> {
         let packet = packet
@@ -176,7 +176,7 @@ impl RateLimiter {
     /// Verify the MAC fields on the handshake, and apply rate limiting if needed.
     pub(crate) fn verify_handshake<P: WgHandshakeBase>(
         &self,
-        src_addr: Option<IpAddr>,
+        src_addr: IpAddr,
         handshake: Packet<P>,
     ) -> Result<Packet<P>, TunnResult> {
         let sender_idx = handshake.sender_idx();
@@ -191,13 +191,7 @@ impl RateLimiter {
         }
 
         if self.is_under_load() {
-            let addr = match src_addr {
-                None => return Err(TunnResult::Err(WireGuardError::UnderLoad)),
-                Some(addr) => addr,
-            };
-
-            // Only given an address can we validate mac2
-            let cookie = self.current_cookie(addr);
+            let cookie = self.current_cookie(src_addr);
             let computed_mac2 = b2s_keyed_mac_16_2(&cookie, packet_until_mac, mac1);
 
             if !constant_time_eq(&computed_mac2, mac2) {
@@ -205,6 +199,8 @@ impl RateLimiter {
                 let packet = handshake.overwrite_with(&cookie_reply);
                 return Err(TunnResult::WriteToNetwork(packet.into()));
             }
+
+            // If under load but mac2 is valid, allow the handshake
         }
 
         Ok(handshake)
