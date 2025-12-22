@@ -278,7 +278,8 @@ impl Packet<[u8]> {
     /// Returns [`Err`] if any of the following checks fail:
     /// - The IP version field is `4` or `6`
     /// - The packet is smaller than the minimum header length.
-    /// - The packet is smaller than [`Ipv4Header::total_len`] or [`Ipv6Header::payload_length`].
+    /// - The IPv4 packet is smaller than [`Ipv4Header::total_len`].
+    /// - The IPv6 payload is smaller than [`Ipv6Header::payload_length`].
     pub fn try_into_ipvx(self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
         self.try_into_ip()?.try_into_ipvx()
     }
@@ -287,13 +288,16 @@ impl Packet<[u8]> {
 impl Packet<Ip> {
     /// Try to cast this [`Ip`] packet into either an [`Ipv4`] or [`Ipv6`] packet.
     ///
-    /// The buffer will be truncated to [`Ipv4Header::total_len`] or [`Ipv6Header::payload_length`].
+    /// The buffer will be truncated to
+    /// - [`Ipv4Header::total_len`]
+    /// - or [`Ipv6Header::payload_length`] + [`Ipv6Header::LEN`].
     ///
     /// # Errors
     ///
     /// Returns [`Err`] if any of the following checks fail:
     /// - The IP version field is `4` or `6`
-    /// - The packet is smaller than [`Ipv4Header::total_len`] or [`Ipv6Header::payload_length`].
+    /// - The IPv4 packet is smaller than [`Ipv4Header::total_len`].
+    /// - The IPv6 payload is smaller than [`Ipv6Header::payload_length`].
     pub fn try_into_ipvx(mut self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
         match self.header.version() {
             4 => {
