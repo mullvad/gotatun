@@ -269,7 +269,9 @@ impl Packet<[u8]> {
 
     /// Try to cast this untyped packet into either an [`Ipv4`] or [`Ipv6`] packet.
     ///
-    /// The buffer will be truncated to [`Ipv4Header::total_len`] or [`Ipv6Header::payload_length`].
+    /// The buffer will be truncated to
+    /// - [`Ipv4Header::total_len`]
+    /// - or [`Ipv6Header::payload_length`] + [`Ipv6Header::LEN`].
     ///
     /// # Errors
     ///
