@@ -4,6 +4,7 @@
 use std::net::IpAddr;
 
 use bitfield_struct::bitfield;
+use either::Either;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 use crate::packet::{Ipv4, Ipv6};
@@ -22,22 +23,44 @@ pub struct IpvxVersion {
 #[repr(C, packed)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Ip {
+    /// The IP version field. [Read more](IpvxVersion)
     pub header: IpvxVersion,
-    pub payload: [u8],
+
+    /// The rest of the IP packet,
+    /// i.e. everything in the header that comes after the first byte, and the payload.
+    ///
+    /// You probably don't want to access this directly.
+    pub rest: [u8],
 }
 
 impl Ip {
-    pub fn destination(&self) -> Option<IpAddr> {
+    fn into_v4_or_v6(&self) -> Option<Either<&Ipv4, &Ipv6>> {
+        let b = self.as_bytes();
         match self.header.version() {
-            4 => {
-                let ipv4 = Ipv4::<[u8]>::ref_from_bytes(self.as_bytes()).ok()?;
-                Some(ipv4.header.destination().into())
-            }
-            6 => {
-                let ipv6 = Ipv6::<[u8]>::ref_from_bytes(self.as_bytes()).ok()?;
-                Some(ipv6.header.destination().into())
-            }
+            4 => Ipv4::<[u8]>::ref_from_bytes(b).ok().map(Either::Left),
+            6 => Ipv6::<[u8]>::ref_from_bytes(b).ok().map(Either::Right),
             _ => None,
         }
+    }
+    /// Try to extract the source [`IpAddr`].
+    ///
+    /// Returns `None` if the version field is not `4` or `6`, or if the packet is too small.
+    /// Other than that, no checks are done to ensure this is a valid ip packet.
+    pub fn source(&self) -> Option<IpAddr> {
+        Some(match self.into_v4_or_v6()? {
+            Either::Left(ipv4) => ipv4.header.source().into(),
+            Either::Right(ipv6) => ipv6.header.source().into(),
+        })
+    }
+
+    /// Try to extract the destination [`IpAddr`].
+    ///
+    /// Returns `None` if the version field is not `4` or `6`, or if the packet is too small.
+    /// Other than that, no checks are done to ensure this is a valid ip packet.
+    pub fn destination(&self) -> Option<IpAddr> {
+        Some(match self.into_v4_or_v6()? {
+            Either::Left(ipv4) => ipv4.header.destination().into(),
+            Either::Right(ipv6) => ipv6.header.destination().into(),
+        })
     }
 }
