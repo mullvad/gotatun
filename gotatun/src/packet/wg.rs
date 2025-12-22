@@ -114,8 +114,7 @@ impl WgPacketType {
 #[repr(C)]
 pub struct WgDataHeader {
     // INVARIANT: Must be WgPacketType::Data
-    // TODO: make private
-    pub packet_type: WgPacketType,
+    packet_type: WgPacketType,
     _reserved_zeros: [u8; 4 - size_of::<WgPacketType>()],
 
     /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
@@ -189,6 +188,34 @@ impl WgData {
     /// [`Self::is_empty`]. Keepalive packets are just data packets with no payload.
     pub const fn is_keepalive(&self) -> bool {
         self.is_empty()
+    }
+}
+
+impl WgDataHeader {
+    /// Construct a [`WgDataHeader`] where all fields except `packet_type` are zeroed.
+    pub fn new() -> Self {
+        Self {
+            packet_type: WgPacketType::Data,
+            ..WgDataHeader::new_zeroed()
+        }
+    }
+
+    /// Set `receiver_idx`.
+    pub const fn with_receiver_idx(mut self, receiver_idx: u32) -> Self {
+        self.receiver_idx = little_endian::U32::new(receiver_idx);
+        self
+    }
+
+    /// Set `counter`.
+    pub const fn with_counter(mut self, counter: u64) -> Self {
+        self.counter = little_endian::U64::new(counter);
+        self
+    }
+}
+
+impl Default for WgDataHeader {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
