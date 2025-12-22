@@ -674,7 +674,7 @@ impl<T: DeviceTransports> Device<T> {
         };
 
         while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
-            let parsed_packet = match rate_limiter.verify_packet(Some(addr.ip()), src_buf) {
+            let parsed_packet = match rate_limiter.verify_packet(addr.ip(), src_buf) {
                 Ok(packet) => packet,
                 Err(TunnResult::WriteToNetwork(cookie)) => {
                     if let Err(_err) = udp_tx.send_to(cookie.into(), addr).await {
