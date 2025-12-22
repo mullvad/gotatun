@@ -376,6 +376,8 @@ mod tests {
 
     use super::*;
     use bytes::BytesMut;
+    #[cfg(feature = "mock_instant")]
+    use mock_instant::MockClock;
     use rand_core::{OsRng, RngCore};
 
     fn create_two_tuns() -> (Tunn, Tunn) {
@@ -420,7 +422,10 @@ mod tests {
         handshake_init: Packet<WgHandshakeInit>,
     ) -> Packet<WgHandshakeResp> {
         let handshake_resp = tun.handle_incoming_packet(WgKind::HandshakeInit(handshake_init));
-        assert!(matches!(handshake_resp, TunnResult::WriteToNetwork(_)));
+        assert!(
+            matches!(handshake_resp, TunnResult::WriteToNetwork(_)),
+            "expected WriteToNetwork, {handshake_resp:?}"
+        );
 
         let TunnResult::WriteToNetwork(handshake_resp) = handshake_resp else {
             unreachable!("expected WriteToNetwork");
@@ -514,6 +519,50 @@ mod tests {
             .rate_limiter
             .verify_handshake(Ipv4Addr::LOCALHOST.into(), resp)
             .expect("Handshake response to be valid");
+    }
+
+    #[test]
+    #[cfg(feature = "mock_instant")]
+    /// Verify that cookie reply is sent when rate limit is hit.
+    /// And that handshakes are accepted under load with a valid mac2.
+    fn verify_cookie_reply() {
+        let forced_handshake_init = |tun: &mut Tunn| {
+            tun.format_handshake_initiation(true)
+                .expect("expected handshake init")
+        };
+
+        let (mut my_tun, their_tun) = create_two_tuns();
+
+        for _ in 0..HANDSHAKE_RATE_LIMIT {
+            let init = forced_handshake_init(&mut my_tun);
+            their_tun
+                .rate_limiter
+                .verify_handshake(Ipv4Addr::LOCALHOST.into(), init)
+                .expect("Handshake init to be valid");
+
+            MockClock::advance(Duration::from_micros(1));
+        }
+
+        // Next handshake should trigger rate limiting
+        let init = forced_handshake_init(&mut my_tun);
+        let Err(TunnResult::WriteToNetwork(WgKind::CookieReply(cookie_resp))) = their_tun
+            .rate_limiter
+            .verify_handshake(Ipv4Addr::LOCALHOST.into(), init)
+        else {
+            panic!("expected cookie reply due to rate limiting");
+        };
+
+        // Verify that cookie reply can be processed
+        // And that the peer accepts our handshake after that
+        my_tun
+            .handle_cookie_reply(&cookie_resp)
+            .expect("expected cookie reply to be valid");
+
+        let init = forced_handshake_init(&mut my_tun);
+        their_tun
+            .rate_limiter
+            .verify_handshake(Ipv4Addr::LOCALHOST.into(), init)
+            .expect("should accept handshake with cookie");
     }
 
     #[test]
