@@ -672,7 +672,7 @@ impl Handshake {
         let key = b2s_hash(LABEL_COOKIE, self.params.peer_static_public.as_bytes()); // TODO: pre-compute
 
         let payload = Payload {
-            aad: &mac1[0..16],
+            aad: &mac1,
             msg: &packet.encrypted_cookie,
         };
         let plaintext = XChaCha20Poly1305::new_from_slice(&key)
@@ -696,8 +696,8 @@ impl Handshake {
         );
 
         //msg.mac2 = MAC(initiator.last_received_cookie, msg[0:offsetof(msg.mac2)])
-        *packet.mac2_mut() = if let Some(cookie) = self.cookies.write_cookie {
-            b2s_keyed_mac_16(&cookie, &packet.as_bytes()[..T::MAC2_OFF])
+        *packet.mac2_mut() = if let Some(cookie) = &self.cookies.write_cookie {
+            b2s_keyed_mac_16(cookie, &packet.as_bytes()[..T::MAC2_OFF])
         } else {
             [0u8; 16]
         };
