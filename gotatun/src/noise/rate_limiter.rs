@@ -12,7 +12,7 @@ use crate::packet::{Packet, WgCookieReply, WgHandshakeBase, WgKind};
 
 use constant_time_eq::constant_time_eq;
 #[cfg(feature = "mock_instant")]
-use mock_instant::Instant;
+use mock_instant::global::Instant;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 

@@ -5,6 +5,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+use base64::Engine as _;
+
 pub struct KeyBytes(pub [u8; 32]);
 
 impl std::str::FromStr for KeyBytes {
@@ -24,7 +26,7 @@ impl std::str::FromStr for KeyBytes {
             }
             43 | 44 => {
                 // Try to parse as base64
-                if let Ok(decoded_key) = base64::decode(s) {
+                if let Ok(decoded_key) = base64::engine::general_purpose::STANDARD.decode(s) {
                     if decoded_key.len() == internal.len() {
                         internal[..].copy_from_slice(&decoded_key);
                     } else {
