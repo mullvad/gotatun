@@ -608,20 +608,6 @@ impl<T: DeviceTransports> Device<T> {
     }
 
     async fn handle_timers(device: Weak<RwLock<Self>>, udp4: impl UdpSend, udp6: impl UdpSend) {
-        // TODO: fix rate limiting
-        /*
-        self.queue.new_periodic_event(
-            // Reset the rate limiter every second give or take
-            Box::new(|d, _| {
-                if let Some(r) = d.rate_limiter.as_ref() {
-                    r.reset_count()
-                }
-                Action::Continue
-            }),
-            std::time::Duration::from_secs(1),
-        )?;
-        */
-
         loop {
             tokio::time::sleep(Duration::from_millis(250)).await;
 
@@ -631,6 +617,11 @@ impl<T: DeviceTransports> Device<T> {
             let device = device.read().await;
             // TODO: pass in peers instead?
             let peer_map = &device.peers;
+
+            if let Some(rate_limiter) = &device.rate_limiter {
+                // Reset rate limiter timer if needed
+                rate_limiter.try_reset_count();
+            }
 
             // Go over each peer and invoke the timer function
             for peer in peer_map.values() {

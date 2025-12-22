@@ -182,7 +182,7 @@ impl Tunn {
         let time = Instant::now();
 
         if self.timers.should_reset_rr {
-            self.rate_limiter.reset_count();
+            self.rate_limiter.try_reset_count();
         }
 
         // All the times are counted from tunnel initiation, for efficiency our timers are rounded

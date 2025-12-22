@@ -84,7 +84,7 @@ impl RateLimiter {
     }
 
     /// Reset packet count (ideally should be called with a period of 1 second)
-    pub fn reset_count(&self) {
+    pub fn try_reset_count(&self) {
         // The rate limiter is not very accurate, but at the scale we care about it doesn't matter much
         let current_time = Instant::now();
         let mut last_reset_time = self.last_reset.lock();
