@@ -50,7 +50,7 @@ tokio = { version = "1.43.0", features = ["full"] }
 eyre = "0.6.12"
 log = "0.4"
 typed-builder = "0.21.0"
-tun = { version = "0.7.13", features = ["async"], optional = true }
+tun = { version = "0.8.4", default-features = false, features = ["async"], optional = true }
 async-trait = "0.1.88"
 zerocopy = { version = "0.8.27", features = ["std", "derive"] }
 pnet_packet = "0.35.0"
