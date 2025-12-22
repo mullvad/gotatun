@@ -144,7 +144,7 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
         }
     }
 
-    /// Discard the type of this packet and treat is as a pile of bytes.
+    /// Discard the type of this packet and treat it as a pile of bytes.
     pub fn into_bytes(self) -> Packet<[u8]> {
         self.cast()
     }
