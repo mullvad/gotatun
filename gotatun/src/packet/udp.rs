@@ -17,11 +17,11 @@ pub struct Udp<Payload: ?Sized = [u8]> {
     /// UDP header.
     pub header: UdpHeader,
     /// UDP payload. The type of this is `[u8]` by default, but it may be any zerocopy type,
-    /// i.e. an `Udp<WgData>`
+    /// e.g. a `WgData`
     pub payload: Payload,
 }
 
-/// A UDP packet header.
+/// A UDP header.
 #[repr(C, packed)]
 #[derive(Clone, Copy, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct UdpHeader {
