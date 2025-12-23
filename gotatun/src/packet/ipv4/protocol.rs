@@ -6,6 +6,9 @@ use std::fmt::Debug;
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
+/// Type of the `protocol`/`next_header` fields of IPv4 and IPv6.
+///
+/// The value indicates what is stored in the IP packet.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Immutable, Unaligned, FromBytes, IntoBytes, KnownLayout)]
 pub struct IpNextProtocol(u8);
@@ -401,6 +404,8 @@ impl IpNextProtocol {
     /// Service-Specific Connection-Oriented Protocol in a Multilink and Connectionless Environment
     pub const Sscopmce: IpNextProtocol = IpNextProtocol(128);
 
+    // This protocol doesn't seem to be documented by IANA.
+    #[allow(missing_docs)]
     pub const Iplt: IpNextProtocol = IpNextProtocol(129);
 
     /// Secure Packet Shield

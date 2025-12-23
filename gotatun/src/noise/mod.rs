@@ -309,7 +309,7 @@ impl Tunn {
         Some(packet)
     }
 
-    /// Get the first packet from [`Self::packet_queue`], and try to encapsulate it.
+    /// Get the first packet from the inner `packet_queue`, and try to encapsulate it.
     pub fn next_queued_packet(&mut self) -> Option<WgKind> {
         self.dequeue_packet()
             .and_then(|packet| self.handle_outgoing_packet(packet))
