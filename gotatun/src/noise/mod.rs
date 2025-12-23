@@ -374,6 +374,7 @@ mod tests {
 
     use super::*;
     use bytes::BytesMut;
+    #[cfg(feature = "mock_instant")]
     use mock_instant::MockClock;
     use rand_core::{OsRng, RngCore};
 
@@ -519,6 +520,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "mock_instant")]
     /// Verify that cookie reply is sent when rate limit is hit.
     /// And that handshakes are accepted under load with a valid mac2.
     fn verify_cookie_reply() {
