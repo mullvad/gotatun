@@ -1891,9 +1891,9 @@ dependencies = [
 
 [[package]]
 name = "tun"
-version = "0.7.22"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7904c94104239657089d14bccbf23fd6d363e30639ce49af21ef008a445baf97"
+checksum = "b35f176015650e3bd849e85808d809e5b54da2ba7df983c5c3b601a2a8f1095e"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -1906,7 +1906,7 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tokio-util",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.1",
  "wintun-bindings",
 ]
 
