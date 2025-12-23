@@ -1,6 +1,8 @@
 // Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! Implementations of [`IpSend`] and [`IpRecv`] using tokio channels.
+
 use either::Either;
 use std::{io, iter};
 use tokio::sync::mpsc;
@@ -123,6 +125,7 @@ mod fragmentation {
     /// buffered is 64 * 65535 = 4194304 bytes, or 4 MiB.
     const MAX_CONCURRENT_FRAGS: usize = 64;
 
+    /// A buffer for reconstructing fragmented IPv4 packets.
     #[derive(Debug)]
     pub struct Ipv4Fragments {
         // The `VecDeque` is holds the fragments for each unique packet being assembled.
@@ -146,6 +149,13 @@ mod fragmentation {
             self.fragments.len()
         }
 
+        /// Add an [`Ipv4`] packet to the buffer and try to reassemble it.
+        ///
+        /// If all fragments are present in the buffer, this returns `Some` of the assembled
+        /// packed, and all fragments are dropped.
+        ///
+        /// If adding this packet causes the internal buffer to exceed its capacity,
+        /// the oldest fragment is dropped.
         pub fn assemble_ipv4_fragment(
             &mut self,
             ipv4_packet: Packet<Ipv4>,
