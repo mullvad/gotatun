@@ -337,11 +337,11 @@ impl<T: DeviceTransports> Drop for DeviceHandle<T> {
             log::warn!("Failed to get tokio runtime handle");
             return;
         };
-        log::info!(
+        log::debug!(
             "DeviceHandle strong count: {}",
             Arc::strong_count(&self.device)
         );
-        log::info!("DeviceHandle weak count: {}", Arc::weak_count(&self.device));
+        log::debug!("DeviceHandle weak count: {}", Arc::weak_count(&self.device));
         let device = self.device.clone();
         handle.spawn(async move {
             Self::stop_inner(device).await;

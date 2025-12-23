@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Rename `gotatun-cli` binary to `gotatun`.
 
+### Fixed
+- Handle SIGINT and SIGTERM in cli
+
 
 ## [0.1.0] - 2025-11-06
 Create initial release of GotaTun, a userspace [WireGuard]<sup>®</sup> implementation based on [Boringtun] v.0.6.0.

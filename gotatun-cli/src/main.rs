@@ -18,6 +18,7 @@ mod unix {
     use std::fs::File;
     use std::os::unix::net::UnixDatagram;
     use std::process::exit;
+    use tokio::signal::unix::{SignalKind, signal};
     use tracing::Level;
 
     fn check_tun_name(_v: String) -> Result<(), String> {
@@ -141,7 +142,7 @@ mod unix {
 
         let config = DeviceConfig { api: Some(api) };
 
-        let _device_handle: DeviceHandle<DefaultDeviceTransports> =
+        let device_handle: DeviceHandle<DefaultDeviceTransports> =
             match DeviceHandle::from_tun_name(UdpSocketFactory, tun_name, config).await {
                 Ok(d) => d,
                 Err(e) => {
@@ -164,8 +165,17 @@ mod unix {
         sock1.send(&[1]).unwrap();
         drop(sock1);
 
-        log::info!("GotaTun started successfully"); // TODO: abort somehow
-        tokio::time::sleep(tokio::time::Duration::from_secs(1000)).await;
+        log::info!("GotaTun started successfully");
+
+        let mut sigint = signal(SignalKind::interrupt()).expect("set up SIGINT handler");
+        let mut sigterm = signal(SignalKind::terminate()).expect("set up SIGTERM handler");
+        tokio::select! {
+            _ = sigint.recv() => log::info!("SIGINT received"),
+            _ = sigterm.recv() => log::info!("SIGTERM received"),
+        }
+
+        log::info!("GotaTun is shutting down");
+        device_handle.stop().await;
     }
 }
 
