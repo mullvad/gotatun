@@ -103,7 +103,7 @@ impl IpRecv for TunChannelRx {
 mod fragmentation {
     use zerocopy::{FromBytes, FromZeros};
 
-    use crate::packet::{Ipv4Header, Udp};
+    use crate::packet::Ipv4Header;
     use std::{collections::VecDeque, net::Ipv4Addr};
 
     use crate::packet::{Ipv4, Packet};
@@ -277,10 +277,10 @@ mod fragmentation {
             // The header of the first packet is updated to reflect that the packet is no
             // longer fragmented.
             {
-                let ip = Ipv4::<Udp>::mut_from_bytes(&mut bytes).expect("valid IP packet buffer");
+                let ip = Ipv4::<[u8]>::mut_from_bytes(&mut bytes).expect("valid IP packet buffer");
                 ip.header.total_len = (len as u16).into();
 
-                // This set `more_fragments`, `dont_fragment`, and `fragment_offset` to zero.
+                // This sets `more_fragments`, `dont_fragment`, and `fragment_offset` to zero.
                 ip.header.flags_and_fragment_offset.zero();
 
                 // We do not need to recompute the checksum, because the checksum is
@@ -312,7 +312,7 @@ mod fragmentation {
     #[cfg(test)]
     mod test {
         use super::*;
-        use crate::packet::{IpNextProtocol, Ipv4FlagsFragmentOffset, Ipv4Header, UdpHeader};
+        use crate::packet::{IpNextProtocol, Ipv4FlagsFragmentOffset, Ipv4Header, Udp, UdpHeader};
         use bytes::BytesMut;
         use rand::rng;
         use rand::seq::SliceRandom;
