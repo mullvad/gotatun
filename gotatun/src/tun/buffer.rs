@@ -23,7 +23,11 @@ pub struct BufferedIpSend {
 }
 
 impl BufferedIpSend {
-    /// Wrap an [`IpSend`].
+    /// Create a [`BufferedIpSend`] with `capacity`.
+    ///
+    /// This takes an `Arc<Mutex<I>>` because the inner `I` will be re-used after [Self] is
+    /// dropped. We will take the mutex lock when this function is called, and hold onto it for the
+    /// lifetime of [Self]. Will panic if the lock is already taken.
     pub fn new<I: IpSend>(capacity: usize, inner: Arc<Mutex<I>>) -> Self {
         let (tx, mut rx) = mpsc::channel::<Packet<Ip>>(capacity);
 
@@ -55,8 +59,8 @@ impl IpSend for BufferedIpSend {
 
 /// An [`IpRecv`] that wraps another [`IpRecv`] to provide buffering.
 ///
-/// This will spawn a background task that contiuously calls [`IpRecv::recv`] until the buffer is
-/// full. Any call to [`IpRecv::recv`] on _this_ object will not block unless the channel is empty.
+/// This will spawn a background task that continuously calls [`IpRecv::recv`] until the buffer is
+/// full. Any call to [`IpRecv::recv`] on _this_ object will not block unless the buffer is empty.
 pub struct BufferedIpRecv<I> {
     rx: mpsc::Receiver<Packet<Ip>>,
     rx_packet_buf: Vec<Packet<Ip>>,
@@ -66,7 +70,7 @@ pub struct BufferedIpRecv<I> {
 }
 
 impl<I: IpRecv> BufferedIpRecv<I> {
-    /// Create a new [`BufferedIpRecv`].
+    /// Create a new [`BufferedIpRecv`] with `capacity`.
     ///
     /// This takes an `Arc<Mutex<I>>` because the inner `I` will be re-used after [Self] is
     /// dropped. We will take the mutex lock when this function is called, and hold onto it for the
