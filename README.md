@@ -40,20 +40,20 @@ Target triple                 |Binary|Library|
 ------------------------------|:----:|------|
 x86_64-unknown-linux-gnu      |  ✓   | ✓    |
 aarch64-unknown-linux-gnu     |  ✓   | ✓    |
-armv7-unknown-linux-gnueabihf |  ✓   | ✓    |
-x86_64-apple-darwin           |  ✓   | ✓    |
+aarch64-apple-darwin          |  ✓   | ✓    |
 x86_64-pc-windows-msvc        |      | ✓    |
-aarch64-apple-ios             |      | ✓    |
-armv7-apple-ios               |      | ✓    |
-armv7s-apple-ios              |      | ✓    |
+x86_64-pc-windows-gnullvm     |      | ✓    |
+aarch64-pc-windows-msvc       |      | ✓    |
+aarch64-pc-windows-gnullvm    |      | ✓    |
+x86_64-linux-android          |      | ✓    |
 aarch64-linux-android         |      | ✓    |
-arm-linux-androideabi         |      | ✓    |
+aarch64-apple-ios             |      | ✓    |
 
-<sub>Other platforms may be added in the future</sub>
+<sub>Other targets may work, but we only test for these</sub>
 
 #### Linux
 
-`x86-64`, `aarch64` and `armv7` architectures are supported. The behaviour should be identical to that of [wireguard-go](https://git.zx2c4.com/wireguard-go/about/), with the following difference:
+`x86-64`, and `aarch64` architectures are supported. The behaviour should be identical to that of [wireguard-go](https://git.zx2c4.com/wireguard-go/about/), with the following difference:
 
 `gotatun` will drop privileges when started. When privileges are dropped it is not possible to set `fwmark`. If `fwmark` is required, such as when using `wg-quick`, run with `--disable-drop-privileges` or set the environment variable `WG_SUDO=1`.
 
