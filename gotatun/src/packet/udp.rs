@@ -7,23 +7,36 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endi
 
 use super::util::size_must_be;
 
+/// A UDP packet.
+///
+/// This is a dynamically sized zerocopy type, which means you can compose packet types like
+/// `Ipv6<Udp<WgData>>` and cast them to/from byte slices using [`FromBytes`] and [`IntoBytes`].
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Udp<Payload: ?Sized = [u8]> {
+    /// UDP header.
     pub header: UdpHeader,
+    /// UDP payload. The type of this is `[u8]` by default, but it may be any zerocopy type,
+    /// e.g. a `WgData`
     pub payload: Payload,
 }
 
+/// A UDP header.
 #[repr(C, packed)]
 #[derive(Clone, Copy, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct UdpHeader {
+    /// UDP source port.
     pub source_port: big_endian::U16,
+    /// UDP destination port.
     pub destination_port: big_endian::U16,
+    /// Length, in bytes, of the UDP packet (including header).
     pub length: big_endian::U16,
+    /// Checksum of the UDP packet
     pub checksum: big_endian::U16,
 }
 
 impl UdpHeader {
+    /// Length, in bytes, of a [`UdpHeader`].
     #[allow(dead_code)]
     pub const LEN: usize = size_must_be::<UdpHeader>(8);
 }
