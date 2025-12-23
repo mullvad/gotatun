@@ -26,7 +26,7 @@ impl<'a, D> FromIterator<(&'a AllowedIP, D)> for AllowedIps<D> {
         let mut allowed_ips = AllowedIps::new();
 
         for (ip, data) in iter {
-            allowed_ips.insert(ip.addr, u32::from(ip.cidr), data);
+            allowed_ips.insert(ip.addr, ip.cidr, data);
         }
 
         allowed_ips
@@ -44,11 +44,11 @@ impl<D> AllowedIps<D> {
         self.ips = IpNetworkTable::new();
     }
 
-    pub fn insert(&mut self, key: IpAddr, cidr: u32, data: D) -> Option<D> {
+    pub fn insert(&mut self, key: IpAddr, cidr: u8, data: D) -> Option<D> {
         // These are networks, it doesn't make sense for host bits to be set, so
         // use new_truncate().
         self.ips.insert(
-            IpNetwork::new_truncate(key, cidr as u8).expect("cidr is valid length"),
+            IpNetwork::new_truncate(key, cidr).expect("cidr is valid length"),
             data,
         )
     }
