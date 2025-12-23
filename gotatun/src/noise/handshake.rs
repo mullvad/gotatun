@@ -690,14 +690,11 @@ impl Handshake {
     // Compute and append mac1 and mac2 to a handshake message
     fn init_mac1_and_mac2<T: WgHandshakeBase>(&mut self, packet: &mut T, local_index: u32) {
         // msg.mac1 = MAC(HASH(LABEL_MAC1 || responder.static_public), msg[0:offsetof(msg.mac1)])
-        *packet.mac1_mut() = b2s_keyed_mac_16(
-            &self.params.sending_mac1_key,
-            &packet.as_bytes()[..T::MAC1_OFF],
-        );
+        *packet.mac1_mut() = b2s_keyed_mac_16(&self.params.sending_mac1_key, packet.until_mac1());
 
         //msg.mac2 = MAC(initiator.last_received_cookie, msg[0:offsetof(msg.mac2)])
         *packet.mac2_mut() = if let Some(cookie) = &self.cookies.write_cookie {
-            b2s_keyed_mac_16(cookie, &packet.as_bytes()[..T::MAC2_OFF])
+            b2s_keyed_mac_16(cookie, packet.until_mac2())
         } else {
             [0u8; 16]
         };
