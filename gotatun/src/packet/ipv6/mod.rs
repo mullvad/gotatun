@@ -7,73 +7,102 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endi
 
 use super::{IpNextProtocol, util::size_must_be};
 
+/// An IPv6 packet.
+///
+/// This is a dynamically sized zerocopy type, which means you can compose packet types like
+/// `Ipv6<Udp<WgData>>` and cast them to/from byte slices using [`FromBytes`] and [`IntoBytes`].
+/// [Read more](crate::packet)
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Ipv6<Payload: ?Sized = [u8]> {
+    /// IPv6 header.
     pub header: Ipv6Header,
+    /// IPv6 payload. The type of this is `[u8]` by default, but it may be any zerocopy type,
+    /// e.g. a `Udp<WgData>`
     pub payload: Payload,
 }
 
+/// An IPv6 header.
 #[repr(C, packed)]
 #[derive(Clone, Copy, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv6Header {
+    /// IPv6 `flow_label`, `traffic_class` and `version` fields.
     pub version_traffic_flow: Ipv6VersionTrafficFlow,
+    /// Length of the IPv6 payload.
     pub payload_length: big_endian::U16,
+    /// Protocol of the IPv6 payload.
     pub next_header: IpNextProtocol,
+    /// Maximum number of hops for the IPv6 packet.
     pub hop_limit: u8,
+    /// IPv6 source address.
     pub source_address: big_endian::U128,
+    /// IPv6 destination address.
     pub destination_address: big_endian::U128,
 }
 
-/// A bitfield struct containing the IPv6 fields `flow_label`, `traffic_class` and `version`
+/// A bitfield struct containing the IPv6 fields `flow_label`, `traffic_class` and `version`.
 #[bitfield(u32, repr = big_endian::U32, from = big_endian::U32::new, into = big_endian::U32::get)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv6VersionTrafficFlow {
+    /// IPv6 flow label.
     #[bits(20)]
     pub flow_label: u32,
+    /// IPv6 traffic class.
     #[bits(8)]
     pub traffic_class: u8,
+    /// IPv6 version. This must be `6`.
     #[bits(4)]
     pub version: u8,
 }
 
 impl Ipv6Header {
+    /// Length of an [`Ipv6Header`], in bytes.
     #[allow(dead_code)]
     pub const LEN: usize = size_must_be::<Ipv6Header>(40);
 
+    /// Get [`version`](Ipv6VersionTrafficFlow::version). This is expected to be `6`.
     pub const fn version(&self) -> u8 {
         self.version_traffic_flow.version()
     }
 
+    /// Get [`traffic_class`](Ipv6VersionTrafficFlow::traffic_class).
     pub const fn traffic_class(&self) -> u8 {
         self.version_traffic_flow.traffic_class()
     }
 
+    /// Get [`flow_label`](Ipv6VersionTrafficFlow::flow_label).
     pub const fn flow_label(&self) -> u32 {
         self.version_traffic_flow.flow_label()
     }
 
+    /// Set [`version`](Ipv6VersionTrafficFlow::version).
+    // If you're setting it to anything other than `6`, you're probably doing it wrong.
     pub const fn set_version(&mut self, version: u8) {
         self.version_traffic_flow.set_version(version);
     }
 
+    /// Set [`traffic_class`](Ipv6VersionTrafficFlow::traffic_class).
     pub const fn set_traffic_class(&mut self, tc: u8) {
         self.version_traffic_flow.set_traffic_class(tc);
     }
 
+    /// Set [`flow_label`](Ipv6VersionTrafficFlow::flow_label).
     pub const fn set_flow_label(&mut self, flow: u32) {
         self.version_traffic_flow.set_flow_label(flow);
     }
 
+    /// Set [next header protocol](Ipv6Header::next_protocol).
     pub const fn next_protocol(&self) -> IpNextProtocol {
         self.next_header
     }
 
+    /// Get source address.
     pub const fn source(&self) -> Ipv6Addr {
         let bits = self.source_address.get();
         Ipv6Addr::from_bits(bits)
     }
 
+    /// Get destination address.
     pub const fn destination(&self) -> Ipv6Addr {
         let bits = self.destination_address.get();
         Ipv6Addr::from_bits(bits)
