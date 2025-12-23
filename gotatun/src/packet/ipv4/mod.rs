@@ -10,10 +10,16 @@ pub use protocol::*;
 
 use super::util::size_must_be;
 
+/// An Ipv4 packet.
+///
+/// This is a dynamically sized zerocopy type, which means you can compose packet types like
+/// `Ipv4<Udp<WgData>>` and cast them to/from byte slices using [`FromBytes`] and [`IntoBytes`].
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Ipv4<Payload: ?Sized = [u8]> {
+    /// IPv4 header.
     pub header: Ipv4Header,
+    /// IPv4 payload.
     pub payload: Payload,
 }
 
@@ -21,8 +27,14 @@ pub struct Ipv4<Payload: ?Sized = [u8]> {
 #[bitfield(u8)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv4VersionIhl {
+    /// IPv4 `ihl` field (Internet Header Length).
+    ///
+    /// This determines the length in `u32`s of the IPv4 header, including optional fields.
+    /// The minimum value is `5`, which implies no optional fields.
     #[bits(4)]
     pub ihl: u8,
+
+    /// IPv4 `version` field. This must be `4`.
     #[bits(4)]
     pub version: u8,
 }
@@ -37,36 +49,50 @@ pub struct Ipv4DscpEcn {
     pub dscp: u8,
 }
 
-/// A bitfield struct containing the IPv4 fields `flags` and `fragment_offset`.
+/// A bitfield struct containing the IPv4 bitflags and the `fragment_offset` field.
 #[bitfield(u16, order = Msb, repr = big_endian::U16, from = big_endian::U16::new, into = big_endian::U16::get)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv4FlagsFragmentOffset {
     _reserved: bool,
+    /// IPv4 `dont_fragment` flag.
     pub dont_fragment: bool,
+    /// IPv4 `more_fragments` flag.
     pub more_fragments: bool,
+    /// IPv4 `fragment_offset` field.
     #[bits(13)]
     pub fragment_offset: u16,
 }
 
+/// An IPv4 header.
 #[repr(C, packed)]
 #[derive(Clone, Copy, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv4Header {
+    /// IPv4 `version`, and `ihl` fields.
     pub version_and_ihl: Ipv4VersionIhl,
+    /// IPv4 `dscp`, and `ecn` fields.
     pub dscp_and_ecn: Ipv4DscpEcn,
+    /// Length of the IPv4 packet, including headers.
     pub total_len: big_endian::U16,
+    /// IPv4 `identification`. This is used for fragmentation.
     pub identification: big_endian::U16,
+    /// IPv4 bitflags, and `fragment_offset` fields.
     pub flags_and_fragment_offset: Ipv4FlagsFragmentOffset,
+    /// Maximum number of hops for the IPv4 packet.
     pub time_to_live: u8,
+    /// Protocol of the IPv4 payload.
     pub protocol: IpNextProtocol,
+    /// Checksum of the IPv4 header.
     pub header_checksum: big_endian::U16,
+    /// IPv4 source address. Use [`Ipv4Header::source`].
     pub source_address: big_endian::U32,
+    /// IPv4 destination address. Use [`Ipv4Header::destination`].
     pub destination_address: big_endian::U32,
 }
 
 impl Ipv4Header {
     /// Construct an IPv4 header with the reasonable defaults.
     ///
-    /// `payload` field is used to set the length and compute the checksum.
+    /// `payload` field is used to set the `total_len` field.
     #[allow(dead_code)]
     pub const fn new(
         source: Ipv4Addr,
@@ -77,6 +103,10 @@ impl Ipv4Header {
         Self::new_for_length(source, destination, protocol, payload.len() as u16)
     }
 
+    /// Construct an IPv4 header with the reasonable defaults.
+    ///
+    /// `payload_len` is used to set the `total_len` field.
+    /// The checksum is initialized to `0`.
     pub const fn new_for_length(
         source: Ipv4Addr,
         destination: Ipv4Addr,
@@ -105,54 +135,60 @@ impl Ipv4Header {
 }
 
 impl Ipv4Header {
+    /// Length, in bytes, of an [`Ipv4Header`].
     pub const LEN: usize = size_must_be::<Ipv4Header>(20);
 
-    /// The IP version. Must be `4` for a valid IPv4 header.
+    /// Get IP version. Must be `4` for a valid IPv4 header.
     pub const fn version(&self) -> u8 {
         self.version_and_ihl.version()
     }
 
-    /// Internet Header Length.
-    ///
-    /// This is the length of the IPv4 header, specified in 4-byte words.
-    /// The minimum value is `5`. If the header contains any IPv4 options, this value will be
-    /// larger.
+    /// Get [`ihl`](Ipv4VersionIhl::ihl)
     pub const fn ihl(&self) -> u8 {
         self.version_and_ihl.ihl()
     }
 
+    /// Get [`source_address`](Ipv4Header::source_address).
     pub const fn source(&self) -> Ipv4Addr {
         let bits = self.source_address.get();
         Ipv4Addr::from_bits(bits)
     }
 
+    /// Get [`destination_address`](Ipv4Header::destination_address).
     pub const fn destination(&self) -> Ipv4Addr {
         let bits = self.destination_address.get();
         Ipv4Addr::from_bits(bits)
     }
 
+    /// Get [`protocol`](Ipv4Header::protocol).
     pub const fn next_protocol(&self) -> IpNextProtocol {
         self.protocol
     }
 
+    /// Get [`dscp`](Ipv4DscpEcn::dscp).
     pub const fn dscp(&self) -> u8 {
         self.dscp_and_ecn.dscp()
     }
 
+    /// Get [`ecn`](Ipv4DscpEcn::ecn).
     pub const fn ecn(&self) -> u8 {
         self.dscp_and_ecn.ecn()
     }
 
+    /// Get [`dont_fragment`](Ipv4FlagsFragmentOffset::dont_fragment).
     pub const fn dont_fragment(&self) -> bool {
         self.flags_and_fragment_offset.dont_fragment()
     }
 
+    /// Get [`more_fragments`](Ipv4FlagsFragmentOffset::more_fragments).
     pub const fn more_fragments(&self) -> bool {
         self.flags_and_fragment_offset.more_fragments()
     }
 
-    /// Offset of IP fragment payload relative to the start of payload of the original packet.
-    /// Note that the value returned is in units of 8 bytes.
+    /// Get [`fragment_offset`](Ipv4FlagsFragmentOffset::fragment_offset).
+    ///
+    /// This is the offset of IP fragment payload relative to the start of payload of the original
+    /// packet. Note that the value returned is in units of 8 bytes.
     pub const fn fragment_offset(&self) -> u16 {
         self.flags_and_fragment_offset.fragment_offset()
     }
