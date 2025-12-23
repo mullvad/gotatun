@@ -17,7 +17,9 @@ use super::util::size_must_be;
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Ipv4<Payload: ?Sized = [u8]> {
+    /// IPv4 header.
     pub header: Ipv4Header,
+    /// IPv4 payload.
     pub payload: Payload,
 }
 
@@ -47,13 +49,16 @@ pub struct Ipv4DscpEcn {
     pub dscp: u8,
 }
 
-/// A bitfield struct containing the IPv4 fields `flags` and `fragment_offset`.
+/// A bitfield struct containing the IPv4 bitflags and the `fragment_offset` field.
 #[bitfield(u16, order = Msb, repr = big_endian::U16, from = big_endian::U16::new, into = big_endian::U16::get)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv4FlagsFragmentOffset {
     _reserved: bool,
+    /// IPv4 `dont_fragment` flag.
     pub dont_fragment: bool,
+    /// IPv4 `more_fragments` flag.
     pub more_fragments: bool,
+    /// IPv4 `fragment_offset` field.
     #[bits(13)]
     pub fragment_offset: u16,
 }
@@ -170,16 +175,20 @@ impl Ipv4Header {
         self.dscp_and_ecn.ecn()
     }
 
+    /// Get [`dont_fragment`](Ipv4FlagsFragmentOffset::dont_fragment).
     pub const fn dont_fragment(&self) -> bool {
         self.flags_and_fragment_offset.dont_fragment()
     }
 
+    /// Get [`more_fragments`](Ipv4FlagsFragmentOffset::more_fragments).
     pub const fn more_fragments(&self) -> bool {
         self.flags_and_fragment_offset.more_fragments()
     }
 
-    /// Offset of IP fragment payload relative to the start of payload of the original packet.
-    /// Note that the value returned is in units of 8 bytes.
+    /// Get [`fragment_offset`](Ipv4FlagsFragmentOffset::fragment_offset).
+    ///
+    /// This is the offset of IP fragment payload relative to the start of payload of the original
+    /// packet. Note that the value returned is in units of 8 bytes.
     pub const fn fragment_offset(&self) -> u16 {
         self.flags_and_fragment_offset.fragment_offset()
     }
