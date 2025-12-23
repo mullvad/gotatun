@@ -21,7 +21,7 @@ pub struct Ipv6<Payload: ?Sized = [u8]> {
     pub payload: Payload,
 }
 
-/// An IPv6 header
+/// An IPv6 header.
 #[repr(C, packed)]
 #[derive(Clone, Copy, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv6Header {
@@ -39,7 +39,7 @@ pub struct Ipv6Header {
     pub destination_address: big_endian::U128,
 }
 
-/// A bitfield struct containing the IPv6 fields `flow_label`, `traffic_class` and `version`
+/// A bitfield struct containing the IPv6 fields `flow_label`, `traffic_class` and `version`.
 #[bitfield(u32, repr = big_endian::U32, from = big_endian::U32::new, into = big_endian::U32::get)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv6VersionTrafficFlow {
