@@ -55,7 +55,7 @@ impl PcapStream {
 }
 
 impl<R> PcapSniffer<R> {
-    /// Create a [`Pcapsniffer`] by wrapping an [`IpRecv`] and a [`PcapStream`].
+    /// Create a [`PcapSniffer`] by wrapping an [`IpRecv`] and a [`PcapStream`].
     ///
     /// `epoch` is used to calculate the timestamps packets in the pcap stream.
     pub fn new(inner: R, writer: PcapStream, epoch: Instant) -> Self {
