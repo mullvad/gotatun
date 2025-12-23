@@ -193,6 +193,18 @@ pub trait WgHandshakeBase:
 
     /// Get MAC2
     fn mac2(&self) -> &[u8; 16];
+
+    /// Get packet until MAC1. Precisely equivalent to `packet[0..offsetof(packet.mac1)]`.
+    #[inline(always)]
+    fn until_mac1(&self) -> &[u8] {
+        &self.as_bytes()[..Self::MAC1_OFF]
+    }
+
+    /// Get packet until MAC2. Precisely equivalent to `packet[0..offsetof(packet.mac2)]`.
+    #[inline(always)]
+    fn until_mac2(&self) -> &[u8] {
+        &self.as_bytes()[..Self::MAC2_OFF]
+    }
 }
 
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
