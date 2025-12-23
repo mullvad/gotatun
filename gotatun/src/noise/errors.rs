@@ -19,5 +19,4 @@ pub enum WireGuardError {
     NoCurrentSession,
     LockFailed,
     ConnectionExpired,
-    UnderLoad,
 }
