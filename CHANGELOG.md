@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Rename `gotatun-cli` binary to `gotatun`.
+- Upgrade `tun` crate to 0.8.5.
+- Disable `wintun.dll` verification to speed up startup.
 
 ### Fixed
 - Handle SIGINT and SIGTERM in cli
