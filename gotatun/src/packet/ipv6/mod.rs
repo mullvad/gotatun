@@ -21,7 +21,7 @@ pub struct Ipv6<Payload: ?Sized = [u8]> {
     pub payload: Payload,
 }
 
-/// An IPV6 header
+/// An IPv6 header
 #[repr(C, packed)]
 #[derive(Clone, Copy, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv6Header {
