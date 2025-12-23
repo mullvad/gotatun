@@ -77,8 +77,8 @@ pub struct UdpChannelFactory {
 /// Create a set of channel-based TUN and UDP endpoints for in-process device communication.
 ///
 /// This function returns a tuple of ([`TunChannelTx`], [`TunChannelRx`], [`UdpChannelFactory`]), which
-/// can be used to connect two wireguard devices (e.g. for a multihop tunnel or for testing)
-/// entirely in memory.
+/// can be used, for example, to pipe arbitrary data into a wireguard device, or to implement multihop.
+/// Entirely in userspace.
 ///
 /// # Arguments
 /// * `capacity` - The channel buffer size for each direction.
