@@ -12,6 +12,10 @@ use crate::{
 };
 use tokio::sync::{Mutex, mpsc};
 
+/// An [`IpSend`] that wraps another [`IpSend`] to provide buffering.
+///
+/// Packets sent on this [`IpSend::send`] will be buffered on a channel, and asynchronously
+/// processed on another task. This means [`IpSend::send`] won't block unless the channel is full.
 #[derive(Clone)]
 pub struct BufferedIpSend {
     tx: mpsc::Sender<Packet<Ip>>,
@@ -19,6 +23,7 @@ pub struct BufferedIpSend {
 }
 
 impl BufferedIpSend {
+    /// Wrap an [`IpSend`].
     pub fn new<I: IpSend>(capacity: usize, inner: Arc<Mutex<I>>) -> Self {
         let (tx, mut rx) = mpsc::channel::<Packet<Ip>>(capacity);
 
@@ -48,6 +53,10 @@ impl IpSend for BufferedIpSend {
     }
 }
 
+/// An [`IpRecv`] that wraps another [`IpRecv`] to provide buffering.
+///
+/// This will spawn a background task that contiuously calls [`IpRecv::recv`] until the buffer is
+/// full. Any call to [`IpRecv::recv`] on _this_ object will not block unless the channel is empty.
 pub struct BufferedIpRecv<I> {
     rx: mpsc::Receiver<Packet<Ip>>,
     rx_packet_buf: Vec<Packet<Ip>>,
