@@ -4,6 +4,7 @@
 // Copyright (c) 2025 Mullvad VPN.
 //
 // SPDX-License-Identifier: BSD-3-Clause
+#![allow(clippy::cast_possible_truncation)]
 
 pub mod errors;
 pub mod handshake;
