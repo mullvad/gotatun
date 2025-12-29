@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 // Common imports that are used on both platforms
+mod allocator;
 
 // Unix implementation in a module
 #[cfg(unix)]
