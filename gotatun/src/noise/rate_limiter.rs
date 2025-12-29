@@ -15,6 +15,7 @@ use constant_time_eq::constant_time_eq;
 use mock_instant::Instant;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 #[cfg(not(feature = "mock_instant"))]
 use crate::sleepyinstant::Instant;
@@ -29,8 +30,8 @@ const COOKIE_REFRESH: u64 = 128; // Use 128 and not 120 so the compiler can opti
 const COOKIE_SIZE: usize = 16;
 const COOKIE_NONCE_SIZE: usize = 24;
 
-/// How often should reset count in seconds
-const RESET_PERIOD: u64 = 1;
+/// How often to reset the under-load counter
+const RESET_PERIOD: Duration = Duration::from_secs(1);
 
 type Cookie = [u8; COOKIE_SIZE];
 
@@ -84,11 +85,11 @@ impl RateLimiter {
     }
 
     /// Reset packet count (ideally should be called with a period of 1 second)
-    pub fn reset_count(&self) {
+    pub fn try_reset_count(&self) {
         // The rate limiter is not very accurate, but at the scale we care about it doesn't matter much
         let current_time = Instant::now();
         let mut last_reset_time = self.last_reset.lock();
-        if current_time.duration_since(*last_reset_time).as_secs() >= RESET_PERIOD {
+        if current_time.duration_since(*last_reset_time) >= RESET_PERIOD {
             self.count.store(0, Ordering::SeqCst);
             *last_reset_time = current_time;
         }
@@ -151,11 +152,7 @@ impl RateLimiter {
 
     /// Decode the packet as wireguard packet.
     /// Then, verify the MAC fields on the packet (if any), and apply rate limiting if needed.
-    pub fn verify_packet(
-        &self,
-        src_addr: Option<IpAddr>,
-        packet: Packet,
-    ) -> Result<WgKind, TunnResult> {
+    pub fn verify_packet(&self, src_addr: IpAddr, packet: Packet) -> Result<WgKind, TunnResult> {
         let packet = packet
             .try_into_wg()
             .map_err(|_err| TunnResult::Err(WireGuardError::InvalidPacket))?;
@@ -175,7 +172,7 @@ impl RateLimiter {
     /// Verify the MAC fields on the handshake, and apply rate limiting if needed.
     pub(crate) fn verify_handshake<P: WgHandshakeBase>(
         &self,
-        src_addr: Option<IpAddr>,
+        src_addr: IpAddr,
         handshake: Packet<P>,
     ) -> Result<Packet<P>, TunnResult> {
         let sender_idx = handshake.sender_idx();
@@ -190,13 +187,7 @@ impl RateLimiter {
         }
 
         if self.is_under_load() {
-            let addr = match src_addr {
-                None => return Err(TunnResult::Err(WireGuardError::UnderLoad)),
-                Some(addr) => addr,
-            };
-
-            // Only given an address can we validate mac2
-            let cookie = self.current_cookie(addr);
+            let cookie = self.current_cookie(src_addr);
             let computed_mac2 = b2s_keyed_mac_16_2(&cookie, packet_until_mac, mac1);
 
             if !constant_time_eq(&computed_mac2, mac2) {
@@ -204,6 +195,9 @@ impl RateLimiter {
                 let packet = handshake.overwrite_with(&cookie_reply);
                 return Err(TunnResult::WriteToNetwork(packet.into()));
             }
+
+            // If under load but mac2 is valid, allow the handshake
+            return Ok(handshake);
         }
 
         Ok(handshake)

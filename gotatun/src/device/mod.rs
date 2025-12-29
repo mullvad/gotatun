@@ -46,7 +46,8 @@ use allowed_ips::AllowedIps;
 use peer::{AllowedIP, Peer};
 use rand_core::{OsRng, RngCore};
 
-const HANDSHAKE_RATE_LIMIT: u64 = 100; // The number of handshakes per second we can tolerate before using cookies
+/// The number of handshakes per second to tolerate before using cookies
+const HANDSHAKE_RATE_LIMIT: u64 = 100;
 
 /// Maximum number of packet buffers that each channel may contain
 const MAX_PACKET_BUFS: usize = 4000;
@@ -451,6 +452,11 @@ impl<T: DeviceTransports> Device<T> {
             .key_pair
             .as_ref()
             .expect("Private key must be set first");
+        let rate_limiter = self
+            .rate_limiter
+            .as_ref()
+            .expect("Setting private key creates rate limiter")
+            .clone();
 
         let tunn = Tunn::new(
             device_key_pair.0.clone(),
@@ -458,7 +464,7 @@ impl<T: DeviceTransports> Device<T> {
             preshared_key,
             keepalive,
             index,
-            None,
+            rate_limiter,
         );
 
         let allowed_ips = if replace_allowed_ips {
@@ -572,7 +578,7 @@ impl<T: DeviceTransports> Device<T> {
             peer.lock().await.tunnel.set_static_private(
                 private_key.clone(),
                 public_key,
-                Some(Arc::clone(&rate_limiter)),
+                Arc::clone(&rate_limiter),
             )
         }
 
@@ -608,20 +614,6 @@ impl<T: DeviceTransports> Device<T> {
     }
 
     async fn handle_timers(device: Weak<RwLock<Self>>, udp4: impl UdpSend, udp6: impl UdpSend) {
-        // TODO: fix rate limiting
-        /*
-        self.queue.new_periodic_event(
-            // Reset the rate limiter every second give or take
-            Box::new(|d, _| {
-                if let Some(r) = d.rate_limiter.as_ref() {
-                    r.reset_count()
-                }
-                Action::Continue
-            }),
-            std::time::Duration::from_secs(1),
-        )?;
-        */
-
         loop {
             tokio::time::sleep(Duration::from_millis(250)).await;
 
@@ -683,9 +675,9 @@ impl<T: DeviceTransports> Device<T> {
         };
 
         while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
-            let parsed_packet = match rate_limiter.verify_packet(Some(addr.ip()), src_buf) {
+            let parsed_packet = match rate_limiter.verify_packet(addr.ip(), src_buf) {
                 Ok(packet) => packet,
-                Err(TunnResult::WriteToNetwork(cookie)) => {
+                Err(TunnResult::WriteToNetwork(WgKind::CookieReply(cookie))) => {
                     if let Err(_err) = udp_tx.send_to(cookie.into(), addr).await {
                         log::trace!("udp.send_to failed");
                         break;

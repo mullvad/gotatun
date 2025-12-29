@@ -25,9 +25,6 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// The default value to use for rate limiting, when no other rate limiter is defined
-const PEER_HANDSHAKE_RATE_LIMIT: u64 = 10;
-
 const MAX_QUEUE_DEPTH: usize = 256;
 /// number of sessions in the ring, better keep a PoT
 const N_SESSIONS: usize = 8;
@@ -76,7 +73,7 @@ impl Tunn {
         preshared_key: Option<[u8; 32]>,
         persistent_keepalive: Option<u16>,
         index: u32,
-        rate_limiter: Option<Arc<RateLimiter>>,
+        rate_limiter: Arc<RateLimiter>,
     ) -> Self {
         let static_public = x25519::PublicKey::from(&static_private);
 
@@ -94,11 +91,9 @@ impl Tunn {
             rx_bytes: Default::default(),
 
             packet_queue: VecDeque::new(),
-            timers: Timers::new(persistent_keepalive, rate_limiter.is_none()),
+            timers: Timers::new(persistent_keepalive),
 
-            rate_limiter: rate_limiter.unwrap_or_else(|| {
-                Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
-            }),
+            rate_limiter,
         }
     }
 
@@ -107,12 +102,9 @@ impl Tunn {
         &mut self,
         static_private: x25519::StaticSecret,
         static_public: x25519::PublicKey,
-        rate_limiter: Option<Arc<RateLimiter>>,
+        rate_limiter: Arc<RateLimiter>,
     ) {
-        self.timers.should_reset_rr = rate_limiter.is_none();
-        self.rate_limiter = rate_limiter.unwrap_or_else(|| {
-            Arc::new(RateLimiter::new(&static_public, PEER_HANDSHAKE_RATE_LIMIT))
-        });
+        self.rate_limiter = rate_limiter;
         self.handshake
             .set_static_private(static_private, static_public);
         for s in &mut self.sessions {
@@ -374,12 +366,18 @@ impl Tunn {
 
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
+
     #[cfg(feature = "mock_instant")]
     use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT};
     use crate::packet::Ipv4;
 
+    const HANDSHAKE_RATE_LIMIT: u64 = 100;
+
     use super::*;
     use bytes::BytesMut;
+    #[cfg(feature = "mock_instant")]
+    use mock_instant::MockClock;
     use rand_core::{OsRng, RngCore};
 
     fn create_two_tuns() -> (Tunn, Tunn) {
@@ -391,9 +389,25 @@ mod tests {
         let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
         let their_idx = OsRng.next_u32();
 
-        let my_tun = Tunn::new(my_secret_key, their_public_key, None, None, my_idx, None);
+        let rate_limiter = Arc::new(RateLimiter::new(&my_public_key, HANDSHAKE_RATE_LIMIT));
+        let my_tun = Tunn::new(
+            my_secret_key,
+            their_public_key,
+            None,
+            None,
+            my_idx,
+            rate_limiter,
+        );
 
-        let their_tun = Tunn::new(their_secret_key, my_public_key, None, None, their_idx, None);
+        let rate_limiter = Arc::new(RateLimiter::new(&their_public_key, HANDSHAKE_RATE_LIMIT));
+        let their_tun = Tunn::new(
+            their_secret_key,
+            my_public_key,
+            None,
+            None,
+            their_idx,
+            rate_limiter,
+        );
 
         (my_tun, their_tun)
     }
@@ -408,7 +422,10 @@ mod tests {
         handshake_init: Packet<WgHandshakeInit>,
     ) -> Packet<WgHandshakeResp> {
         let handshake_resp = tun.handle_incoming_packet(WgKind::HandshakeInit(handshake_init));
-        assert!(matches!(handshake_resp, TunnResult::WriteToNetwork(_)));
+        assert!(
+            matches!(handshake_resp, TunnResult::WriteToNetwork(_)),
+            "expected WriteToNetwork, {handshake_resp:?}"
+        );
 
         let TunnResult::WriteToNetwork(handshake_resp) = handshake_resp else {
             unreachable!("expected WriteToNetwork");
@@ -495,13 +512,57 @@ mod tests {
 
         their_tun
             .rate_limiter
-            .verify_handshake(None, init)
+            .verify_handshake(Ipv4Addr::LOCALHOST.into(), init)
             .expect("Handshake init to be valid");
 
         my_tun
             .rate_limiter
-            .verify_handshake(None, resp)
+            .verify_handshake(Ipv4Addr::LOCALHOST.into(), resp)
             .expect("Handshake response to be valid");
+    }
+
+    #[test]
+    #[cfg(feature = "mock_instant")]
+    /// Verify that cookie reply is sent when rate limit is hit.
+    /// And that handshakes are accepted under load with a valid mac2.
+    fn verify_cookie_reply() {
+        let forced_handshake_init = |tun: &mut Tunn| {
+            tun.format_handshake_initiation(true)
+                .expect("expected handshake init")
+        };
+
+        let (mut my_tun, their_tun) = create_two_tuns();
+
+        for _ in 0..HANDSHAKE_RATE_LIMIT {
+            let init = forced_handshake_init(&mut my_tun);
+            their_tun
+                .rate_limiter
+                .verify_handshake(Ipv4Addr::LOCALHOST.into(), init)
+                .expect("Handshake init to be valid");
+
+            MockClock::advance(Duration::from_micros(1));
+        }
+
+        // Next handshake should trigger rate limiting
+        let init = forced_handshake_init(&mut my_tun);
+        let Err(TunnResult::WriteToNetwork(WgKind::CookieReply(cookie_resp))) = their_tun
+            .rate_limiter
+            .verify_handshake(Ipv4Addr::LOCALHOST.into(), init)
+        else {
+            panic!("expected cookie reply due to rate limiting");
+        };
+
+        // Verify that cookie reply can be processed
+        // And that the peer accepts our handshake after that
+        my_tun
+            .handle_cookie_reply(&cookie_resp)
+            .expect("expected cookie reply to be valid");
+
+        let init = forced_handshake_init(&mut my_tun);
+        their_tun
+            .rate_limiter
+            .verify_handshake(Ipv4Addr::LOCALHOST.into(), init)
+            .expect("should accept handshake with cookie");
     }
 
     #[test]
@@ -516,13 +577,13 @@ mod tests {
 
         their_tun
             .rate_limiter
-            .verify_handshake(None, init.clone())
+            .verify_handshake(Ipv4Addr::LOCALHOST.into(), init.clone())
             .map(|packet| packet.mac1)
             .expect_err("Handshake init to be invalid");
 
         my_tun
             .rate_limiter
-            .verify_handshake(None, resp)
+            .verify_handshake(Ipv4Addr::LOCALHOST.into(), resp)
             .map(|packet| packet.mac1)
             .expect_err("Handshake response to be invalid");
     }
