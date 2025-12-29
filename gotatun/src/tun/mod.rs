@@ -1,6 +1,10 @@
 // Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! Trait abstractions for TUN devices.
+//!
+//! See [`IpSend`] and [`IpRecv`].
+
 use tokio::sync::watch;
 
 use crate::packet::{Ip, Packet, PacketBufPool};
@@ -18,8 +22,8 @@ pub mod tun_async_device;
 
 /// A type that let's you send an IP packet.
 ///
-/// This is used as an abstraction of the TUN device used by wireguard,
-/// and enables us to, for example, swap it out with a channel.
+/// This is used as an abstraction of the TUN device used by WireGuard,
+/// but can be implemented by anything. For example, a tokio channel.
 pub trait IpSend: Send + Sync + 'static {
     /// Send a complete IP packet.
     // TODO: consider refactoring trait with methods that take `Packet<Ipv4>` and `Packet<Ipv6>`
@@ -28,8 +32,8 @@ pub trait IpSend: Send + Sync + 'static {
 
 /// A type that let's you receive an IP packet.
 ///
-/// This is used as an abstraction of the TUN device used by wireguard,
-/// and enables us to, for example, swap it out with a channel.
+/// This is used as an abstraction of the TUN device used by WireGuard,
+/// but can be implemented by anything. For example, a tokio channel.
 pub trait IpRecv: Send + Sync + 'static {
     /// Receive a complete IP packet.
     // TODO: consider refactoring trait with methods that return `Packet<Ipv4>` and `Packet<Ipv6>`
@@ -45,6 +49,9 @@ pub trait IpRecv: Send + Sync + 'static {
     fn mtu(&self) -> MtuWatcher;
 }
 
+/// This watches for MTU changes on an [`IpRecv`] (e.g. a TUN device).
+///
+/// To provide MTU updates yourself, you can create this from a tokio [`watch`].
 #[derive(Clone)]
 pub struct MtuWatcher {
     mtu_source: MtuSource,

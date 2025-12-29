@@ -22,8 +22,13 @@ pub mod socket;
 ///
 /// See [`UdpSend`] and [`UdpRecv`].
 pub trait UdpTransportFactory: Send + Sync + 'static {
+    /// The [`UdpSend`] returned by [`UdpTransportFactory::bind`].
     type Send: UdpSend + 'static;
+
+    /// The [`UdpRecv`] for IPv4 returned by [`UdpTransportFactory::bind`].
     type RecvV4: UdpRecv + 'static;
+
+    /// The [`UdpRecv`] for IPv6 returned by [`UdpTransportFactory::bind`].
     type RecvV6: UdpRecv + 'static;
 
     /// Bind sockets for sending and receiving UDP.
@@ -39,10 +44,16 @@ pub trait UdpTransportFactory: Send + Sync + 'static {
 /// Arguments to [`UdpTransportFactory::bind`].
 #[derive(Clone)]
 pub struct UdpTransportFactoryParams {
+    /// The [`Ipv4Addr`] to bind the UDP socket to.
     pub addr_v4: Ipv4Addr,
+
+    /// The [`Ipv6Addr`] to bind the UDP socket to.
     pub addr_v6: Ipv6Addr,
+
+    /// The port to bind the UDP socket to.
     pub port: u16,
 
+    /// If `Some`, set `fwmark` on the socket.
     #[cfg(target_os = "linux")]
     pub fwmark: Option<u32>,
 }
@@ -93,6 +104,8 @@ pub trait UdpRecv: Send + Sync {
 /// This allows us to, for example, swap out UDP sockets with a channel.
 // TODO: consider splitting into UdpSendV4 and UdpSendV6
 pub trait UdpSend: Send + Sync + Clone {
+    /// The implementations of [`UdpSend::send_many_to`] typically require a buffer of some kind.
+    /// This buffer should be created by the caller (using `::default()`), and reused between calls.
     type SendManyBuf: Default + Send + Sync;
 
     /// Send a single UDP packet to `destination`.

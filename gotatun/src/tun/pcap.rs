@@ -17,12 +17,17 @@ use crate::{
     tun::{IpRecv, IpSend, MtuWatcher},
 };
 
+/// A [`Write`] wrapper that can be used to create a [`PcapSniffer`].
 #[derive(Clone)]
 pub struct PcapStream {
     writer: Arc<Mutex<pcap_file::pcap::PcapWriter<Box<dyn Write + Send>>>>,
 }
 
-/// An implementor of [IpSend] and [IpRecv] which also dumps all packets in the pcap file format to a [Write] (See [PcapStream]).
+/// An implementation of [IpSend] and [IpRecv] which also dumps all packets in the pcap file
+/// format to a [Write] (See [PcapStream]).
+///
+/// Note that this is only intended for development and debugging.
+/// As such, it has a considerable performance penalty.
 #[derive(Clone)]
 pub struct PcapSniffer<I> {
     inner: I,
@@ -31,6 +36,7 @@ pub struct PcapSniffer<I> {
 }
 
 impl PcapStream {
+    /// Create a [`PcapStream`] by wrapping a [`Write`].
     pub fn new(write: Box<dyn Write + Send>) -> Self {
         let writer = pcap_file::pcap::PcapWriter::with_header(
             write,
@@ -49,6 +55,9 @@ impl PcapStream {
 }
 
 impl<R> PcapSniffer<R> {
+    /// Create a [`PcapSniffer`] by wrapping an [`IpRecv`] and a [`PcapStream`].
+    ///
+    /// `epoch` is used to calculate the timestamps packets in the pcap stream.
     pub fn new(inner: R, writer: PcapStream, epoch: Instant) -> Self {
         Self {
             inner,

@@ -1,0 +1,57 @@
+name: cargo-doc
+
+on:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  docs-linux:
+    name: Check documentation (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Cache cargo directories
+        id: cache-cargo-restore
+        uses: actions/cache@v4
+        with: # NOTE: keep this in sync with `cache-cargo-save`
+          key: ${{ runner.os }}-cargo-doc-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            target/doc
+
+      - name: Check all feature combinations
+        run: |
+          # Extract features from Cargo.toml
+          readarray -t features < <(cargo metadata --no-deps --format-version=1 | jq -r '.packages[].features | keys[]')
+          echo "Features: ${features[*]}"
+
+          echo "Checking docs with all features and all dependencies"
+          cargo doc --locked --release -p gotatun --all-features
+
+          echo "Checking docs with no features (no-deps)"
+          cargo doc --locked --release -p gotatun --no-default-features --no-deps
+
+          for feature in ${features[*]}; do
+            echo "Checking docs with --features=$feature (no-deps)"
+            cargo doc --locked --release -p gotatun --no-default-features --no-deps --features "$feature"
+          done
+
+      # Cache cargo directories, even if the job failed.
+      - name: Always cache cargo dirs
+        id: cache-cargo-save
+        if: always() && steps.cache-cargo-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with: # NOTE: keep this in sync with `cache-cargo-restore`
+          key: ${{ runner.os }}-cargo-doc-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            target/doc
