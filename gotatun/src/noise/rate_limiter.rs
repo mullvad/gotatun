@@ -197,6 +197,7 @@ impl RateLimiter {
             }
 
             // If under load but mac2 is valid, allow the handshake
+            return Ok(handshake);
         }
 
         Ok(handshake)
