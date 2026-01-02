@@ -236,9 +236,10 @@ impl<T: DeviceTransports> Device<T> {
                 Request::Set(set) => {
                     let mut device_guard = device.write().await;
                     let (response, reconfigure) = on_api_set(set, &mut device_guard).await;
+                    let has_key_pair = device_guard.key_pair.is_some();
                     drop(device_guard);
 
-                    if reconfigure == Reconfigure::Yes {
+                    if reconfigure == Reconfigure::Yes && has_key_pair {
                         match Connection::set_up(device.clone()).await {
                             Ok(con) => {
                                 let mut device_guard = device.write().await;
