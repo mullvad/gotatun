@@ -25,8 +25,6 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
 
-    use tokio::test;
-
     static NEXT_IFACE_IDX: AtomicUsize = AtomicUsize::new(100); // utun 100+ should be vacant during testing on CI
     static NEXT_PORT: AtomicUsize = AtomicUsize::new(61111); // Use ports starting with 61111, hoping we don't run into a taken port 🤷
     static NEXT_IP: AtomicUsize = AtomicUsize::new(0xc0000200); // Use 192.0.2.0/24 for those tests, we might use more than 256 addresses though, usize must be >=32 bits on all supported platforms
@@ -263,15 +261,13 @@ mod tests {
     impl WGHandle {
         /// Create a new interface for the tunnel with the given address
         async fn init(addr_v4: IpAddr, addr_v6: IpAddr) -> WGHandle {
-            WGHandle::init_with_config(
-                addr_v4,
-                addr_v6,
-                DeviceConfig {
-                    #[cfg(target_os = "linux")]
-                    api: None,
-                },
-            )
-            .await
+            // Generate a new name, utun100+ should work on macOS and Linux
+            let name = format!("utun{}", NEXT_IFACE_IDX.fetch_add(1, Ordering::Relaxed));
+            let config = DeviceConfig {
+                #[cfg(target_os = "linux")]
+                api: Some(crate::device::api::ApiServer::default_unix_socket(&name).unwrap()),
+            };
+            WGHandle::init_with_config(addr_v4, addr_v6, config, &name).await
         }
 
         /// Create a new interface for the tunnel with the given address
@@ -279,15 +275,14 @@ mod tests {
             addr_v4: IpAddr,
             addr_v6: IpAddr,
             config: DeviceConfig,
+            tun_name: &str,
         ) -> WGHandle {
-            // Generate a new name, utun100+ should work on macOS and Linux
-            let name = format!("utun{}", NEXT_IFACE_IDX.fetch_add(1, Ordering::Relaxed));
-            let _device = DeviceHandle::from_tun_name(UdpSocketFactory, &name, config)
+            let _device = DeviceHandle::from_tun_name(UdpSocketFactory, tun_name, config)
                 .await
                 .unwrap();
             WGHandle {
                 _device,
-                name,
+                name: tun_name.to_owned(),
                 addr_v4,
                 addr_v6,
                 started: false,
@@ -405,14 +400,17 @@ mod tests {
         }
 
         /// Issue a get command on the interface
-        fn wg_get(&self) -> String {
+        async fn wg_get(&self) -> String {
+            use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
             let path = format!("/var/run/wireguard/{}.sock", self.name);
 
-            let mut socket = UnixStream::connect(path).unwrap();
-            write!(socket, "get=1\n\n").unwrap();
+            let mut socket = tokio::net::UnixStream::connect(path).await.unwrap();
+            socket.write_all(b"get=1\n\n").await.unwrap();
 
             let mut ret = String::new();
-            socket.read_to_string(&mut ret).unwrap();
+            let mut reader = tokio::io::BufReader::new(socket);
+            // Read until end of file or empty newline
+            while reader.read_line(&mut ret).await.unwrap() > 1 {}
             ret
         }
 
@@ -472,40 +470,39 @@ mod tests {
         path
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore]
     /// Test if wireguard starts and creates a unix socket that we can read from
     async fn test_wireguard_get() {
         let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap()).await;
-        let response = wg.wg_get();
-        assert!(response.ends_with("errno=0\n\n"));
+        let response = wg.wg_get().await;
+        assert!(
+            response.ends_with("errno=0\n\n"),
+            "Got response '{response}'"
+        );
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore]
     /// Test if wireguard starts and creates a unix socket that we can use to set settings
     async fn test_wireguard_set() {
         let port = next_port();
-        let private_key = StaticSecret::random_from_rng(OsRng);
-        let own_public_key = PublicKey::from(&private_key);
+        let own_private_key = StaticSecret::random_from_rng(OsRng);
 
         let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap()).await;
-        assert!(wg.wg_get().ends_with("errno=0\n\n"));
+        assert!(wg.wg_get().await.ends_with("errno=0\n\n"));
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
-        assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
+        assert_eq!(wg.wg_set_key(own_private_key.clone()), "errno=0\n\n");
 
+        let own_private_key = encode(own_private_key.as_bytes());
         // Check that the response matches what we expect
         assert_eq!(
-            wg.wg_get(),
-            format!(
-                "own_public_key={}\nlisten_port={}\nerrno=0\n\n",
-                encode(own_public_key.as_bytes()),
-                port
-            )
+            wg.wg_get().await,
+            format!("private_key={own_private_key}\nlisten_port={port}\nerrno=0\n\n",)
         );
 
-        let peer_key = StaticSecret::random_from_rng(OsRng);
-        let peer_pub_key = PublicKey::from(&peer_key);
+        let peer_private_key = StaticSecret::random_from_rng(OsRng);
+        let peer_pub_key = PublicKey::from(&peer_private_key);
         let endpoint = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(172, 0, 0, 1)), 50001);
         let allowed_ips = [
             AllowedIp {
@@ -524,28 +521,23 @@ mod tests {
         );
 
         // Check that the response matches what we expect
-        assert_eq!(
-            wg.wg_get(),
-            format!(
-                "own_public_key={}\n\
-                 listen_port={}\n\
-                 public_key={}\n\
-                 endpoint={}\n\
-                 allowed_ip={}/{}\n\
-                 allowed_ip={}/{}\n\
-                 rx_bytes=0\n\
-                 tx_bytes=0\n\
-                 errno=0\n\n",
-                encode(own_public_key.as_bytes()),
-                port,
-                encode(peer_pub_key.as_bytes()),
-                endpoint,
-                allowed_ips[0].ip,
-                allowed_ips[0].cidr,
-                allowed_ips[1].ip,
-                allowed_ips[1].cidr
-            )
-        );
+        let wg_get = wg.wg_get().await;
+        let peer_pub_key = encode(peer_pub_key.as_bytes());
+        assert!(wg_get.contains(&format!("public_key={peer_pub_key}")));
+        assert!(wg_get.contains(&format!("endpoint={endpoint}")));
+        assert!(wg_get.contains(&format!(
+            "allowed_ip={}/{}",
+            allowed_ips[0].ip, allowed_ips[0].cidr
+        )));
+        assert!(wg_get.contains(&format!(
+            "allowed_ip={}/{}",
+            allowed_ips[1].ip, allowed_ips[1].cidr
+        )));
+        assert!(wg_get.contains("rx_bytes=0"));
+        assert!(wg_get.contains("tx_bytes=0"));
+        assert!(wg_get.contains(&format!("private_key={own_private_key}")));
+        assert!(wg_get.contains(&format!("listen_port={port}")));
+        assert!(wg_get.contains("errno=0"));
     }
 
     /// Test if wireguard can handle simple ipv4 connections, don't use a connected socket
@@ -558,16 +550,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::init_with_config(
-            addr_v4,
-            addr_v6,
-            DeviceConfig {
-                //use_connected_socket: false,
-                #[cfg(target_os = "linux")]
-                api: None,
-            },
-        )
-        .await;
+        let mut wg = WGHandle::init(addr_v4, addr_v6).await;
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -714,15 +697,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::init_with_config(
-            addr_v4,
-            addr_v6,
-            DeviceConfig {
-                #[cfg(target_os = "linux")]
-                api: None,
-            },
-        )
-        .await;
+        let mut wg = WGHandle::init(addr_v4, addr_v6).await;
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
