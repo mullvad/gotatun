@@ -493,26 +493,23 @@ mod tests {
     /// Test if wireguard starts and creates a unix socket that we can use to set settings
     async fn test_wireguard_set() {
         let port = next_port();
-        let private_key = StaticSecret::random_from_rng(OsRng);
-        let public_key = PublicKey::from(&private_key);
+        let own_private_key = StaticSecret::random_from_rng(OsRng);
+        // let own_public_key = PublicKey::from(&own_private_key);
 
         let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap()).await;
         assert!(wg.wg_get().await.ends_with("errno=0\n\n"));
         assert_eq!(wg.wg_set_port(port).await, "errno=0\n\n");
-        assert_eq!(wg.wg_set_key(private_key).await, "errno=0\n\n");
+        assert_eq!(wg.wg_set_key(own_private_key.clone()).await, "errno=0\n\n");
 
+        let own_private_key = encode(own_private_key.as_bytes());
         // Check that the response matches what we expect
         assert_eq!(
             wg.wg_get().await,
-            format!(
-                "public_key={}\nlisten_port={}\nerrno=0\n\n",
-                encode(public_key.as_bytes()),
-                port
-            )
+            format!("private_key={own_private_key}\nlisten_port={port}\nerrno=0\n\n",)
         );
 
-        let peer_key = StaticSecret::random_from_rng(OsRng);
-        let peer_pub_key = PublicKey::from(&peer_key);
+        let peer_private_key = StaticSecret::random_from_rng(OsRng);
+        let peer_pub_key = PublicKey::from(&peer_private_key);
         let endpoint = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(172, 0, 0, 1)), 50001);
         let allowed_ips = [
             AllowedIp {
@@ -530,27 +527,23 @@ mod tests {
             "errno=0\n\n"
         );
 
+        let peer_pub_key = encode(peer_pub_key.as_bytes());
+
+        // The test fails as the response is formatted in different order, is that not ok?
         // Check that the response matches what we expect
         assert_eq!(
             wg.wg_get().await,
             format!(
-                "public_key={}\n\
-                 listen_port={}\n\
-                 public_key={}\n\
-                 endpoint={}\n\
+                "private_key={own_private_key}\n\
+                 listen_port={port}\n\
+                 public_key={peer_pub_key}\n\
+                 endpoint={endpoint}\n\
                  allowed_ip={}/{}\n\
                  allowed_ip={}/{}\n\
                  rx_bytes=0\n\
                  tx_bytes=0\n\
                  errno=0\n\n",
-                encode(public_key.as_bytes()),
-                port,
-                encode(peer_pub_key.as_bytes()),
-                endpoint,
-                allowed_ips[0].ip,
-                allowed_ips[0].cidr,
-                allowed_ips[1].ip,
-                allowed_ips[1].cidr
+                allowed_ips[0].ip, allowed_ips[0].cidr, allowed_ips[1].ip, allowed_ips[1].cidr
             )
         );
     }
