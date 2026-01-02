@@ -454,5 +454,10 @@ async fn on_api_set(
         device.update_peer(update_peer).await;
     }
 
+    // If there is no key pair, we cannot reconfigure the connection
+    if device.key_pair.is_none() {
+        reconfigure = Reconfigure::No;
+    }
+
     (SetResponse { errno: 0 }, reconfigure)
 }
