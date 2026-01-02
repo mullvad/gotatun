@@ -24,7 +24,7 @@ where
         futures::select! {
             _ = event_rx.recv_many(&mut event_buf, usize::MAX).fuse() => {
                 if event_buf.is_empty() {
-                    log::debug!("DAITA: event_rx channel closed, exiting handle_events");
+                    tracing::debug!("DAITA: event_rx channel closed, exiting handle_events");
                     return None; // channel closed
                 }
             },

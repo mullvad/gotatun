@@ -3,6 +3,7 @@
 
 use std::pin::Pin;
 use tokio::task::JoinHandle;
+use tracing::Instrument;
 
 /// A wrapper around [`JoinHandle`] that.
 /// - Aborts the task on Drop.
@@ -16,11 +17,12 @@ pub struct Task {
     /// - Self is dropped.
     /// - [`Self::stop`] is called.
     handle: Option<JoinHandle<()>>,
+    span: tracing::Span,
 }
 
 pub trait TaskOutput: Sized + Send + 'static {
     fn handle(self, task_name: &'static str) {
-        log::debug!("task {task_name:?} exited");
+        tracing::debug!("task {task_name:?} exited");
     }
 }
 
@@ -34,7 +36,7 @@ where
     fn handle(self, task_name: &'static str) {
         match self {
             Ok(..) => ().handle(task_name),
-            Err(e) => log::error!("task {task_name:?} errored: {e:?}"),
+            Err(e) => tracing::error!("task {task_name:?} errored: {e:?}"),
         }
     }
 }
@@ -46,14 +48,21 @@ impl Task {
         Fut: Future<Output = O> + Send + 'static,
         O: TaskOutput,
     {
-        let handle = tokio::spawn(async move {
-            let output = fut.await;
-            TaskOutput::handle(output, name);
-        });
+        // Set task parent to None to avoid nesting tracing spans
+        let span = tracing::info_span!(parent: None, "Task", name = name);
+        let handle = tokio::spawn(
+            async move {
+                tracing::info!("Task started");
+                let output = fut.await;
+                TaskOutput::handle(output, name);
+            }
+            .instrument(span.clone()),
+        );
 
         Task {
             name,
             handle: Some(handle),
+            span,
         }
     }
 }
@@ -80,10 +89,10 @@ impl Task {
             handle.abort();
             match handle.await {
                 Err(e) if e.is_panic() => {
-                    log::error!("task {} panicked: {e:#?}", self.name);
+                    tracing::error!(parent: &self.span, "task {} panicked: {e:#?}", self.name);
                 }
                 _ => {
-                    log::debug!("stopped task {}", self.name);
+                    tracing::debug!(parent: &self.span, "stopped task {}", self.name);
                 }
             }
         }
@@ -93,7 +102,7 @@ impl Task {
 impl Drop for Task {
     fn drop(&mut self) {
         if let Some(handle) = self.handle.take() {
-            log::debug!("dropped task {}", self.name);
+            tracing::debug!(parent: &self.span, "dropped task {}", self.name);
 
             // Note that the task future isn't dropped when calling abort.
             // It is dropped by the tokio runtime at some point in the future.

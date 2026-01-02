@@ -49,14 +49,14 @@ impl BufferedUdpSend {
                         let _ = udp_tx
                             .send_to(packet, addr)
                             .await
-                            .inspect_err(|e| log::trace!("send_to_err: {e:#}"));
+                            .inspect_err(|e| tracing::trace!("send_to_err: {e:#}"));
                     }
                     2.. => {
                         // send all packets at once
                         if let Err(e) = udp_tx.send_many_to(&mut send_many_buf, buf).await {
-                            log::trace!("send_to_many_err: {e:#}");
+                            tracing::trace!("send_to_many_err: {e:#}");
                             if !buf.is_empty() {
-                                log::trace!(
+                                tracing::trace!(
                                     "send_to_many dropping {} packets due to error.",
                                     buf.len()
                                 );

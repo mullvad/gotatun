@@ -125,9 +125,9 @@ mod unix {
                 });
 
             match daemonize.start() {
-                Ok(()) => log::info!("GotaTun started successfully"),
+                Ok(()) => tracing::info!("GotaTun started successfully"),
                 Err(e) => {
-                    log::error!("error = {e:?}");
+                    tracing::error!(error = ?e);
                     exit(1);
                 }
             }
@@ -147,7 +147,7 @@ mod unix {
                 Ok(d) => d,
                 Err(e) => {
                     // Notify parent that tunnel initialization failed
-                    log::error!("Failed to initialize tunnel: {e:?}");
+                    tracing::error!("Failed to initialize tunnel: {e:?}");
                     sock1.send(&[0]).unwrap();
                     exit(1);
                 }
@@ -156,7 +156,7 @@ mod unix {
         if !matches.is_present("disable-drop-privileges")
             && let Err(e) = drop_privileges()
         {
-            log::error!("Failed to drop privileges: {e:?}");
+            tracing::error!("Failed to drop privileges: {e:?}");
             sock1.send(&[0]).unwrap();
             exit(1);
         }
@@ -165,16 +165,16 @@ mod unix {
         sock1.send(&[1]).unwrap();
         drop(sock1);
 
-        log::info!("GotaTun started successfully");
+        tracing::info!("GotaTun started successfully");
 
         let mut sigint = signal(SignalKind::interrupt()).expect("set up SIGINT handler");
         let mut sigterm = signal(SignalKind::terminate()).expect("set up SIGTERM handler");
         tokio::select! {
-            _ = sigint.recv() => log::info!("SIGINT received"),
-            _ = sigterm.recv() => log::info!("SIGTERM received"),
+            _ = sigint.recv() => tracing::info!("SIGINT received"),
+            _ = sigterm.recv() => tracing::info!("SIGTERM received"),
         }
 
-        log::info!("GotaTun is shutting down");
+        tracing::info!("GotaTun is shutting down");
         device_handle.stop().await;
     }
 }

@@ -19,6 +19,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::str::FromStr;
 use std::sync::{Weak, atomic};
 use tokio::sync::{RwLock, mpsc, oneshot};
+use tracing::instrument;
 
 #[cfg(unix)]
 const SOCK_DIR: &str = "/var/run/wireguard/";
@@ -39,28 +40,22 @@ pub struct ApiClient {
 impl ApiClient {
     pub async fn send(&self, request: impl Into<Request>) -> eyre::Result<Response> {
         let request = request.into();
-        log::trace!("Handling API request: {request:?}");
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
             .send((request, response_tx))
             .await
             .map_err(|_| eyre!("Channel closed"))?;
-        response_rx
-            .await
-            .inspect(|response| log::trace!("Sending API response: {response:?}"))
-            .map_err(|_| eyre!("Channel closed"))
+        response_rx.await.map_err(|_| eyre!("Channel closed"))
     }
 
     pub fn send_sync(&self, request: impl Into<Request>) -> eyre::Result<Response> {
         let request = request.into();
-        log::trace!("Handling API request: {request:?}");
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
             .blocking_send((request, response_tx))
             .map_err(|_| eyre!("Channel closed"))?;
         response_rx
             .blocking_recv()
-            .inspect(|response| log::trace!("Sending API response: {response:?}"))
             .map_err(|_| eyre!("Channel closed"))
     }
 }
@@ -76,18 +71,23 @@ impl ApiClient {
         RW: Send + Sync + 'static,
     {
         std::thread::spawn(move || {
+            let span = tracing::info_span!("Forward API requests");
+            let _enter = span.enter();
+
             let r = BufReader::new(&rw);
 
             let make_request = |s: &str| {
+                // TODO: remove this, it will print the private key
+                tracing::info!(request = ?s);
                 let request = Request::from_str(s).wrap_err("Failed to parse command")?;
 
                 let Some(response) = self.send_sync(request).ok() else {
                     bail!("Server hung up");
                 };
 
-                log::info!("{:?}", response.to_string());
+                tracing::info!(response = ?response.to_string());
                 if let Err(e) = writeln!(&rw, "{response}") {
-                    log::error!("Failed to write API response: {e}");
+                    tracing::error!("Failed to write API response: {e}");
                 }
 
                 Ok(())
@@ -100,7 +100,7 @@ impl ApiClient {
                     if !lines.is_empty()
                         && let Err(e) = make_request(&lines)
                     {
-                        log::error!("Failed to handle UAPI request: {e:#}");
+                        tracing::error!("Failed to handle UAPI request: {e:#}");
                         return;
                     }
                     return;
@@ -119,7 +119,7 @@ impl ApiClient {
                 }
 
                 if let Err(e) = make_request(&lines) {
-                    log::error!("Failed to handle UAPI request: {e:#}");
+                    tracing::error!("Failed to handle UAPI request: {e:#}");
                     return;
                 }
 
@@ -139,10 +139,12 @@ impl ApiServer {
     /// Spawn a unix socket in [`SOCK_DIR`] called `<name>.sock`. This socket speaks the official
     /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
     #[cfg(unix)]
+    #[tracing::instrument(err)]
     pub fn default_unix_socket(name: &str) -> eyre::Result<Self> {
         use std::os::unix::net::UnixListener;
 
         let path = format!("{SOCK_DIR}/{name}.sock");
+        tracing::debug!(%path, "Creating unix socket");
 
         create_sock_dir();
 
@@ -159,9 +161,7 @@ impl ApiServer {
                 let Ok((stream, _)) = api_listener.accept() else {
                     break;
                 };
-
-                log::info!("New UAPI connection on unix socket");
-
+                tracing::info!("New UAPI connection on unix socket");
                 tx.clone().wrap_read_write(stream);
             }
         });
@@ -228,6 +228,7 @@ impl<T: DeviceTransports> Device<T> {
             let Some(device) = device.upgrade() else {
                 return;
             };
+            tracing::info!(?request);
             let response = match request {
                 Request::Get(get) => {
                     let device_guard = device.read().await;
@@ -239,6 +240,7 @@ impl<T: DeviceTransports> Device<T> {
                     drop(device_guard);
 
                     if reconfigure == Reconfigure::Yes {
+                        // FIX: calling set_up here will nest the tracing spanns of `handle_api` with `handle_outgoing` and friends
                         match Connection::set_up(device.clone()).await {
                             Ok(con) => {
                                 let mut device_guard = device.write().await;
@@ -247,7 +249,7 @@ impl<T: DeviceTransports> Device<T> {
                             }
                             Err(err) => {
                                 // TODO: error message
-                                log::error!("Failed to set up stuff: {err}");
+                                tracing::error!("Failed to set up stuff: {err}");
                                 // TODO: response code
                                 Response::Set(SetResponse { errno: EINVAL })
                             }
@@ -258,7 +260,11 @@ impl<T: DeviceTransports> Device<T> {
                 } //_ => EIO,
             };
 
-            let _ = respond.send(response);
+            tracing::info!(?response);
+
+            if let Err(response) = respond.send(response) {
+                tracing::warn!(?response, "Failed to send response");
+            }
 
             // The protocol requires to return an error code as the response, or zero on success
             //channel.tx.send(format!("errno={}\n", status)).ok();
@@ -339,6 +345,7 @@ async fn on_api_get(_: Get, d: &Device<impl DeviceTransports>) -> GetResponse {
 }
 
 /// Handle a [Set] request.
+#[instrument(level = "debug", skip_all, ret)]
 async fn on_api_set(
     set: Set,
     device: &mut Device<impl DeviceTransports>,
@@ -355,7 +362,7 @@ async fn on_api_set(
     if let Some(protocol_version) = protocol_version
         && protocol_version != "1"
     {
-        log::warn!("Invalid API protocol version: {protocol_version}");
+        tracing::warn!("Invalid API protocol version: {protocol_version}");
         return (SetResponse { errno: EINVAL }, Reconfigure::No);
     }
 
@@ -430,7 +437,7 @@ async fn on_api_set(
                 match crate::device::daita::DaitaSettings::try_from(daita_settings) {
                     Ok(settings) => Some(settings),
                     Err(e) => {
-                        log::error!("Invalid DAITA settings: {e}");
+                        tracing::error!("Invalid DAITA settings: {e}");
                         return (SetResponse { errno: EINVAL }, Reconfigure::No);
                     }
                 }

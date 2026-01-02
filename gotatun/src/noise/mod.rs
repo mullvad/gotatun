@@ -163,7 +163,7 @@ impl Tunn {
         &mut self,
         p: Packet<WgHandshakeInit>,
     ) -> Result<TunnResult, WireGuardError> {
-        log::debug!("Received handshake_initiation: {}", p.sender_idx);
+        tracing::debug!("Received handshake_initiation: {}", p.sender_idx);
 
         let (packet, session) = self.handshake.receive_handshake_initialization(p)?;
 
@@ -175,7 +175,7 @@ impl Tunn {
         self.timer_tick(TimerName::TimeLastPacketSent);
         self.timer_tick_session_established(false, index); // New session established, we are not the initiator
 
-        log::debug!("Sending handshake_response: {index}");
+        tracing::debug!("Sending handshake_response: {index}");
 
         Ok(TunnResult::WriteToNetwork(packet.into()))
     }
@@ -184,7 +184,7 @@ impl Tunn {
         &mut self,
         p: Packet<WgHandshakeResp>,
     ) -> Result<TunnResult, WireGuardError> {
-        log::debug!(
+        tracing::debug!(
             "Received handshake_response: {} {}",
             p.receiver_idx,
             p.sender_idx,
@@ -205,19 +205,19 @@ impl Tunn {
         self.timer_tick_session_established(true, index); // New session established, we are the initiator
         self.set_current_session(l_idx);
 
-        log::debug!("Sending keepalive");
+        tracing::debug!("Sending keepalive");
 
         Ok(TunnResult::WriteToNetwork(keepalive_packet.into())) // Send a keepalive as a response
     }
 
     fn handle_cookie_reply(&mut self, p: &WgCookieReply) -> Result<TunnResult, WireGuardError> {
-        log::debug!("Received cookie_reply: {}", p.receiver_idx);
+        tracing::debug!("Received cookie_reply: {}", p.receiver_idx);
 
         self.handshake.receive_cookie_reply(p)?;
         self.timer_tick(TimerName::TimeLastPacketReceived);
         self.timer_tick(TimerName::TimeCookieReceived);
 
-        log::debug!("Did set cookie");
+        tracing::debug!("Did set cookie");
 
         Ok(TunnResult::Done)
     }
@@ -234,7 +234,7 @@ impl Tunn {
                 >= self.timers.session_timers[cur_idx % N_SESSIONS]
         {
             self.current = new_idx;
-            log::debug!("New session: {new_idx}");
+            tracing::debug!("New session: {new_idx}");
         }
     }
 
@@ -259,8 +259,8 @@ impl Tunn {
         let decapsulated_packet = {
             let session = self.sessions[idx].as_ref();
             let session = session.ok_or_else(|| {
-                //log::trace!(message = "No current session available", remote_idx = r_idx);
-                log::trace!("No current session available: {r_idx}");
+                //tracing::trace!(message = "No current session available", remote_idx = r_idx);
+                tracing::trace!("No current session available: {r_idx}");
                 WireGuardError::NoCurrentSession
             })?;
             session.receive_packet_data(packet)?
@@ -292,7 +292,7 @@ impl Tunn {
         let starting_new_handshake = !self.handshake.is_in_progress();
 
         let packet = self.handshake.format_handshake_initiation();
-        log::debug!("Sending handshake_initiation");
+        tracing::debug!("Sending handshake_initiation");
 
         if starting_new_handshake {
             self.timer_tick(TimerName::TimeLastHandshakeStarted);

@@ -23,6 +23,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
+    use tracing_test::traced_test;
 
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
     use tokio::net::UnixStream;
@@ -470,8 +471,9 @@ mod tests {
         path
     }
 
+    #[traced_test]
     #[test]
-    #[ignore]
+    // #[ignore]
     /// Test if wireguard starts and creates a unix socket that we can read from
     async fn test_wireguard_get() {
         let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap()).await;
@@ -479,8 +481,9 @@ mod tests {
         assert!(response.ends_with("errno=0\n\n"));
     }
 
+    #[traced_test]
     #[test]
-    #[ignore]
+    // #[ignore]
     /// Test if wireguard starts and creates a unix socket that we can use to set settings
     async fn test_wireguard_set() {
         let port = next_port();
@@ -550,7 +553,7 @@ mod tests {
 
     /// Test if wireguard can handle simple ipv4 connections, don't use a connected socket
     #[tokio::test]
-    #[ignore]
+    // #[ignore]
     async fn test_wg_start_ipv4_non_connected() {
         let port = next_port();
         let private_key = StaticSecret::random_from_rng(OsRng);
@@ -586,7 +589,7 @@ mod tests {
 
     /// Test if wireguard can handle simple ipv4 connections
     #[tokio::test]
-    #[ignore]
+    // #[ignore]
     async fn test_wg_start_ipv4() {
         let port = next_port();
         let private_key = StaticSecret::random_from_rng(OsRng);
@@ -621,7 +624,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
+    // #[ignore]
     /// Test if wireguard can handle simple ipv6 connections
     async fn test_wg_start_ipv6() {
         let port = next_port();
@@ -657,7 +660,7 @@ mod tests {
 
     /// Test if wireguard can handle connection with an ipv6 endpoint
     #[tokio::test]
-    #[ignore]
+    // #[ignore]
     #[cfg(target_os = "linux")] // Can't make docker work with ipv6 on macOS ATM
     async fn test_wg_start_ipv6_endpoint() {
         let port = next_port();
@@ -696,7 +699,7 @@ mod tests {
 
     /// Test if wireguard can handle connection with an ipv6 endpoint
     #[tokio::test]
-    #[ignore]
+    // #[ignore]
     #[cfg(target_os = "linux")] // Can't make docker work with ipv6 on macOS ATM
     async fn test_wg_start_ipv6_endpoint_not_connected() {
         let port = next_port();
@@ -735,7 +738,7 @@ mod tests {
 
     /// Test many concurrent connections
     #[tokio::test]
-    #[ignore]
+    // #[ignore]
     async fn test_wg_concurrent() {
         let port = next_port();
         let private_key = StaticSecret::random_from_rng(OsRng);
@@ -786,7 +789,7 @@ mod tests {
 
     /// Test many concurrent connections
     #[tokio::test]
-    #[ignore]
+    // #[ignore]
     async fn test_wg_concurrent_v6() {
         let port = next_port();
         let private_key = StaticSecret::random_from_rng(OsRng);

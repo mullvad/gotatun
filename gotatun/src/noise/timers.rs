@@ -158,7 +158,7 @@ impl Tunn {
         for (i, t) in timers.session_timers.iter_mut().enumerate() {
             if time_now - *t > REJECT_AFTER_TIME {
                 if let Some(session) = self.sessions[i].take() {
-                    log::debug!(
+                    tracing::debug!(
                         "SESSION_EXPIRED(REJECT_AFTER_TIME): {}",
                         session.receiving_index
                     );
@@ -211,7 +211,7 @@ impl Tunn {
             // All ephemeral private keys and symmetric session keys are zeroed out after
             // (REJECT_AFTER_TIME * 3) ms if no new keys have been exchanged.
             if now - session_established >= REJECT_AFTER_TIME * 3 {
-                log::error!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
+                tracing::error!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
                 self.handshake.set_expired();
                 self.clear_all();
                 return Err(WireGuardError::ConnectionExpired);
@@ -224,7 +224,7 @@ impl Tunn {
                     // the retries give up and cease, and clear all existing packets queued
                     // up to be sent. If a packet is explicitly queued up to be sent, then
                     // this timer is reset.
-                    log::error!("CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
+                    tracing::error!("CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
                     self.handshake.set_expired();
                     self.clear_all();
                     return Err(WireGuardError::ConnectionExpired);
@@ -236,7 +236,7 @@ impl Tunn {
                     // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
                     // if a response has not been received, where jitter is some random
                     // value between 0 and 333 ms.
-                    log::warn!("HANDSHAKE(REKEY_TIMEOUT)");
+                    tracing::warn!("HANDSHAKE(REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
                 }
             } else {
@@ -249,7 +249,7 @@ impl Tunn {
                     if session_established < data_packet_sent
                         && now - session_established >= REKEY_AFTER_TIME
                     {
-                        log::debug!("HANDSHAKE(REKEY_AFTER_TIME (on send))");
+                        tracing::debug!("HANDSHAKE(REKEY_AFTER_TIME (on send))");
                         handshake_initiation_required = true;
                     }
 
@@ -261,7 +261,7 @@ impl Tunn {
                         && now - session_established
                             >= REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT
                     {
-                        log::warn!(
+                        tracing::warn!(
                             "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - \
                         REKEY_TIMEOUT \
                         (on receive))"
@@ -277,7 +277,7 @@ impl Tunn {
                     && now - aut_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
                     && mem::replace(&mut self.timers.want_handshake, false)
                 {
-                    log::warn!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
+                    tracing::warn!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
                 }
 
@@ -288,7 +288,7 @@ impl Tunn {
                         && now - aut_packet_sent >= KEEPALIVE_TIMEOUT
                         && mem::replace(&mut self.timers.want_keepalive, false)
                     {
-                        log::debug!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
+                        tracing::debug!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
                         keepalive_required = true;
                     }
 
@@ -297,7 +297,7 @@ impl Tunn {
                         && (now - self.timers[TimePersistentKeepalive]
                             >= Duration::from_secs(persistent_keepalive as _))
                     {
-                        log::debug!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
+                        tracing::debug!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
                         self.timer_tick(TimePersistentKeepalive);
                         keepalive_required = true;
                     }

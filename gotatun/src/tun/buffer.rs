@@ -26,7 +26,7 @@ impl BufferedIpSend {
             let mut inner = inner.try_lock().expect("Lock must not be taken");
             while let Some(packet) = rx.recv().await {
                 if let Err(e) = inner.send(packet).await {
-                    log::error!("Error sending IP packet: {e}");
+                    tracing::error!("Error sending IP packet: {e}");
                 }
             }
         });
@@ -80,7 +80,7 @@ impl<I: IpRecv> BufferedIpRecv<I> {
                         }
                     }
                     Err(e) => {
-                        log::error!("Error receiving IP packet: {e}");
+                        tracing::error!("Error receiving IP packet: {e}");
                         // exit?
                         continue;
                     }

@@ -54,10 +54,10 @@ impl UdpTransportFactory for UdpSocketFactory {
         }
 
         if let Err(err) = udp_v4.enable_udp_gro() {
-            log::warn!("Failed to enable UDP GRO for IPv4 socket: {err}");
+            tracing::warn!(%err, "Failed to enable UDP GRO for IPv4 socket");
         }
         if let Err(err) = udp_v6.enable_udp_gro() {
-            log::warn!("Failed to enable UDP GRO for IPv6 socket: {err}");
+            tracing::warn!(%err, "Failed to enable UDP GRO for IPv6 socket",);
         }
 
         Ok(((udp_v4.clone(), udp_v4), (udp_v6.clone(), udp_v6)))

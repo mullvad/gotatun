@@ -87,6 +87,7 @@ nix = { version = "0.30", default-features = false, features = [
 [dev-dependencies]
 etherparse = "0.13"
 tracing-subscriber = "0.3"
+tracing-test = "0.2.5"
 criterion = { version = "0.7.0", features = ["html_reports"] }
 
 [lib]

@@ -25,6 +25,7 @@ use std::time::Duration;
 use tokio::join;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
+use tracing::instrument;
 
 use crate::device::daita::DaitaSettings;
 use crate::noise::errors::WireGuardError;
@@ -186,6 +187,7 @@ pub(crate) struct Connection<T: DeviceTransports> {
 }
 
 impl<T: DeviceTransports> Connection<T> {
+    #[instrument(skip_all)]
     pub async fn set_up(device: Arc<RwLock<Device<T>>>) -> Result<Self, Error> {
         let pool = PacketBufPool::new(MAX_PACKET_BUFS);
 
@@ -317,7 +319,7 @@ impl<T: DeviceTransports> DeviceHandle<T> {
     }
 
     async fn stop_inner(device: Arc<RwLock<Device<T>>>) {
-        log::debug!("Stopping gotatun device");
+        tracing::debug!("Stopping gotatun device");
 
         let mut device = device.write().await;
 
@@ -333,16 +335,16 @@ impl<T: DeviceTransports> DeviceHandle<T> {
 
 impl<T: DeviceTransports> Drop for DeviceHandle<T> {
     fn drop(&mut self) {
-        log::debug!("Dropping gotatun device");
+        tracing::debug!("Dropping gotatun device");
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
-            log::warn!("Failed to get tokio runtime handle");
+            tracing::warn!("Failed to get tokio runtime handle");
             return;
         };
-        log::debug!(
+        tracing::debug!(
             "DeviceHandle strong count: {}",
             Arc::strong_count(&self.device)
         );
-        log::debug!("DeviceHandle weak count: {}", Arc::weak_count(&self.device));
+        tracing::debug!("DeviceHandle weak count: {}", Arc::weak_count(&self.device));
         let device = self.device.clone();
         handle.spawn(async move {
             Self::stop_inner(device).await;
@@ -351,7 +353,7 @@ impl<T: DeviceTransports> Drop for DeviceHandle<T> {
 }
 
 /// Do we need to reconfigure the socket?
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Reconfigure {
     Yes,
     No,
@@ -392,7 +394,7 @@ impl<T: DeviceTransports> Device<T> {
             self.peers_by_ip
                 .remove(&|p: &Arc<Mutex<Peer>>| Arc::ptr_eq(&peer, p));
 
-            log::info!("Peer removed");
+            tracing::info!("Peer removed");
 
             Some(peer)
         } else {
@@ -495,7 +497,7 @@ impl<T: DeviceTransports> Device<T> {
                 .insert(addr, u32::from(cidr), Arc::clone(&peer));
         }
 
-        log::info!("Peer added");
+        tracing::info!("Peer added");
     }
 
     pub async fn new(
@@ -551,6 +553,7 @@ impl<T: DeviceTransports> Device<T> {
         ),
         Error,
     > {
+        tracing::info!("Binding UDP sockets");
         let params = UdpTransportFactoryParams {
             addr_v4: Ipv4Addr::UNSPECIFIED,
             addr_v6: Ipv6Addr::UNSPECIFIED,
@@ -649,7 +652,7 @@ impl<T: DeviceTransports> Device<T> {
                     }
                     Ok(None) => {}
                     Err(WireGuardError::ConnectionExpired) => {}
-                    Err(e) => log::error!("Timer error = {e:?}: {e:?}"),
+                    Err(e) => tracing::error!("Timer error = {e:?}: {e:?}"),
                 }
             }
         }
@@ -679,7 +682,7 @@ impl<T: DeviceTransports> Device<T> {
                 Ok(packet) => packet,
                 Err(TunnResult::WriteToNetwork(WgKind::CookieReply(cookie))) => {
                     if let Err(_err) = udp_tx.send_to(cookie.into(), addr).await {
-                        log::trace!("udp.send_to failed");
+                        tracing::trace!("udp.send_to failed");
                         break;
                     }
                     continue;
@@ -736,7 +739,7 @@ impl<T: DeviceTransports> Device<T> {
 
                     for packet in not_blocked_packets {
                         if let Err(_err) = udp_tx.send_to(packet.into(), addr).await {
-                            log::trace!("udp.send_to failed");
+                            tracing::trace!("udp.send_to failed");
                             break;
                         }
                     }
@@ -765,7 +768,7 @@ impl<T: DeviceTransports> Device<T> {
                     if !peer.is_allowed_ip(source) {
                         if cfg!(debug_assertions) {
                             let unspecified = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0).into();
-                            log::warn!(
+                            tracing::warn!(
                                 "peer at {} is not allowed to send us packets from: {source}",
                                 peer.endpoint().addr.unwrap_or(unspecified)
                             );
@@ -774,7 +777,7 @@ impl<T: DeviceTransports> Device<T> {
                     }
 
                     if let Err(_err) = tun_tx.send(packet).await {
-                        log::trace!("buffered_tun_send.send failed");
+                        tracing::trace!("buffered_tun_send.send failed");
                         break;
                     }
                 }
@@ -796,7 +799,7 @@ impl<T: DeviceTransports> Device<T> {
             let packets = match tun_rx.recv(&mut packet_pool).await {
                 Ok(packets) => packets,
                 Err(e) => {
-                    log::error!("Unexpected error on tun interface: {e:?}");
+                    tracing::error!("Unexpected error on tun interface: {e:?}");
                     break;
                 }
             };
@@ -822,7 +825,7 @@ impl<T: DeviceTransports> Device<T> {
 
                 let mut peer = peer.lock().await;
                 let Some(peer_addr) = peer.endpoint().addr else {
-                    log::error!("No endpoint");
+                    tracing::error!("No endpoint");
                     continue;
                 };
 
@@ -933,6 +936,6 @@ impl<T: DeviceTransports> Connection<T> {
 
 impl<T: DeviceTransports> Drop for Device<T> {
     fn drop(&mut self) {
-        log::info!("Stopping Device");
+        tracing::info!("Stopping Device");
     }
 }

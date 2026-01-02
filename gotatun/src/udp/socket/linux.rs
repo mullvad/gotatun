@@ -178,7 +178,7 @@ mod gro {
 
                         let Some(source_addr) = result.address.map(|addr| addr.into()) else {
                             if cfg!(debug_assertions) {
-                                log::debug!("recvmmsg returned packet without source");
+                                tracing::debug!("recvmmsg returned packet without source");
                             }
                             continue;
                         };
