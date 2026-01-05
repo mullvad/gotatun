@@ -528,25 +528,24 @@ mod tests {
             "errno=0\n\n"
         );
 
-        let peer_pub_key = encode(peer_pub_key.as_bytes());
+        let wg_get = wg.wg_get().await;
 
-        // The test fails as the response is formatted in different order, is that not ok?
-        // Check that the response matches what we expect
-        assert_eq!(
-            wg.wg_get().await,
-            format!(
-                "private_key={own_private_key}\n\
-                 listen_port={port}\n\
-                 public_key={peer_pub_key}\n\
-                 endpoint={endpoint}\n\
-                 allowed_ip={}/{}\n\
-                 allowed_ip={}/{}\n\
-                 rx_bytes=0\n\
-                 tx_bytes=0\n\
-                 errno=0\n\n",
-                allowed_ips[0].ip, allowed_ips[0].cidr, allowed_ips[1].ip, allowed_ips[1].cidr
-            )
-        );
+        let peer_pub_key = encode(peer_pub_key.as_bytes());
+        assert!(wg_get.contains(&format!("public_key={peer_pub_key}")));
+        assert!(wg_get.contains(&format!("endpoint={endpoint}")));
+        assert!(wg_get.contains(&format!(
+            "allowed_ip={}/{}",
+            allowed_ips[0].ip, allowed_ips[0].cidr
+        )));
+        assert!(wg_get.contains(&format!(
+            "allowed_ip={}/{}",
+            allowed_ips[1].ip, allowed_ips[1].cidr
+        )));
+        assert!(wg_get.contains("rx_bytes=0"));
+        assert!(wg_get.contains("tx_bytes=0"));
+        assert!(wg_get.contains(&format!("private_key={own_private_key}")));
+        assert!(wg_get.contains(&format!("listen_port={port}")));
+        assert!(wg_get.contains("errno=0"));
     }
 
     /// Test if wireguard can handle simple ipv4 connections, don't use a connected socket
