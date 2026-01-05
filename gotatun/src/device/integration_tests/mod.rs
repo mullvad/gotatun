@@ -78,6 +78,7 @@ mod tests {
     impl Drop for Peer {
         fn drop(&mut self) {
             if let Some(name) = &self.container_name {
+                tracing::debug!("Stopping container '{name}'");
                 Command::new("docker")
                     .args([
                         "stop", // Run docker
@@ -157,29 +158,29 @@ mod tests {
             let nginx_config_file = format!("{peer_config_file}.ngx");
             std::fs::write(&nginx_config_file, nginx_config).unwrap();
 
-            Command::new("docker")
-                .args([
-                    "run",                 // Run docker
-                    "-d",                  // In detached mode
-                    "--cap-add=NET_ADMIN", // Grant permissions to open a tunnel
-                    "--device=/dev/net/tun",
-                    "--sysctl", // Enable ipv6
-                    "net.ipv6.conf.all.disable_ipv6=0",
-                    "--sysctl",
-                    "net.ipv6.conf.default.disable_ipv6=0",
-                    "-p", // Open port for the endpoint
-                    &format!("{0}:{0}/udp", self.endpoint.port()),
-                    "-v", // Map the generated WireGuard config file
-                    &format!("{peer_config_file}:/wireguard/wg.conf"),
-                    "-v", // Map the nginx config file
-                    &format!("{nginx_config_file}:/etc/nginx/conf.d/default.conf"),
-                    "--rm", // Cleanup
-                    "--name",
-                    &peer_config_file[5..],
-                    "vkrasnov/wireguard-test",
-                ])
-                .status()
-                .expect("Failed to run docker");
+            let mut cmd = Command::new("docker");
+            let cmd = cmd.args([
+                "run",                 // Run docker
+                "-d",                  // In detached mode
+                "--cap-add=NET_ADMIN", // Grant permissions to open a tunnel
+                "--device=/dev/net/tun",
+                "--sysctl", // Enable ipv6
+                "net.ipv6.conf.all.disable_ipv6=0",
+                "--sysctl",
+                "net.ipv6.conf.default.disable_ipv6=0",
+                "-p", // Open port for the endpoint
+                &format!("{0}:{0}/udp", self.endpoint.port()),
+                "-v", // Map the generated WireGuard config file
+                &format!("{peer_config_file}:/wireguard/wg.conf"),
+                "-v", // Map the nginx config file
+                &format!("{nginx_config_file}:/etc/nginx/conf.d/default.conf"),
+                "--rm", // Cleanup
+                "--name",
+                &peer_config_file[5..],
+                "vkrasnov/wireguard-test",
+            ]);
+            tracing::debug!("Running command: '{cmd:?}'");
+            cmd.status().expect("Failed to run docker");
 
             self.container_name = Some(peer_config_file);
         }
@@ -399,10 +400,10 @@ mod tests {
         async fn wg_get(&self) -> String {
             let path = format!("/var/run/wireguard/{}.sock", self.name);
 
-            tracing::info!("Connecting to wireguard socket at {path}");
+            tracing::debug!("Connecting to wireguard socket at {path}");
             let mut socket = UnixStream::connect(path).await.unwrap();
             socket.write_all(b"get=1\n\n").await.unwrap();
-            tracing::info!("Wrote 'get=1'");
+            tracing::debug!("Wrote 'get=1'");
             let mut ret = String::new();
             let mut reader = tokio::io::BufReader::new(socket);
             // Read until end of file or empty newline
@@ -558,11 +559,13 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
+        tracing::info!("Initializing WGHandle");
         let mut wg = WGHandle::init(addr_v4, addr_v6).await;
 
         assert_eq!(wg.wg_set_port(port).await, "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key).await, "errno=0\n\n");
 
+        tracing::info!("Initializing Peer");
         // Create a new peer whose endpoint is on this machine
         let mut peer = Peer::new(
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), next_port()),
@@ -572,6 +575,7 @@ mod tests {
             }],
         );
 
+        tracing::info!("Starting container");
         peer.start_in_container(&public_key, &addr_v4, port);
 
         let peer = Arc::new(peer);
