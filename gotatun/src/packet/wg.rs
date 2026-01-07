@@ -88,7 +88,7 @@ impl From<WgKind> for Packet {
     }
 }
 
-/// The first byte of a WireGuard packet. This indentifies its type.
+/// The first byte of a WireGuard packet. This identifies its type.
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq, Clone, Copy)]
 #[repr(transparent)]
 pub struct WgPacketType(pub u8);
