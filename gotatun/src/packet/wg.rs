@@ -110,7 +110,7 @@ impl WgPacketType {
 }
 
 /// Header of [`WgData`].
-/// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+/// See section 5.4.6 of the [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C)]
 pub struct WgDataHeader {
@@ -131,7 +131,7 @@ impl WgDataHeader {
 }
 
 /// WireGuard data packet.
-/// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+/// See section 5.4.6 of the [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 pub struct WgData {
@@ -278,7 +278,7 @@ pub trait WgHandshakeBase:
 }
 
 /// WireGuard handshake initialization packet.
-/// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+/// See section 5.4.2 of the [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 pub struct WgHandshakeInit {
@@ -287,7 +287,6 @@ pub struct WgHandshakeInit {
     _reserved_zeros: [u8; 4 - size_of::<WgPacketType>()],
 
     /// An integer that identifies the WireGuard session for the initiating peer.
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub sender_idx: little_endian::U32,
 
     /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
@@ -352,7 +351,7 @@ impl Default for WgHandshakeInit {
 }
 
 /// WireGuard handshake response packet.
-/// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+/// See section 5.4.3 of the [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 pub struct WgHandshakeResp {
@@ -361,11 +360,9 @@ pub struct WgHandshakeResp {
     _reserved_zeros: [u8; 4 - size_of::<WgPacketType>()],
 
     /// An integer that identifies the WireGuard session for the responding peer.
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub sender_idx: little_endian::U32,
 
     /// An integer that identifies the WireGuard session for the initiating peer.
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub receiver_idx: little_endian::U32,
 
     /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
@@ -427,7 +424,7 @@ impl WgHandshakeBase for WgHandshakeResp {
 }
 
 /// WireGuard cookie reply packet.
-/// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+/// See section 5.4.7 of the [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 pub struct WgCookieReply {
@@ -436,7 +433,6 @@ pub struct WgCookieReply {
     _reserved_zeros: [u8; 4 - size_of::<WgPacketType>()],
 
     /// An integer that identifies the WireGuard session for the handshake-initiating peer.
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub receiver_idx: little_endian::U32,
 
     /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
