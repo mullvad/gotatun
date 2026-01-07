@@ -110,6 +110,7 @@ impl WgPacketType {
 }
 
 /// Header of [`WgData`].
+/// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C)]
 pub struct WgDataHeader {
