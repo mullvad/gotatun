@@ -27,7 +27,7 @@ impl Debug for Wg {
     }
 }
 
-/// An owned WireGuard [`Packet`] where its [`WgPacketType`] is known. See [`Packet::try_into_wg`].
+/// An owned WireGuard [`Packet`] whose [`WgPacketType`] is known. See [`Packet::try_into_wg`].
 pub enum WgKind {
     /// An owned [`WgHandshakeInit`] packet.
     HandshakeInit(Packet<WgHandshakeInit>),
