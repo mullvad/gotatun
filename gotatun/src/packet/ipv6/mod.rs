@@ -44,7 +44,7 @@ pub struct Ipv6Header {
 #[bitfield(u32, repr = big_endian::U32, from = big_endian::U32::new, into = big_endian::U32::get)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv6VersionTrafficFlow {
-    /// IPv6 flow label
+    /// IPv6 flow label.
     #[bits(20)]
     pub flow_label: u32,
     /// IPv6 traffic class
