@@ -27,7 +27,10 @@ impl BufferedIpSend {
     ///
     /// This takes an `Arc<Mutex<I>>` because the inner `I` will be re-used after [Self] is
     /// dropped. We will take the mutex lock when this function is called, and hold onto it for the
-    /// lifetime of [Self]. Will panic if the lock is already taken.
+    /// lifetime of [Self].
+    ///
+    /// # Panics
+    /// Panics if the lock is already taken.
     pub fn new<I: IpSend>(capacity: usize, inner: Arc<Mutex<I>>) -> Self {
         let (tx, mut rx) = mpsc::channel::<Packet<Ip>>(capacity);
 
