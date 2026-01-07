@@ -104,19 +104,9 @@ mod unix {
             let log_file =
                 File::create(log).unwrap_or_else(|_| panic!("Could not create log file {log}"));
 
-            let (non_blocking, guard) = tracing_appender::non_blocking(log_file);
-
-            _guard = guard;
-
-            tracing_subscriber::fmt()
-                .with_max_level(log_level)
-                .with_writer(non_blocking)
-                .with_ansi(false)
-                .init();
-
             let daemonize = Daemonize::new().working_directory("/tmp");
 
-            match daemonize.execute() {
+            let child_result = match daemonize.execute() {
                 daemonize::Outcome::Parent(Err(e)) => {
                     eprintln!("GotaTun failed to start");
                     eprintln!("{e:?}");
@@ -132,12 +122,22 @@ mod unix {
                         exit(1);
                     }
                 }
-                daemonize::Outcome::Child(Err(e)) => {
-                    log::error!("{e:?}");
-                    sock1.send(&[0]).unwrap();
-                    exit(1);
-                }
-                daemonize::Outcome::Child(Ok(_child)) => {}
+                daemonize::Outcome::Child(child) => child,
+            };
+
+            let (non_blocking, guard) = tracing_appender::non_blocking(log_file);
+            _guard = guard;
+
+            tracing_subscriber::fmt()
+                .with_max_level(log_level)
+                .with_writer(non_blocking)
+                .with_ansi(false)
+                .init();
+
+            if let Err(e) = child_result {
+                log::error!("{e:?}");
+                sock1.send(&[0]).unwrap();
+                exit(1);
             }
         } else {
             tracing_subscriber::fmt()
