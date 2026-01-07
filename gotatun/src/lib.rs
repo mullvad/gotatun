@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! A library implementation of [WireGuard](https://www.wireguard.com/>).
+//! A library implementation of [WireGuard](https://www.wireguard.com/).
 
 #[cfg(feature = "device")]
 pub mod device;
