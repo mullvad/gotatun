@@ -14,6 +14,7 @@ pub mod drop_privileges;
 #[cfg(test)]
 mod integration_tests;
 pub mod peer;
+mod transports;
 
 use ip_network::IpNetwork;
 use std::collections::HashMap;
@@ -38,13 +39,13 @@ use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
 use crate::tun::tun_async_device::TunDevice;
 use crate::tun::{IpRecv, IpSend, MtuWatcher};
 use crate::udp::buffer::{BufferedUdpReceive, BufferedUdpSend};
-#[cfg(feature = "tun")]
-use crate::udp::socket::UdpSocketFactory;
 use crate::udp::{UdpRecv, UdpSend, UdpTransportFactory, UdpTransportFactoryParams};
 use crate::x25519;
 use allowed_ips::AllowedIps;
 use peer::{AllowedIP, Peer};
 use rand_core::{OsRng, RngCore};
+
+pub use crate::device::transports::{DefaultDeviceTransports, DeviceTransports};
 
 /// The number of handshakes per second to tolerate before using cookies
 const HANDSHAKE_RATE_LIMIT: u64 = 100;
@@ -102,37 +103,6 @@ pub struct Device<T: DeviceTransports> {
 #[derive(Default)]
 pub struct DeviceConfig {
     pub api: Option<api::ApiServer>,
-}
-
-/// By default, use a UDP socket for sending datagrams and a TUN device for IP packets.
-#[cfg(feature = "tun")]
-pub type DefaultDeviceTransports = (UdpSocketFactory, TunDevice);
-
-pub trait DeviceTransports: 'static {
-    type UdpTransportFactory: UdpTransportFactory;
-    type IpSend: IpSend;
-    type IpRecv: IpRecv;
-}
-
-impl<UF, IS, IR> DeviceTransports for (UF, IS, IR)
-where
-    UF: UdpTransportFactory,
-    IS: IpSend,
-    IR: IpRecv,
-{
-    type UdpTransportFactory = UF;
-    type IpSend = IS;
-    type IpRecv = IR;
-}
-
-impl<UF, IP> DeviceTransports for (UF, IP)
-where
-    UF: UdpTransportFactory,
-    IP: IpSend + IpRecv + Clone,
-{
-    type UdpTransportFactory = UF;
-    type IpSend = IP;
-    type IpRecv = IP;
 }
 
 pub(crate) struct DeviceState<T: DeviceTransports> {
