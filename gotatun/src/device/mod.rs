@@ -93,8 +93,10 @@ pub enum Error {
     DaitaHooks(#[from] maybenot::Error),
 }
 
-pub struct DeviceHandle<T: DeviceTransports> {
-    device: Arc<RwLock<Device<T>>>,
+/// A reference-counted handle to a WireGuard device.
+#[derive(Clone)]
+pub struct Device<T: DeviceTransports> {
+    device: Arc<RwLock<DeviceState<T>>>,
 }
 
 #[derive(Default)]
@@ -133,7 +135,7 @@ where
     type IpRecv = IP;
 }
 
-pub struct Device<T: DeviceTransports> {
+pub(crate) struct DeviceState<T: DeviceTransports> {
     key_pair: Option<(x25519::StaticSecret, x25519::PublicKey)>,
     fwmark: Option<u32>,
 
@@ -186,7 +188,7 @@ pub(crate) struct Connection<T: DeviceTransports> {
 }
 
 impl<T: DeviceTransports> Connection<T> {
-    pub async fn set_up(device: Arc<RwLock<Device<T>>>) -> Result<Self, Error> {
+    pub async fn set_up(device: Arc<RwLock<DeviceState<T>>>) -> Result<Self, Error> {
         let pool = PacketBufPool::new(MAX_PACKET_BUFS);
 
         let mut device_guard = device.write().await;
@@ -230,7 +232,7 @@ impl<T: DeviceTransports> Connection<T> {
         // Start device tasks
         let outgoing = Task::spawn(
             "handle_outgoing",
-            Device::handle_outgoing(
+            DeviceState::handle_outgoing(
                 Arc::downgrade(&device),
                 buffered_ip_rx,
                 buffered_udp_tx_v4.clone(),
@@ -240,7 +242,7 @@ impl<T: DeviceTransports> Connection<T> {
         );
         let timers = Task::spawn(
             "handle_timers",
-            Device::handle_timers(
+            DeviceState::handle_timers(
                 Arc::downgrade(&device),
                 buffered_udp_tx_v4.clone(),
                 buffered_udp_tx_v6.clone(),
@@ -249,7 +251,7 @@ impl<T: DeviceTransports> Connection<T> {
 
         let incoming_ipv4 = Task::spawn(
             "handle_incoming ipv4",
-            Device::handle_incoming(
+            DeviceState::handle_incoming(
                 Arc::downgrade(&device),
                 buffered_ip_tx.clone(),
                 buffered_udp_tx_v4,
@@ -259,7 +261,7 @@ impl<T: DeviceTransports> Connection<T> {
         );
         let incoming_ipv6 = Task::spawn(
             "handle_incoming ipv6",
-            Device::handle_incoming(
+            DeviceState::handle_incoming(
                 Arc::downgrade(&device),
                 buffered_ip_tx,
                 buffered_udp_tx_v6,
@@ -281,12 +283,12 @@ impl<T: DeviceTransports> Connection<T> {
 }
 
 #[cfg(feature = "tun")]
-impl<T: DeviceTransports<IpRecv = TunDevice, IpSend = TunDevice>> DeviceHandle<T> {
+impl<T: DeviceTransports<IpRecv = TunDevice, IpSend = TunDevice>> Device<T> {
     pub async fn from_tun_name(
         udp_factory: T::UdpTransportFactory,
         tun_name: &str,
         config: DeviceConfig,
-    ) -> Result<DeviceHandle<T>, Error> {
+    ) -> Result<Device<T>, Error> {
         let mut tun_config = tun::Configuration::default();
         tun_config.tun_name(tun_name);
         #[cfg(target_os = "macos")]
@@ -296,19 +298,19 @@ impl<T: DeviceTransports<IpRecv = TunDevice, IpSend = TunDevice>> DeviceHandle<T
         let tun = tun::create_as_async(&tun_config)?;
         let tun = TunDevice::from_tun_device(tun)?;
         let (tun_tx, tun_rx) = (tun.clone(), tun);
-        Ok(DeviceHandle::new(udp_factory, tun_tx, tun_rx, config).await)
+        Ok(Device::new(udp_factory, tun_tx, tun_rx, config).await)
     }
 }
 
-impl<T: DeviceTransports> DeviceHandle<T> {
+impl<T: DeviceTransports> Device<T> {
     pub async fn new(
         udp_factory: T::UdpTransportFactory,
         tun_tx: T::IpSend,
         tun_rx: T::IpRecv,
         config: DeviceConfig,
-    ) -> DeviceHandle<T> {
-        DeviceHandle {
-            device: Device::new(udp_factory, tun_tx, tun_rx, config).await,
+    ) -> Device<T> {
+        Device {
+            device: DeviceState::new(udp_factory, tun_tx, tun_rx, config).await,
         }
     }
 
@@ -316,7 +318,7 @@ impl<T: DeviceTransports> DeviceHandle<T> {
         Self::stop_inner(self.device.clone()).await
     }
 
-    async fn stop_inner(device: Arc<RwLock<Device<T>>>) {
+    async fn stop_inner(device: Arc<RwLock<DeviceState<T>>>) {
         log::debug!("Stopping gotatun device");
 
         let mut device = device.write().await;
@@ -331,7 +333,7 @@ impl<T: DeviceTransports> DeviceHandle<T> {
     }
 }
 
-impl<T: DeviceTransports> Drop for DeviceHandle<T> {
+impl<T: DeviceTransports> Drop for Device<T> {
     fn drop(&mut self) {
         log::debug!("Dropping gotatun device");
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
@@ -377,7 +379,7 @@ pub struct PeerUpdateRequest {
     daita_settings: Option<DaitaSettings>,
 }
 
-impl<T: DeviceTransports> Device<T> {
+impl<T: DeviceTransports> DeviceState<T> {
     fn next_index(&mut self) -> u32 {
         self.next_index.next()
     }
@@ -503,8 +505,8 @@ impl<T: DeviceTransports> Device<T> {
         tun_tx: T::IpSend,
         tun_rx: T::IpRecv,
         config: DeviceConfig,
-    ) -> Arc<RwLock<Device<T>>> {
-        let device = Device {
+    ) -> Arc<RwLock<DeviceState<T>>> {
+        let device = DeviceState {
             api: None,
             udp_factory,
             tun_tx: Arc::new(Mutex::new(tun_tx)),
@@ -524,7 +526,7 @@ impl<T: DeviceTransports> Device<T> {
         if let Some(channel) = config.api {
             device.write().await.api = Some(Task::spawn(
                 "handle_api",
-                Device::handle_api(Arc::downgrade(&device), channel),
+                DeviceState::handle_api(Arc::downgrade(&device), channel),
             ));
         }
         device
@@ -931,7 +933,7 @@ impl<T: DeviceTransports> Connection<T> {
     }
 }
 
-impl<T: DeviceTransports> Drop for Device<T> {
+impl<T: DeviceTransports> Drop for DeviceState<T> {
     fn drop(&mut self) {
         log::info!("Stopping Device");
     }
