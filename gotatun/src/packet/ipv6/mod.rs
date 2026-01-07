@@ -56,7 +56,7 @@ pub struct Ipv6VersionTrafficFlow {
 }
 
 impl Ipv6Header {
-    /// Length, in bytes, of an [`Ipv6Header`].
+    /// Length of an [`Ipv6Header`], in bytes.
     #[allow(dead_code)]
     pub const LEN: usize = size_must_be::<Ipv6Header>(40);
 
