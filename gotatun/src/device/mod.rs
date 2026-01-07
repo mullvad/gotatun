@@ -83,7 +83,7 @@ pub enum Error {
     Timer(io::Error),
     #[error("iface read: {0}")]
     IfaceRead(io::Error),
-    #[error("{0}")]
+    #[error("Failed to drop privileges: {0}")]
     DropPrivileges(String),
     #[error("API socket error: {0}")]
     ApiSocket(io::Error),
