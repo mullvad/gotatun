@@ -114,24 +114,30 @@ mod unix {
                 .with_ansi(false)
                 .init();
 
-            let daemonize = Daemonize::new()
-                .working_directory("/tmp")
-                .exit_action(move || {
+            let daemonize = Daemonize::new().working_directory("/tmp");
+
+            match daemonize.execute() {
+                daemonize::Outcome::Parent(Err(e)) => {
+                    eprintln!("GotaTun failed to start");
+                    eprintln!("{e:?}");
+                    exit(1);
+                }
+                daemonize::Outcome::Parent(Ok(_parent)) => {
                     let mut b = [0u8; 1];
                     if sock2.recv(&mut b).is_ok() && b[0] == 1 {
                         println!("GotaTun started successfully");
+                        return;
                     } else {
                         eprintln!("GotaTun failed to start");
                         exit(1);
                     }
-                });
-
-            match daemonize.start() {
-                Ok(()) => log::info!("GotaTun started successfully"),
-                Err(e) => {
-                    log::error!("error = {e:?}");
+                }
+                daemonize::Outcome::Child(Err(e)) => {
+                    log::error!("{e:?}");
+                    sock1.send(&[0]).unwrap();
                     exit(1);
                 }
+                daemonize::Outcome::Child(Ok(_child)) => {}
             }
         } else {
             tracing_subscriber::fmt()
