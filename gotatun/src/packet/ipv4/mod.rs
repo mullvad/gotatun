@@ -136,7 +136,7 @@ impl Ipv4Header {
 }
 
 impl Ipv4Header {
-    /// Length, in bytes, of an [`Ipv4Header`].
+    /// Length of an [`Ipv4Header`], in bytes.
     pub const LEN: usize = size_must_be::<Ipv4Header>(20);
 
     /// Get IP version. Must be `4` for a valid IPv4 header.
