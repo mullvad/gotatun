@@ -122,7 +122,6 @@ pub struct WgDataHeader {
     pub receiver_idx: little_endian::U32,
 
     /// A counter that must be incremented for every data packet to prevent replay attacks.
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub counter: little_endian::U64,
 }
 
