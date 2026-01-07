@@ -355,7 +355,7 @@ impl Packet<Ipv4> {
     /// Try to cast this [`Ipv4`] packet into an [`Udp`] packet.
     ///
     /// Returns `Packet<Ipv4<Udp>>` if the packet is a valid,
-    /// non-fragmented IPv4 UDP packet with no options (IHL == 5).
+    /// non-fragmented IPv4 UDP packet with no options (IHL == `5`).
     ///
     /// # Errors
     /// Returns an error if
