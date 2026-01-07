@@ -117,6 +117,7 @@ pub struct WgDataHeader {
     packet_type: WgPacketType,
     _reserved_zeros: [u8; 4 - size_of::<WgPacketType>()],
 
+    /// An integer that identifies the WireGuard session for the receiving peer.
     /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub receiver_idx: little_endian::U32,
 
