@@ -37,7 +37,7 @@ pub struct UdpHeader {
 }
 
 impl UdpHeader {
-    /// Length, in bytes, of a [`UdpHeader`].
+    /// Length of a [`UdpHeader`], in bytes.
     #[allow(dead_code)]
     pub const LEN: usize = size_must_be::<UdpHeader>(8);
 }
