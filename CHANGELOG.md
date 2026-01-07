@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- Allow tun devices with packet information on macOS.
+
 ### Fixed
 - Fix issue where every handshake after 100 received handshake messages triggered a cookie reply.
 
