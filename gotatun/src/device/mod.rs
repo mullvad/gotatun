@@ -8,6 +8,7 @@
 pub mod allowed_ips;
 
 pub mod api;
+mod builder;
 pub mod daita;
 #[cfg(unix)]
 pub mod drop_privileges;
@@ -35,8 +36,6 @@ use crate::noise::{Tunn, TunnResult};
 use crate::packet::{PacketBufPool, WgKind};
 use crate::task::Task;
 use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
-#[cfg(feature = "tun")]
-use crate::tun::tun_async_device::TunDevice;
 use crate::tun::{IpRecv, IpSend, MtuWatcher};
 use crate::udp::buffer::{BufferedUdpReceive, BufferedUdpSend};
 use crate::udp::{UdpRecv, UdpSend, UdpTransportFactory, UdpTransportFactoryParams};
@@ -46,6 +45,7 @@ use peer::{AllowedIP, Peer};
 use rand_core::{OsRng, RngCore};
 
 pub use crate::device::transports::{DefaultDeviceTransports, DeviceTransports};
+pub use builder::DeviceBuilder;
 
 /// The number of handshakes per second to tolerate before using cookies
 const HANDSHAKE_RATE_LIMIT: u64 = 100;
@@ -98,11 +98,6 @@ pub enum Error {
 #[derive(Clone)]
 pub struct Device<T: DeviceTransports> {
     inner: Arc<RwLock<DeviceState<T>>>,
-}
-
-#[derive(Default)]
-pub struct DeviceConfig {
-    pub api: Option<api::ApiServer>,
 }
 
 pub(crate) struct DeviceState<T: DeviceTransports> {
@@ -252,61 +247,7 @@ impl<T: DeviceTransports> Connection<T> {
     }
 }
 
-#[cfg(feature = "tun")]
-impl<T: DeviceTransports<IpRecv = TunDevice, IpSend = TunDevice>> Device<T> {
-    pub async fn from_tun_name(
-        udp_factory: T::UdpTransportFactory,
-        tun_name: &str,
-        config: DeviceConfig,
-    ) -> Result<Device<T>, Error> {
-        let mut tun_config = tun::Configuration::default();
-        tun_config.tun_name(tun_name);
-        #[cfg(target_os = "macos")]
-        tun_config.platform_config(|p| {
-            p.enable_routing(false);
-        });
-        let tun = tun::create_as_async(&tun_config)?;
-        let tun = TunDevice::from_tun_device(tun)?;
-        let (tun_tx, tun_rx) = (tun.clone(), tun);
-        Ok(Device::new(udp_factory, tun_tx, tun_rx, config).await)
-    }
-}
-
 impl<T: DeviceTransports> Device<T> {
-    pub async fn new(
-        udp_factory: T::UdpTransportFactory,
-        tun_tx: T::IpSend,
-        tun_rx: T::IpRecv,
-        config: DeviceConfig,
-    ) -> Device<T> {
-        let state = DeviceState {
-            api: None,
-            udp_factory: udp_factory,
-            tun_tx: Arc::new(Mutex::new(tun_tx)),
-            tun_rx_mtu: tun_rx.mtu(),
-            tun_rx: Arc::new(Mutex::new(tun_rx)),
-            fwmark: Default::default(),
-            key_pair: Default::default(),
-            next_index: Default::default(),
-            peers: Default::default(),
-            peers_by_idx: Default::default(),
-            peers_by_ip: AllowedIps::new(),
-            rate_limiter: None,
-            port: 0,
-            connection: None,
-        };
-        let inner = Arc::new(RwLock::new(state));
-
-        if let Some(channel) = config.api {
-            inner.write().await.api = Some(Task::spawn(
-                "handle_api",
-                DeviceState::handle_api(Arc::downgrade(&inner), channel),
-            ));
-        }
-
-        Device { inner }
-    }
-
     pub async fn stop(self) {
         Self::stop_inner(self.inner.clone()).await
     }
