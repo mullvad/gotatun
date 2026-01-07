@@ -365,6 +365,7 @@ pub struct WgHandshakeResp {
     /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub sender_idx: little_endian::U32,
 
+    /// An integer that identifies the WireGuard session for the initiating peer.
     /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub receiver_idx: little_endian::U32,
 
