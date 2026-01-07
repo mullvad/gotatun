@@ -47,7 +47,7 @@ pub struct Ipv6VersionTrafficFlow {
     /// IPv6 flow label.
     #[bits(20)]
     pub flow_label: u32,
-    /// IPv6 traffic class
+    /// IPv6 traffic class.
     #[bits(8)]
     pub traffic_class: u8,
     /// IPv6 version. This must be `6`.
