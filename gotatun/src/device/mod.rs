@@ -102,7 +102,7 @@ pub struct DeviceConfig {
     pub api: Option<api::ApiServer>,
 }
 
-/// By default, use a UDP socket for sending datagrams and a tunnel device for IP packets.
+/// By default, use a UDP socket for sending datagrams and a TUN device for IP packets.
 #[cfg(feature = "tun")]
 pub type DefaultDeviceTransports = (UdpSocketFactory, TunDevice);
 
