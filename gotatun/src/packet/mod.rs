@@ -164,7 +164,8 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
         }
     }
 
-    /// Create a `Packet<Y>` from a `&Y`, but re-use the backing buffer of this `Packet<T>`.
+    /// Create a `Packet<Y>` from a `&Y` by copying its bytes into the backing buffer of this
+    /// `Packet<T>`.
     ///
     /// If the `Y` won't fit into the backing buffer, this call will allocate, and effectively
     /// devolves into [`Packet::copy_from`].
