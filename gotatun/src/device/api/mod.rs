@@ -71,21 +71,21 @@ impl ApiClient {
         RW: Send + Sync + 'static,
     {
         std::thread::spawn(move || {
-            let span = tracing::info_span!("Forward API requests");
+            let span = tracing::debug_span!("Forward API requests");
             let _enter = span.enter();
 
             let r = BufReader::new(&rw);
 
             let make_request = |s: &str| {
                 // TODO: remove this, it will print the private key
-                tracing::info!(request = ?s);
+                tracing::debug!(request = ?s);
                 let request = Request::from_str(s).wrap_err("Failed to parse command")?;
 
                 let Some(response) = self.send_sync(request).ok() else {
                     bail!("Server hung up");
                 };
 
-                tracing::info!(response = ?response.to_string());
+                tracing::debug!(response = ?response.to_string());
                 if let Err(e) = writeln!(&rw, "{response}") {
                     tracing::error!("Failed to write API response: {e}");
                 }
@@ -161,7 +161,7 @@ impl ApiServer {
                 let Ok((stream, _)) = api_listener.accept() else {
                     break;
                 };
-                tracing::info!("New UAPI connection on unix socket");
+                tracing::debug!("New UAPI connection on unix socket");
                 tx.clone().wrap_read_write(stream);
             }
         });
@@ -228,7 +228,7 @@ impl<T: DeviceTransports> Device<T> {
             let Some(device) = device.upgrade() else {
                 return;
             };
-            tracing::info!(?request);
+            tracing::debug!(?request);
             let response = match request {
                 Request::Get(get) => {
                     let device_guard = device.read().await;
@@ -260,7 +260,7 @@ impl<T: DeviceTransports> Device<T> {
                 } //_ => EIO,
             };
 
-            tracing::info!(?response);
+            tracing::debug!(?response);
 
             if let Err(response) = respond.send(response) {
                 tracing::warn!(?response, "Failed to send response");
