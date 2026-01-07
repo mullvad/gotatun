@@ -9,7 +9,7 @@
 // Those tests require docker and sudo privileges to run
 #[cfg(all(test, not(target_os = "macos"), not(target_os = "windows")))]
 mod tests {
-    use crate::device::{DefaultDeviceTransports, DeviceConfig, DeviceHandle};
+    use crate::device::{DefaultDeviceTransports, Device, DeviceConfig};
     use crate::udp::socket::UdpSocketFactory;
     use crate::x25519::{PublicKey, StaticSecret};
     use base64::encode as base64encode;
@@ -65,7 +65,7 @@ mod tests {
 
     /// Represents a single WireGuard interface on local machine
     struct WGHandle {
-        _device: DeviceHandle<DefaultDeviceTransports>,
+        _device: Device<DefaultDeviceTransports>,
         name: String,
         addr_v4: IpAddr,
         addr_v6: IpAddr,
@@ -282,7 +282,7 @@ mod tests {
         ) -> WGHandle {
             // Generate a new name, utun100+ should work on macOS and Linux
             let name = format!("utun{}", NEXT_IFACE_IDX.fetch_add(1, Ordering::Relaxed));
-            let _device = DeviceHandle::from_tun_name(UdpSocketFactory, &name, config)
+            let _device = Device::from_tun_name(UdpSocketFactory, &name, config)
                 .await
                 .unwrap();
             WGHandle {
