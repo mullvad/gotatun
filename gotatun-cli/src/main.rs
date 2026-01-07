@@ -95,7 +95,11 @@ mod unix {
         // Create a socketpair to communicate between forked processes
         let (sock1, sock2) = UnixDatagram::pair().unwrap();
         let _ = sock1.set_nonblocking(true);
+        // Status messages sent between forked processes
+        const CHILD_OK: &[u8] = &[1];
+        const CHILD_ERR: &[u8] = &[0];
 
+        // tracing_appender worker guard
         let _guard;
 
         if background {
@@ -114,7 +118,7 @@ mod unix {
                 }
                 daemonize::Outcome::Parent(Ok(_parent)) => {
                     let mut b = [0u8; 1];
-                    if sock2.recv(&mut b).is_ok() && b[0] == 1 {
+                    if sock2.recv(&mut b).is_ok() && b == CHILD_OK {
                         println!("GotaTun started successfully");
                         return;
                     } else {
@@ -136,7 +140,7 @@ mod unix {
 
             if let Err(e) = child_result {
                 log::error!("{e:?}");
-                sock1.send(&[0]).unwrap();
+                sock1.send(CHILD_ERR).unwrap();
                 exit(1);
             }
         } else {
@@ -150,13 +154,13 @@ mod unix {
             Ok(device) => device,
             Err(e) => {
                 log::error!("{e:?}");
-                sock1.send(&[0]).unwrap();
+                sock1.send(CHILD_ERR).unwrap();
                 exit(1);
             }
         };
 
         // Notify parent that tunnel initialization succeeded
-        sock1.send(&[1]).unwrap();
+        sock1.send(CHILD_OK).unwrap();
         drop(sock1);
 
         log::info!("GotaTun started successfully");
