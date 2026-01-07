@@ -9,6 +9,8 @@ jobs:
   docs-linux:
     name: Check documentation (Linux)
     runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: "--deny warnings"
     steps:
       - uses: actions/checkout@v4
 
