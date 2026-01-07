@@ -179,16 +179,14 @@ impl RateLimiter {
         let mac1 = handshake.mac1();
         let mac2 = handshake.mac2();
 
-        let packet_until_mac = &handshake.as_bytes()[..P::MAC1_OFF];
-
-        let computed_mac1 = b2s_keyed_mac_16(&self.mac1_key, packet_until_mac);
+        let computed_mac1 = b2s_keyed_mac_16(&self.mac1_key, handshake.until_mac1());
         if !constant_time_eq(&computed_mac1, mac1) {
             return Err(TunnResult::Err(WireGuardError::InvalidMac));
         }
 
         if self.is_under_load() {
             let cookie = self.current_cookie(src_addr);
-            let computed_mac2 = b2s_keyed_mac_16_2(&cookie, packet_until_mac, mac1);
+            let computed_mac2 = b2s_keyed_mac_16_2(&cookie, handshake.until_mac1(), mac1);
 
             if !constant_time_eq(&computed_mac2, mac2) {
                 let cookie_reply = self.format_cookie_reply(sender_idx, cookie, mac1);
