@@ -96,7 +96,7 @@ pub enum Error {
 /// A reference-counted handle to a WireGuard device.
 #[derive(Clone)]
 pub struct Device<T: DeviceTransports> {
-    device: Arc<RwLock<DeviceState<T>>>,
+    inner: Arc<RwLock<DeviceState<T>>>,
 }
 
 #[derive(Default)]
@@ -309,13 +309,36 @@ impl<T: DeviceTransports> Device<T> {
         tun_rx: T::IpRecv,
         config: DeviceConfig,
     ) -> Device<T> {
-        Device {
-            device: DeviceState::new(udp_factory, tun_tx, tun_rx, config).await,
+        let state = DeviceState {
+            api: None,
+            udp_factory: udp_factory,
+            tun_tx: Arc::new(Mutex::new(tun_tx)),
+            tun_rx_mtu: tun_rx.mtu(),
+            tun_rx: Arc::new(Mutex::new(tun_rx)),
+            fwmark: Default::default(),
+            key_pair: Default::default(),
+            next_index: Default::default(),
+            peers: Default::default(),
+            peers_by_idx: Default::default(),
+            peers_by_ip: AllowedIps::new(),
+            rate_limiter: None,
+            port: 0,
+            connection: None,
+        };
+        let inner = Arc::new(RwLock::new(state));
+
+        if let Some(channel) = config.api {
+            inner.write().await.api = Some(Task::spawn(
+                "handle_api",
+                DeviceState::handle_api(Arc::downgrade(&inner), channel),
+            ));
         }
+
+        Device { inner }
     }
 
     pub async fn stop(self) {
-        Self::stop_inner(self.device.clone()).await
+        Self::stop_inner(self.inner.clone()).await
     }
 
     async fn stop_inner(device: Arc<RwLock<DeviceState<T>>>) {
@@ -342,10 +365,10 @@ impl<T: DeviceTransports> Drop for Device<T> {
         };
         log::debug!(
             "DeviceHandle strong count: {}",
-            Arc::strong_count(&self.device)
+            Arc::strong_count(&self.inner)
         );
-        log::debug!("DeviceHandle weak count: {}", Arc::weak_count(&self.device));
-        let device = self.device.clone();
+        log::debug!("DeviceHandle weak count: {}", Arc::weak_count(&self.inner));
+        let device = self.inner.clone();
         handle.spawn(async move {
             Self::stop_inner(device).await;
         });
@@ -498,38 +521,6 @@ impl<T: DeviceTransports> DeviceState<T> {
         }
 
         log::info!("Peer added");
-    }
-
-    pub async fn new(
-        udp_factory: T::UdpTransportFactory,
-        tun_tx: T::IpSend,
-        tun_rx: T::IpRecv,
-        config: DeviceConfig,
-    ) -> Arc<RwLock<DeviceState<T>>> {
-        let device = DeviceState {
-            api: None,
-            udp_factory,
-            tun_tx: Arc::new(Mutex::new(tun_tx)),
-            tun_rx_mtu: tun_rx.mtu(),
-            tun_rx: Arc::new(Mutex::new(tun_rx)),
-            fwmark: Default::default(),
-            key_pair: Default::default(),
-            next_index: Default::default(),
-            peers: Default::default(),
-            peers_by_idx: Default::default(),
-            peers_by_ip: AllowedIps::new(),
-            rate_limiter: None,
-            port: 0,
-            connection: None,
-        };
-        let device = Arc::new(RwLock::new(device));
-        if let Some(channel) = config.api {
-            device.write().await.api = Some(Task::spawn(
-                "handle_api",
-                DeviceState::handle_api(Arc::downgrade(&device), channel),
-            ));
-        }
-        device
     }
 
     fn set_port(&mut self, port: u16) -> Reconfigure {
