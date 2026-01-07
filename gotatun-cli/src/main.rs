@@ -12,9 +12,10 @@
 mod unix {
     use clap::{Arg, Command};
     use daemonize::Daemonize;
+    use eyre::Context;
+    use gotatun::device::api::ApiServer;
     use gotatun::device::drop_privileges::drop_privileges;
-    use gotatun::device::{DefaultDeviceTransports, Device, DeviceConfig};
-    use gotatun::udp::socket::UdpSocketFactory;
+    use gotatun::device::{DefaultDeviceTransports, Device, DeviceBuilder};
     use std::fs::File;
     use std::os::unix::net::UnixDatagram;
     use std::process::exit;
@@ -89,6 +90,7 @@ mod unix {
         let background = !matches.is_present("foreground");
         let tun_name = matches.value_of("INTERFACE_NAME").unwrap();
         let log_level: Level = matches.value_of_t("verbosity").unwrap_or_else(|e| e.exit());
+        let do_drop_privileges = !matches.is_present("disable-drop-privileges");
 
         // Create a socketpair to communicate between forked processes
         let (sock1, sock2) = UnixDatagram::pair().unwrap();
@@ -138,28 +140,14 @@ mod unix {
                 .init();
         }
 
-        let api = gotatun::device::api::ApiServer::default_unix_socket(tun_name).unwrap();
-
-        let config = DeviceConfig { api: Some(api) };
-
-        let device_handle: Device<DefaultDeviceTransports> =
-            match Device::from_tun_name(UdpSocketFactory, tun_name, config).await {
-                Ok(d) => d,
-                Err(e) => {
-                    // Notify parent that tunnel initialization failed
-                    log::error!("Failed to initialize tunnel: {e:?}");
-                    sock1.send(&[0]).unwrap();
-                    exit(1);
-                }
-            };
-
-        if !matches.is_present("disable-drop-privileges")
-            && let Err(e) = drop_privileges()
-        {
-            log::error!("Failed to drop privileges: {e:?}");
-            sock1.send(&[0]).unwrap();
-            exit(1);
-        }
+        let device = match start(tun_name, do_drop_privileges).await {
+            Ok(device) => device,
+            Err(e) => {
+                log::error!("{e:?}");
+                sock1.send(&[0]).unwrap();
+                exit(1);
+            }
+        };
 
         // Notify parent that tunnel initialization succeeded
         sock1.send(&[1]).unwrap();
@@ -175,7 +163,28 @@ mod unix {
         }
 
         log::info!("GotaTun is shutting down");
-        device_handle.stop().await;
+        device.stop().await;
+    }
+
+    async fn start(
+        tun_name: &str,
+        do_drop_privileges: bool,
+    ) -> eyre::Result<Device<DefaultDeviceTransports>> {
+        let uapi = ApiServer::default_unix_socket(tun_name)
+            .context("Failed to create UAPI unix socket")?;
+
+        let device: Device<_> = DeviceBuilder::new()
+            .with_uapi(uapi)
+            .with_default_udp()
+            .create_tun(tun_name)
+            .context("Failed to create TUN device")?
+            .build();
+
+        if do_drop_privileges {
+            drop_privileges().context("Failed to drop privileges")?;
+        }
+
+        Ok(device)
     }
 }
 
