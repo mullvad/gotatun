@@ -30,7 +30,7 @@ pub struct UdpHeader {
     pub source_port: big_endian::U16,
     /// UDP destination port.
     pub destination_port: big_endian::U16,
-    /// Length, in bytes, of the UDP packet (including header).
+    /// Length of the UDP packet (including header) in bytes.
     pub length: big_endian::U16,
     /// Checksum of the UDP packet
     pub checksum: big_endian::U16,
