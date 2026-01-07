@@ -210,8 +210,8 @@ fn create_sock_dir() {
             // delete the files there when we exit, so we need to change the owner
             libc::chown(
                 c_path.as_bytes_with_nul().as_ptr().cast(),
-                saved_uid,
-                saved_gid,
+                saved_uid.as_raw(),
+                saved_gid.as_raw(),
             );
         }
     }
