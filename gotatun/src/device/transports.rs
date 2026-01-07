@@ -10,7 +10,7 @@ use crate::{
 
 /// By default, use a UDP socket for sending datagrams and a TUN device for IP packets.
 #[cfg(feature = "tun")]
-pub type DefaultDeviceTransports = (UdpSocketFactory, TunDevice);
+pub type DefaultDeviceTransports = (UdpSocketFactory, TunDevice, TunDevice);
 
 pub trait DeviceTransports: 'static {
     type UdpTransportFactory: UdpTransportFactory;

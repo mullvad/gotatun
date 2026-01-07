@@ -835,6 +835,7 @@ version = "0.1.2"
 dependencies = [
  "clap 3.2.25",
  "daemonize",
+ "eyre",
  "gotatun",
  "log",
  "tokio",
