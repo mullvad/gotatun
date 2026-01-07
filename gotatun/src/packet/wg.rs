@@ -119,7 +119,6 @@ pub struct WgDataHeader {
     _reserved_zeros: [u8; 4 - size_of::<WgPacketType>()],
 
     /// An integer that identifies the WireGuard session for the receiving peer.
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
     pub receiver_idx: little_endian::U32,
 
     /// A counter that must be incremented for every data packet to prevent replay attacks.
