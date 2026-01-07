@@ -13,7 +13,7 @@ mod unix {
     use clap::{Arg, Command};
     use daemonize::Daemonize;
     use gotatun::device::drop_privileges::drop_privileges;
-    use gotatun::device::{DefaultDeviceTransports, DeviceConfig, DeviceHandle};
+    use gotatun::device::{DefaultDeviceTransports, Device, DeviceConfig};
     use gotatun::udp::socket::UdpSocketFactory;
     use std::fs::File;
     use std::os::unix::net::UnixDatagram;
@@ -142,8 +142,8 @@ mod unix {
 
         let config = DeviceConfig { api: Some(api) };
 
-        let device_handle: DeviceHandle<DefaultDeviceTransports> =
-            match DeviceHandle::from_tun_name(UdpSocketFactory, tun_name, config).await {
+        let device_handle: Device<DefaultDeviceTransports> =
+            match Device::from_tun_name(UdpSocketFactory, tun_name, config).await {
                 Ok(d) => d,
                 Err(e) => {
                     // Notify parent that tunnel initialization failed
