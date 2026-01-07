@@ -20,6 +20,7 @@ pub struct IpvxVersion {
 }
 
 /// An IP packet, including headers, that may be either IPv4 or IPv6.
+/// [Read more](crate::packet)
 #[repr(C, packed)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Ip {
