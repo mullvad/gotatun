@@ -102,7 +102,7 @@ impl UdpSocket {
         })
     }
 
-    /// Returs the local address that this socket is bound to.
+    /// Returns the local address that this socket is bound to.
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.inner.local_addr()
     }
