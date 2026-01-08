@@ -262,31 +262,16 @@ mod tests {
 
     impl WGHandle {
         /// Create a new interface for the tunnel with the given address
-        async fn init(addr_v4: IpAddr, addr_v6: IpAddr) -> WGHandle {
-            WGHandle::init_with_config(
-                addr_v4,
-                addr_v6,
-                DeviceConfig {
-                    #[cfg(target_os = "linux")]
-                    api: None,
-                },
-            )
-            .await
-        }
-
-        /// Create a new interface for the tunnel with the given address
-        async fn init_with_config(
-            addr_v4: IpAddr,
-            addr_v6: IpAddr,
-            config: DeviceConfig,
-        ) -> WGHandle {
+        fn init(addr_v4: IpAddr, addr_v6: IpAddr) -> WGHandle {
             // Generate a new name, utun100+ should work on macOS and Linux
             let name = format!("utun{}", NEXT_IFACE_IDX.fetch_add(1, Ordering::Relaxed));
-            let _device = Device::from_tun_name(UdpSocketFactory, &name, config)
-                .await
-                .unwrap();
+            let builder = DeviceBuilder::new()
+                .create_tun(&name)
+                .unwrap()
+                .with_udp(UdpSocketFactory);
+
             WGHandle {
-                _device,
+                _device: builder.build(),
                 name,
                 addr_v4,
                 addr_v6,
@@ -476,7 +461,7 @@ mod tests {
     #[ignore]
     /// Test if wireguard starts and creates a unix socket that we can read from
     async fn test_wireguard_get() {
-        let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap()).await;
+        let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap());
         let response = wg.wg_get();
         assert!(response.ends_with("errno=0\n\n"));
     }
@@ -489,7 +474,7 @@ mod tests {
         let private_key = StaticSecret::random_from_rng(OsRng);
         let own_public_key = PublicKey::from(&private_key);
 
-        let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap()).await;
+        let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap());
         assert!(wg.wg_get().ends_with("errno=0\n\n"));
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -558,16 +543,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::init_with_config(
-            addr_v4,
-            addr_v6,
-            DeviceConfig {
-                //use_connected_socket: false,
-                #[cfg(target_os = "linux")]
-                api: None,
-            },
-        )
-        .await;
+        let mut wg = WGHandle::init(addr_v4, addr_v6);
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -603,7 +579,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::init(addr_v4, addr_v6).await;
+        let mut wg = WGHandle::init(addr_v4, addr_v6);
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -639,7 +615,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::init(addr_v4, addr_v6).await;
+        let mut wg = WGHandle::init(addr_v4, addr_v6);
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -675,7 +651,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::init(addr_v4, addr_v6).await;
+        let mut wg = WGHandle::init(addr_v4, addr_v6);
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -714,15 +690,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::init_with_config(
-            addr_v4,
-            addr_v6,
-            DeviceConfig {
-                #[cfg(target_os = "linux")]
-                api: None,
-            },
-        )
-        .await;
+        let mut wg = WGHandle::init(addr_v4, addr_v6);
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -760,7 +728,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::init(addr_v4, addr_v6).await;
+        let mut wg = WGHandle::init(addr_v4, addr_v6);
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
@@ -811,7 +779,7 @@ mod tests {
         let addr_v4 = next_ip();
         let addr_v6 = next_ip_v6();
 
-        let mut wg = WGHandle::init(addr_v4, addr_v6).await;
+        let mut wg = WGHandle::init(addr_v4, addr_v6);
 
         assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
         assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
