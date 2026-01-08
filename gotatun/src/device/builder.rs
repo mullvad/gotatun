@@ -8,7 +8,9 @@ use tokio::sync::{Mutex, RwLock};
 #[cfg(feature = "tun")]
 use crate::device::Error;
 use crate::{
-    device::{Device, DeviceState, allowed_ips::AllowedIps, api::ApiServer},
+    device::{
+        Device, DeviceState, allowed_ips::AllowedIps, api::ApiServer, peer::builder::PeerBuilder,
+    },
     task::Task,
     tun::{IpRecv, IpSend, tun_async_device::TunDevice},
     udp::{UdpTransportFactory, socket::UdpSocketFactory},
@@ -21,15 +23,19 @@ pub struct DeviceBuilder<Udp, TunTx, TunRx> {
     tun_tx: TunTx,
     tun_rx: TunRx,
     uapi: Option<ApiServer>,
+
+    // TODO: consider turning this into a typestat, and adding a special case for single peer
+    peers: Vec<PeerBuilder>,
 }
 
 impl DeviceBuilder<Nul, Nul, Nul> {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             udp: Nul,
             tun_tx: Nul,
             tun_rx: Nul,
             uapi: None,
+            peers: Vec::new(),
         }
     }
 }
@@ -45,6 +51,7 @@ impl<X, Y> DeviceBuilder<Nul, X, Y> {
             tun_tx: self.tun_tx,
             tun_rx: self.tun_rx,
             uapi: self.uapi,
+            peers: self.peers,
         }
     }
 }
@@ -81,6 +88,7 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
             tun_tx,
             tun_rx,
             uapi: self.uapi,
+            peers: self.peers,
         }
     }
 }
@@ -90,11 +98,16 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
         self.uapi = Some(uapi);
         self
     }
+
+    pub fn with_peer(mut self, peer: PeerBuilder) -> Self {
+        self.peers.push(peer);
+        self
+    }
 }
 
 impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, TunTx, TunRx> {
     pub fn build(self) -> Device<(Udp, TunTx, TunRx)> {
-        let state = DeviceState {
+        let mut state = DeviceState {
             api: None,
             udp_factory: self.udp,
             tun_tx: Arc::new(Mutex::new(self.tun_tx)),
@@ -110,6 +123,11 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             port: 0,
             connection: None,
         };
+
+        for peer in self.peers {
+            let index = state.next_index();
+            state.add_peer(peer, index);
+        }
 
         let inner = Arc::new(RwLock::new(state));
 

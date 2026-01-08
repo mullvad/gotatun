@@ -1,0 +1,278 @@
+use std::{net::SocketAddr, sync::Arc};
+
+use ip_network::IpNetwork;
+use x25519_dalek::{PublicKey, StaticSecret};
+
+#[cfg(target_os = "linux")]
+use crate::device::Error;
+use crate::device::{
+    Connection, Device, DeviceState, DeviceTransports, Reconfigure, peer::builder::PeerBuilder,
+};
+
+pub struct DeviceConfigurator<'a, T: DeviceTransports> {
+    device: &'a mut DeviceState<T>,
+    reconfigure: Reconfigure,
+    set_private_key: Option<StaticSecret>,
+}
+// struct PeerMut2 {
+//     pub public_key: PublicKey,
+//     pub endpoint: Endpoint,
+//     pub allowed_ips: Vec<IpNetwork>,
+//     pub preshared_key: Option<[u8; 32]>,
+//     pub keepalive: Option<u16>,
+// }
+
+#[derive(Default)]
+enum Update<T> {
+    #[default]
+    Ignore,
+    Set(Option<T>),
+}
+
+impl<T> From<Option<T>> for Update<T> {
+    fn from(value: Option<T>) -> Self {
+        Update::Set(value)
+    }
+}
+
+#[derive(Default)]
+#[non_exhaustive]
+pub struct PeerMut {
+    preshared_key: Update<[u8; 32]>,
+    endpoint: Update<SocketAddr>,
+    keepalive: Update<u16>,
+
+    clear_allowed_ips: bool,
+    add_allowed_ips: Vec<IpNetwork>,
+}
+
+impl PeerMut {
+    pub fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
+        self.preshared_key = preshared_key.into();
+    }
+
+    pub fn set_endpoint(&mut self, addr: Option<SocketAddr>) {
+        self.endpoint = addr.into();
+    }
+
+    pub fn set_keepalive(&mut self, keepalive: Option<u16>) {
+        self.keepalive = keepalive.into();
+    }
+
+    pub fn clear_allowed_ips(&mut self) {
+        self.clear_allowed_ips = true;
+    }
+
+    pub fn add_allowed_ip(&mut self, allowed_ip: impl Into<IpNetwork>) {
+        self.add_allowed_ips.push(allowed_ip.into());
+    }
+
+    pub fn add_allowed_ips(&mut self, allowed_ips: impl IntoIterator<Item = impl Into<IpNetwork>>) {
+        self.add_allowed_ips
+            .extend(allowed_ips.into_iter().map(Into::into));
+    }
+}
+
+impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
+    pub fn clear_peers(&mut self) {
+        self.device.clear_peers();
+    }
+
+    pub fn add_peer(&mut self, peer: PeerBuilder) {
+        if self.device.peers.contains_key(&peer.public_key) {
+            return; // TODO: error? yes please
+        }
+        let index = self.device.next_index();
+        self.device.add_peer(peer, index);
+    }
+
+    pub async fn add_or_update_peer(&mut self, peer: PeerBuilder) {
+        if self.device.peers.contains_key(&peer.public_key) {
+            self.update_peer(peer).await;
+        } else {
+            self.add_peer(peer);
+        }
+    }
+
+    /// ```
+    /// let device: Device<_>;
+    /// device.configure(|device| {
+    ///     device.clear_peers();
+    ///     device.add_peer(peer);
+    ///     device.add_or_update_peer(peer);
+    ///     device.modify_peer(pubkey, |peer| {
+    ///         peer.set_stuff()
+    ///     });
+    /// }).await?;
+    /// ```
+    pub async fn modify_peer(
+        &mut self,
+        public_key: &PublicKey,
+        f: impl for<'a> FnOnce(&mut PeerMut),
+    ) -> bool {
+        let Some(existing_peer) = self.device.peers.get(public_key) else {
+            return false;
+        };
+
+        let existing_peer_arc = Arc::clone(&existing_peer);
+        let mut existing_peer = existing_peer_arc.lock().await;
+
+        let mut peer_mut = PeerMut::default();
+        f(&mut peer_mut);
+
+        let PeerMut {
+            preshared_key,
+            clear_allowed_ips,
+            add_allowed_ips,
+            endpoint,
+            keepalive,
+        } = peer_mut;
+
+        let index = existing_peer.index();
+
+        if let Update::Set(preshared_key) = preshared_key {
+            existing_peer.preshared_key = preshared_key;
+        }
+
+        if let Update::Set(keepalive) = keepalive {
+            todo!("update tunnel.persistent_keepalive?");
+        }
+
+        if let Update::Set(addr) = endpoint {
+            existing_peer.endpoint.write().addr = addr;
+        }
+
+        if clear_allowed_ips {
+            existing_peer.allowed_ips.clear();
+        }
+
+        for allowed_ip in add_allowed_ips {
+            existing_peer.allowed_ips.insert(
+                allowed_ip.network_address(),
+                allowed_ip.netmask(),
+                (),
+            );
+        }
+
+        // Update device.peers_by_ip by clearing all entries that refer to this peer and
+        // adding them again.
+        let mut remove_list = vec![];
+        for (peer, ip_network) in self.device.peers_by_ip.iter() {
+            if Arc::ptr_eq(&existing_peer_arc, peer) {
+                remove_list.push(ip_network.clone());
+            }
+        }
+        for network in remove_list {
+            self.device.peers_by_ip.remove_network(network);
+        }
+        for (_, allowed_ip) in existing_peer.allowed_ips.iter() {
+            self.device.peers_by_ip.insert(
+                allowed_ip.network_address(),
+                allowed_ip.netmask(),
+                Arc::clone(&existing_peer_arc),
+            );
+        }
+
+        true
+    }
+
+    pub async fn remove_peer(&mut self, public_key: &PublicKey) -> bool {
+        self.device.remove_peer(public_key).await.is_some()
+    }
+
+    pub async fn update_peer(&mut self, peer: PeerBuilder) -> bool {
+        self.modify_peer(&peer.public_key, |peer_mut| {
+            peer_mut.clear_allowed_ips();
+            peer_mut.add_allowed_ips(peer.allowed_ips);
+            peer_mut.set_endpoint(peer.endpoint);
+            peer_mut.set_keepalive(peer.keepalive);
+            peer_mut.set_preshared_key(peer.preshared_key);
+        })
+        .await
+    }
+
+    pub async fn set_private_key(&mut self, private_key: StaticSecret) {
+        self.reconfigure |= self.device.set_key(private_key).await;
+    }
+
+    pub fn set_listen_port(&mut self, port: u16) {
+        self.reconfigure |= self.device.set_port(port);
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn set_fwmark(&mut self, mark: u32) -> Result<(), Error> {
+        self.device.set_fwmark(mark)
+    }
+}
+
+impl<T: DeviceTransports> Device<T> {
+    /// ```
+    /// let device: Device<_>;
+    /// device.configure(|device| {
+    ///     device.clear_peers();
+    ///     device.add_peer(peer);
+    /// }).await?;
+    /// ```
+    pub async fn configure<X>(
+        &self,
+        f: impl AsyncFnOnce(&mut DeviceConfigurator<T>) -> X,
+    ) -> Result<X, Error> {
+        let mut state = self.inner.write().await;
+        let mut configurator = DeviceConfigurator {
+            device: &mut state,
+            reconfigure: Reconfigure::No,
+            set_private_key: None,
+        };
+
+        let t = f(&mut configurator).await;
+
+        if let Some(private_key) = configurator.set_private_key {
+            configurator.reconfigure |= configurator.device.set_key(private_key).await;
+        }
+
+        if let Reconfigure::Yes = configurator.reconfigure {
+            // TODO: don't do this elsewhere for ApiServer?
+            // FIXME: set_up acquires lock but we should reuseit
+            drop(state);
+            let con = Connection::set_up(self.inner.clone()).await?;
+            let mut state = self.inner.write().await;
+            state.connection = Some(con);
+        }
+
+        Ok(t)
+    }
+
+    pub async fn set_private_key(&mut self, private_key: StaticSecret) -> Result<(), Error> {
+        self.configure(async |device| {
+            device.set_private_key(private_key).await;
+        })
+        .await
+    }
+
+    pub async fn clear_peers(&mut self) -> Result<(), Error> {
+        self.configure(async |device| device.clear_peers()).await
+    }
+
+    pub async fn add_peer(&self, peer: PeerBuilder) -> Result<(), Error> {
+        self.configure(async |device| device.add_peer(peer)).await
+    }
+
+    pub async fn add_peers(
+        &self,
+        peers: impl IntoIterator<Item = PeerBuilder>,
+    ) -> Result<(), Error> {
+        self.configure(async |device| {
+            for peer in peers {
+                device.add_peer(peer)
+            }
+        })
+        .await
+    }
+
+    pub async fn remove_peer(&self, public_key: &PublicKey) -> Result<(), Error> {
+        self.configure(async |device| {
+            device.remove_peer(public_key).await;
+        })
+        .await
+    }
+}
