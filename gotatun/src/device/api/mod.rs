@@ -13,6 +13,7 @@ use crate::device::{DeviceTransports, PeerUpdateRequest};
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
 use eyre::{Context, bail, eyre};
+use ip_network::IpNetwork;
 use libc::EINVAL;
 use std::fmt::Debug;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -309,7 +310,10 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
                 persistent_keepalive_interval: peer.persistent_keepalive(),
                 allowed_ip: peer
                     .allowed_ips()
-                    .map(|(addr, cidr)| AllowedIP { addr, cidr })
+                    .map(|ip_network| AllowedIP {
+                        addr: ip_network.network_address(),
+                        cidr: ip_network.netmask(),
+                    })
                     .collect(),
             },
             last_handshake_time_sec: peer.time_since_last_handshake().map(|d| d.as_secs()),
@@ -442,7 +446,10 @@ async fn on_api_set(
             remove,
             replace_allowed_ips,
             endpoint,
-            new_allowed_ips: allowed_ip,
+            new_allowed_ips: allowed_ip
+                .iter()
+                .map(|AllowedIP { addr, cidr }| IpNetwork::new(*addr, *cidr).unwrap())
+                .collect(),
             keepalive: persistent_keepalive_interval,
             preshared_key,
             daita_settings,

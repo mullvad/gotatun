@@ -189,6 +189,7 @@ mod unix {
 
         let device: Device<_> = DeviceBuilder::new()
             .with_uapi(uapi)
+            // .uapi_unix_socket(tun_name) // TODO?
             .with_default_udp()
             .create_tun(tun_name)
             .context("Failed to create TUN device")?
