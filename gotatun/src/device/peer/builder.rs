@@ -3,7 +3,7 @@
 
 use std::net::SocketAddr;
 
-use ip_network::IpNetwork;
+use ipnetwork::IpNetwork;
 use x25519_dalek::PublicKey;
 
 use crate::device::daita::DaitaSettings;
@@ -14,6 +14,7 @@ pub struct PeerBuilder {
     pub public_key: PublicKey,
     pub endpoint: Option<SocketAddr>,
     pub allowed_ips: Vec<IpNetwork>,
+    // TODO: zeroize
     pub preshared_key: Option<[u8; 32]>,
     pub keepalive: Option<u16>,
 
@@ -50,6 +51,11 @@ impl PeerBuilder {
 
     pub const fn with_preshared_key(mut self, preshared_key: [u8; 32]) -> Self {
         self.preshared_key = Some(preshared_key);
+        self
+    }
+
+    pub fn with_daita(mut self, daita_settings: DaitaSettings) -> Self {
+        self.daita_settings = Some(daita_settings);
         self
     }
 }

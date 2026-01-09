@@ -5,10 +5,9 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-use ip_network::IpNetwork;
 use ip_network_table::IpNetworkTable;
+use ipnetwork::IpNetwork;
 
-use std::collections::VecDeque;
 use std::iter::FromIterator;
 use std::net::IpAddr;
 
@@ -24,7 +23,7 @@ impl<'a, D> FromIterator<(&'a IpNetwork, D)> for AllowedIps<D> {
         let mut allowed_ips = AllowedIps::new();
 
         for (ip, data) in iter {
-            allowed_ips.insert(ip.network_address(), ip.netmask(), data);
+            allowed_ips.insert(ip.network(), ip.prefix(), data);
         }
 
         allowed_ips
@@ -43,12 +42,9 @@ impl<D> AllowedIps<D> {
     }
 
     pub fn insert(&mut self, key: IpAddr, cidr: u8, data: D) -> Option<D> {
-        // These are networks, it doesn't make sense for host bits to be set, so
-        // use new_truncate().
-        self.ips.insert(
-            IpNetwork::new_truncate(key, cidr).expect("cidr is valid length"),
-            data,
-        )
+        // Use new_truncate to remove the host bits
+        let network = ip_network::IpNetwork::new_truncate(key, cidr).expect("cidr is valid length");
+        self.ips.insert(network, data)
     }
 
     pub fn find(&self, key: IpAddr) -> Option<&D> {
@@ -60,20 +56,17 @@ impl<D> AllowedIps<D> {
     }
 
     pub fn remove_network(&mut self, network: IpNetwork) {
+        let network = ip_network::IpNetwork::new_truncate(network.ip(), network.prefix())
+            .expect("cidr is valid length");
         self.ips.remove(network);
     }
 
-    pub fn iter(&'_ self) -> Iter<'_, D> {
-        Iter(self.ips.iter().map(|(ipa, d)| (d, ipa)).collect())
-    }
-}
-
-pub struct Iter<'a, D: 'a>(VecDeque<(&'a D, IpNetwork)>);
-
-impl<'a, D> Iterator for Iter<'a, D> {
-    type Item = (&'a D, IpNetwork);
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.pop_front()
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a D, IpNetwork)> {
+        self.ips.iter().map(|(ip_network, d)| {
+            let ip_network = IpNetwork::new(ip_network.network_address(), ip_network.netmask())
+                .expect("cidr is valid length");
+            (d, ip_network)
+        })
     }
 }
 
