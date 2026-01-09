@@ -153,6 +153,14 @@ pub struct WgDataAndTag {
     _extra: [u8],
 }
 
+/// An encrypted value with an attached Poly1305 authentication tag.
+#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
+#[repr(C)]
+pub struct EncryptedWithTag<T: Sized> {
+    pub encrypted: T,
+    pub tag: [u8; 16],
+}
+
 impl WgData {
     /// Data packet overhead: header and tag (16 bytes)
     pub const OVERHEAD: usize = WgDataHeader::LEN + WgData::TAG_LEN;
@@ -292,11 +300,11 @@ pub struct WgHandshakeInit {
     /// Ephemeral public key of the initiating peer.
     pub unencrypted_ephemeral: [u8; 32],
 
-    /// Encrypted static public key, plus a 16 byte Poly1305 authentication tag.
-    pub encrypted_static: [u8; 48],
+    /// Encrypted static public key.
+    pub encrypted_static: EncryptedWithTag<[u8; 32]>,
 
     /// A TAI64N timestamp. Used to avoid replay attacks.
-    pub encrypted_timestamp: [u8; 28],
+    pub timestamp: EncryptedWithTag<[u8; 12]>,
 
     /// Message authentication code 1.
     pub mac1: [u8; 16],
@@ -369,7 +377,7 @@ pub struct WgHandshakeResp {
     pub unencrypted_ephemeral: [u8; 32],
 
     /// A Poly1305 authentication tag generated from an empty message.
-    pub encrypted_nothing: [u8; 16],
+    pub encrypted_nothing: EncryptedWithTag<()>,
 
     /// Message authentication code 1.
     pub mac1: [u8; 16],
@@ -390,7 +398,7 @@ impl WgHandshakeResp {
             sender_idx: sender_idx.into(),
             receiver_idx: receiver_idx.into(),
             unencrypted_ephemeral,
-            encrypted_nothing: [0; 16],
+            encrypted_nothing: EncryptedWithTag::new_zeroed(),
             mac1: [0u8; 16],
             mac2: [0u8; 16],
         }
@@ -439,8 +447,7 @@ pub struct WgCookieReply {
     pub nonce: [u8; 24],
 
     /// An encrypted 16-byte value that identifies the [`WgHandshakeInit`] that this packet is in response to.
-    /// Plus a 16 byte Poly1305 authentication tag.
-    pub encrypted_cookie: [u8; 32],
+    pub encrypted_cookie: EncryptedWithTag<[u8; 16]>,
 }
 
 impl WgCookieReply {

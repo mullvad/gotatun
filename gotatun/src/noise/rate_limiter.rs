@@ -140,13 +140,12 @@ impl RateLimiter {
 
         let iv = GenericArray::from_slice(&wg_cookie_reply.nonce);
 
-        wg_cookie_reply.encrypted_cookie[..16].copy_from_slice(&cookie);
+        wg_cookie_reply.encrypted_cookie.encrypted = cookie;
         let tag = cipher
-            .encrypt_in_place_detached(iv, mac1, &mut wg_cookie_reply.encrypted_cookie[..16])
+            .encrypt_in_place_detached(iv, mac1, &mut wg_cookie_reply.encrypted_cookie.encrypted)
             .expect("wg_cookie_reply is large enough");
 
-        wg_cookie_reply.encrypted_cookie[16..].copy_from_slice(&tag);
-
+        wg_cookie_reply.encrypted_cookie.tag = tag.into();
         wg_cookie_reply
     }
 
