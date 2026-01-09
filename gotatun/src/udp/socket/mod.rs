@@ -24,6 +24,7 @@ mod linux;
 #[cfg(target_os = "windows")]
 mod windows;
 
+/// An implementation of [`UdpTransportFactory`] for regular UDP sockets. This provides `bind`.
 pub struct UdpSocketFactory;
 
 const UDP_RECV_BUFFER_SIZE: usize = 7 * 1024 * 1024;
@@ -71,6 +72,12 @@ pub struct UdpSocket {
 }
 
 impl UdpSocket {
+    /// Create a UDP socket and bind it to `addr`.
+    ///
+    /// This also configures the following socket options:
+    /// - `nonblocking`, to work with [`tokio`].
+    /// - `reuse_address`, to allow IPv6 and IPv4 sockets to be bound to the same port.
+    /// - `{recv,send}_buffer_size`, for better performance.
     pub fn bind(addr: SocketAddr) -> io::Result<Self> {
         let domain = match addr {
             SocketAddr::V4(..) => socket2::Domain::IPV4,
@@ -95,6 +102,7 @@ impl UdpSocket {
         })
     }
 
+    /// Returns the local address that this socket is bound to.
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.inner.local_addr()
     }

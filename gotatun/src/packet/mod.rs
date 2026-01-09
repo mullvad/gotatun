@@ -1,6 +1,49 @@
 // Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! Types to create, parse, and move network packets around in a zero-copy manner.
+//!
+//! See [`Packet`] for an implementation of a [`bytes`]-backed owned packet buffer.
+//!
+//! Any of the [`zerocopy`]-enabled definitions such as [`Ipv4`] or [`Udp`] can be used to cheaply
+//! construct or parse packets:
+//! ```
+//! let example_ipv4_icmp: &mut [u8] = &mut [
+//!     0x45, 0x83, 0x0, 0x54, 0xa3, 0x13, 0x40, 0x0, 0x40, 0x1, 0xc6, 0x26, 0xa, 0x8c, 0xc2, 0xdd,
+//!     0x1, 0x2, 0x3, 0x4, 0x8, 0x0, 0x51, 0x13, 0x0, 0x2b, 0x0, 0x1, 0xb1, 0x5c, 0x87, 0x68, 0x0,
+//!     0x0, 0x0, 0x0, 0xa8, 0x28, 0x7, 0x0, 0x0, 0x0, 0x0, 0x0, 0x10, 0x11, 0x12, 0x13, 0x14,
+//!     0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23,
+//!     0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32,
+//!     0x33, 0x34, 0x35, 0x36, 0x37,
+//! ];
+//!
+//! use gotatun::packet::{Ipv4, Ipv4Header, IpNextProtocol};
+//! use zerocopy::FromBytes;
+//! use std::net::Ipv4Addr;
+//!
+//! // Cast the `&[u8]` to an &Ipv4.
+//! // Note that this doesn't validate anything about the packet,
+//! // except that it's at least Ipv4Header::LEN bytes long.
+//! let packet = Ipv4::<[u8]>::mut_from_bytes(example_ipv4_icmp)
+//!     .expect("Packet must be large enough to be IPv4");
+//! let header: &mut Ipv4Header = &mut packet.header;
+//! let payload: &mut [u8] = &mut packet.payload;
+//!
+//! // Read stuff from the IPv4 header
+//! assert_eq!(header.version(), 4);
+//! assert_eq!(header.source(), Ipv4Addr::new(10, 140, 194, 221));
+//! assert_eq!(header.destination(), Ipv4Addr::new(1, 2, 3, 4));
+//! assert_eq!(header.header_checksum, 0xc626);
+//! assert_eq!(header.protocol, IpNextProtocol::Icmp);
+//!
+//! // Write stuff to the header. Note that this invalidates the checksum.
+//! header.time_to_live = 123;
+//!
+//! // Write stuff to the payload. Note that this clobbers the ICMP packet stored here.
+//! payload[..12].copy_from_slice(b"Hello there!");
+//! assert_eq!(&example_ipv4_icmp[20..][..12], b"Hello there!");
+//! ```
+
 use std::{
     fmt::{self, Debug},
     marker::PhantomData,
@@ -65,7 +108,7 @@ pub struct Packet<Kind: ?Sized = [u8]> {
     _kind: PhantomData<Kind>,
 }
 
-pub struct PacketInner {
+struct PacketInner {
     buf: BytesMut,
 
     // If the [BytesMut] was allocated by a [PacketBufPool], this will return the buffer to be re-used later.
@@ -75,7 +118,7 @@ pub struct PacketInner {
 /// A marker trait that indicates that a [Packet] contains a valid payload of a specific type.
 ///
 /// For example, [`CheckedPayload`] is implemented for [`Ipv4<[u8]>`], and a [`Packet<Ipv4<[u8]>>>`]
-/// can only be constructed through [`Packet::<[u8]>::try_into_ip`], which checks that the IPv4
+/// can only be constructed through [`Packet::<[u8]>::try_into_ipvx`], which checks that the IPv4
 /// header is valid.
 pub trait CheckedPayload: FromBytes + IntoBytes + KnownLayout + Immutable + Unaligned {}
 
@@ -90,6 +133,10 @@ impl CheckedPayload for WgCookieReply {}
 impl CheckedPayload for WgData {}
 
 impl<T: CheckedPayload + ?Sized> Packet<T> {
+    /// Cast `T` to `Y` without checking anything.
+    ///
+    /// Only invoke this after checking that the backing buffer contain a bitwise valid `Y` type.
+    /// Incorrect usage of this function will cause [`Packet::deref`] to panic.
     fn cast<Y: CheckedPayload + ?Sized>(self) -> Packet<Y> {
         Packet {
             inner: self.inner,
@@ -97,6 +144,7 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
         }
     }
 
+    /// Discard the type of this packet and treat it as a pile of bytes.
     pub fn into_bytes(self) -> Packet<[u8]> {
         self.cast()
     }
@@ -116,7 +164,11 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
         }
     }
 
-    /// Overwrite the contents of the backing buffer with new value of an new type.
+    /// Create a `Packet<Y>` from a `&Y` by copying its bytes into the backing buffer of this
+    /// `Packet<T>`.
+    ///
+    /// If the `Y` won't fit into the backing buffer, this call will allocate, and effectively
+    /// devolves into [`Packet::copy_from`].
     pub fn overwrite_with<Y: CheckedPayload>(mut self, payload: &Y) -> Packet<Y> {
         self.inner.buf.clear();
         self.inner.buf.extend_from_slice(payload.as_bytes());
@@ -124,7 +176,7 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
     }
 }
 
-// Trivial From conversions between packet types
+// Trivial `From`-conversions between packet types
 #[duplicate_item(
     FromType ToType;
     [Ipv4<Udp>]             [Ipv4];
@@ -174,6 +226,7 @@ impl Packet<[u8]> {
         }
     }
 
+    /// Create a `Packet::<u8>` from a [`BytesMut`].
     pub fn from_bytes(bytes: BytesMut) -> Self {
         Self {
             inner: PacketInner {
@@ -184,14 +237,24 @@ impl Packet<[u8]> {
         }
     }
 
+    /// See [`BytesMut::truncate`].
     pub fn truncate(&mut self, new_len: usize) {
         self.inner.buf.truncate(new_len);
     }
 
+    /// Get direct mutable access to the backing buffer.
     pub fn buf_mut(&mut self) -> &mut BytesMut {
         &mut self.inner.buf
     }
 
+    /// Try to cast this untyped packet into an [`Ip`].
+    ///
+    /// This is a stepping stone to casting the packet into an [`Ipv4`] or an [`Ipv6`].
+    /// See also [`Packet::try_into_ipvx`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if this packet is smaller than [`Ipv4Header::LEN`] bytes.
     pub fn try_into_ip(self) -> eyre::Result<Packet<Ip>> {
         let buf_len = self.buf().len();
 
@@ -205,16 +268,33 @@ impl Packet<[u8]> {
         Ok(self.cast::<Ip>())
     }
 
-    /// Convert this untyped packet into either an IPv4 or IPv6 packet.
+    /// Try to cast this untyped packet into either an [`Ipv4`] or [`Ipv6`] packet.
     ///
-    /// This will truncate to [`Ipv4Header::total_len`](crate::packet::Ipv4Header::total_len)
-    /// or [`Ipv6Header::payload_length`](crate::packet::Ipv6Header::payload_length).
+    /// The buffer will be truncated to [`Ipv4Header::total_len`] or [`Ipv6Header::total_length`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if any of the following checks fail:
+    /// - The IP version field is `4` or `6`
+    /// - The packet is smaller than the minimum header length.
+    /// - The IPv4 packet is smaller than [`Ipv4Header::total_len`].
+    /// - The IPv6 payload is smaller than [`Ipv6Header::payload_length`].
     pub fn try_into_ipvx(self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
         self.try_into_ip()?.try_into_ipvx()
     }
 }
 
 impl Packet<Ip> {
+    /// Try to cast this [`Ip`] packet into either an [`Ipv4`] or [`Ipv6`] packet.
+    ///
+    /// The buffer will be truncated to [`Ipv4Header::total_len`] or [`Ipv6Header::total_length`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if any of the following checks fail:
+    /// - The IP version field is `4` or `6`
+    /// - The IPv4 packet is smaller than [`Ipv4Header::total_len`].
+    /// - The IPv6 payload is smaller than [`Ipv6Header::payload_length`].
     pub fn try_into_ipvx(mut self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
         match self.header.version() {
             4 => {
@@ -268,15 +348,15 @@ impl Packet<Ip> {
 }
 
 impl Packet<Ipv4> {
-    /// Attempts to convert this IPv4 packet into a UDP packet.
+    /// Try to cast this [`Ipv4`] packet into an [`Udp`] packet.
     ///
     /// Returns `Packet<Ipv4<Udp>>` if the packet is a valid,
-    /// non-fragmented IPv4 UDP packet with no options (IHL == 5).
+    /// non-fragmented IPv4 UDP packet with no options (IHL == `5`).
     ///
     /// # Errors
     /// Returns an error if
     /// - the packet is a fragment
-    /// - the IHL is invalid
+    /// - the IHL is not `5`
     /// - UDP validation fails
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv4<Udp>>> {
         let ip = self.deref();
@@ -311,7 +391,12 @@ impl Packet<Ipv4> {
 }
 
 impl Packet<Ipv6> {
-    /// Check if the IP payload is valid UDP.
+    /// Try to cast this [`Ipv6`] packet into an [`Udp`] packet.
+    ///
+    /// Returns `Packet<Ipv6<Udp>>` if the packet is a valid IPv6 UDP packet.
+    ///
+    /// # Errors
+    /// Returns an error if UDP validation fails
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv6<Udp>>> {
         let ip = self.deref();
 
