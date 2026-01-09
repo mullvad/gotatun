@@ -18,7 +18,7 @@ mod new_api;
 pub mod peer;
 mod transports;
 
-use ip_network::IpNetwork;
+use ipnetwork::IpNetwork;
 use std::collections::HashMap;
 use std::io::{self};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
@@ -400,6 +400,8 @@ impl<T: DeviceTransports> DeviceState<T> {
             allowed_ips,
             keepalive,
             preshared_key,
+
+            // TODO: how to remove daita?
             daita_settings: daita_settings.or(old_daita_settings),
         };
 
@@ -416,8 +418,8 @@ impl<T: DeviceTransports> DeviceState<T> {
         self.peers.insert(pub_key, Arc::clone(&peer));
 
         for allowed_ip in allowed_ips {
-            let cidr = allowed_ip.netmask();
-            let addr = allowed_ip.network_address();
+            let addr = allowed_ip.network();
+            let cidr = allowed_ip.prefix();
             self.peers_by_ip.insert(addr, cidr, Arc::clone(&peer));
         }
 
@@ -532,10 +534,17 @@ impl<T: DeviceTransports> DeviceState<T> {
         Ok(())
     }
 
-    fn clear_peers(&mut self) {
+    /// Remove all peers.
+    ///
+    /// # Returns
+    /// Returns the number of peers removed.
+    fn clear_peers(&mut self) -> usize {
+        let n = self.peers.len();
         self.peers.clear();
         self.peers_by_idx.clear();
         self.peers_by_ip.clear();
+        // TODO: tear down connection?
+        n
     }
 
     async fn handle_timers(device: Weak<RwLock<Self>>, udp4: impl UdpSend, udp6: impl UdpSend) {

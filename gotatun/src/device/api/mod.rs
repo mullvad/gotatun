@@ -13,7 +13,7 @@ use crate::device::{DeviceTransports, PeerUpdateRequest};
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
 use eyre::{Context, bail, eyre};
-use ip_network::IpNetwork;
+use ipnetwork::IpNetwork;
 use libc::EINVAL;
 use std::fmt::Debug;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -311,8 +311,8 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
                 allowed_ip: peer
                     .allowed_ips()
                     .map(|ip_network| AllowedIP {
-                        addr: ip_network.network_address(),
-                        cidr: ip_network.netmask(),
+                        addr: ip_network.network(),
+                        cidr: ip_network.prefix(),
                     })
                     .collect(),
             },

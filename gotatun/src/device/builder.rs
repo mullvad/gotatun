@@ -16,6 +16,8 @@ use crate::{
     udp::{UdpTransportFactory, socket::UdpSocketFactory},
 };
 
+use super::Connection;
+
 pub struct Nul;
 
 pub struct DeviceBuilder<Udp, TunTx, TunRx> {
@@ -68,6 +70,7 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
         tun_config.platform_config(|p| {
             p.enable_routing(false);
         });
+        // FIXME: for wintun, must set path or enable signature check
         let tun = tun::create_as_async(&tun_config)?;
         let tun = TunDevice::from_tun_device(tun)?;
 
@@ -106,7 +109,7 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
 }
 
 impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, TunTx, TunRx> {
-    pub fn build(self) -> Device<(Udp, TunTx, TunRx)> {
+    pub async fn build(self) -> Result<Device<(Udp, TunTx, TunRx)>, Error> {
         let mut state = DeviceState {
             api: None,
             udp_factory: self.udp,
@@ -124,6 +127,7 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             connection: None,
         };
 
+        let has_peers = !self.peers.is_empty();
         for peer in self.peers {
             let index = state.next_index();
             state.add_peer(peer, index);
@@ -138,6 +142,12 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             ))
         }
 
-        Device { inner }
+        if has_peers {
+            let con = Connection::set_up(inner.clone()).await?;
+            let mut state = inner.write().await;
+            state.connection = Some(con);
+        }
+
+        Ok(Device { inner })
     }
 }

@@ -1,6 +1,6 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use ip_network::IpNetwork;
+use ipnetwork::IpNetwork;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 #[cfg(target_os = "linux")]
@@ -10,17 +10,33 @@ use crate::device::{
 };
 
 pub struct DeviceConfigurator<'a, T: DeviceTransports> {
+    device: &'a DeviceState<T>,
+}
+
+#[derive(Debug)]
+pub struct Stats {
+    pub last_handshake: Option<Duration>,
+    pub rx_bytes: usize,
+    pub tx_bytes: usize,
+}
+
+/// Read-only peer info
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct Peer {
+    pub public_key: PublicKey,
+    pub preshared_key: Option<[u8; 32]>,
+    pub endpoint: Option<SocketAddr>,
+    pub keepalive: Option<u16>,
+    pub allowed_ips: Vec<IpNetwork>,
+    pub stats: Stats,
+}
+
+pub struct DeviceConfiguratorMut<'a, T: DeviceTransports> {
     device: &'a mut DeviceState<T>,
     reconfigure: Reconfigure,
     set_private_key: Option<StaticSecret>,
 }
-// struct PeerMut2 {
-//     pub public_key: PublicKey,
-//     pub endpoint: Endpoint,
-//     pub allowed_ips: Vec<IpNetwork>,
-//     pub preshared_key: Option<[u8; 32]>,
-//     pub keepalive: Option<u16>,
-// }
 
 #[derive(Default)]
 enum Update<T> {
@@ -74,8 +90,34 @@ impl PeerMut {
 }
 
 impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
-    pub fn clear_peers(&mut self) {
-        self.device.clear_peers();
+    pub async fn peers(&self) -> Vec<Peer> {
+        let mut peers = vec![];
+        for (pubkey, peer) in self.device.peers.iter() {
+            let p = peer.lock().await;
+
+            let (_, tx_bytes, rx_bytes, ..) = p.tunnel.stats();
+            let last_handshake = p.time_since_last_handshake();
+
+            peers.push(Peer {
+                public_key: pubkey.clone(),
+                preshared_key: p.preshared_key.clone(),
+                allowed_ips: p.allowed_ips.iter().map(|(_, net)| net).collect(),
+                endpoint: p.endpoint.read().addr,
+                keepalive: p.tunnel.persistent_keepalive(),
+                stats: Stats {
+                    tx_bytes,
+                    rx_bytes,
+                    last_handshake,
+                },
+            });
+        }
+        peers
+    }
+}
+
+impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
+    pub fn clear_peers(&mut self) -> usize {
+        self.device.clear_peers()
     }
 
     pub fn add_peer(&mut self, peer: PeerBuilder) {
@@ -128,14 +170,12 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
             keepalive,
         } = peer_mut;
 
-        let index = existing_peer.index();
-
         if let Update::Set(preshared_key) = preshared_key {
             existing_peer.preshared_key = preshared_key;
         }
 
         if let Update::Set(keepalive) = keepalive {
-            todo!("update tunnel.persistent_keepalive?");
+            existing_peer.tunnel.set_persistent_keepalive(keepalive);
         }
 
         if let Update::Set(addr) = endpoint {
@@ -147,11 +187,9 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
         }
 
         for allowed_ip in add_allowed_ips {
-            existing_peer.allowed_ips.insert(
-                allowed_ip.network_address(),
-                allowed_ip.netmask(),
-                (),
-            );
+            existing_peer
+                .allowed_ips
+                .insert(allowed_ip.network(), allowed_ip.prefix(), ());
         }
 
         // Update device.peers_by_ip by clearing all entries that refer to this peer and
@@ -167,8 +205,8 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
         }
         for (_, allowed_ip) in existing_peer.allowed_ips.iter() {
             self.device.peers_by_ip.insert(
-                allowed_ip.network_address(),
-                allowed_ip.netmask(),
+                allowed_ip.network(),
+                allowed_ip.prefix(),
                 Arc::clone(&existing_peer_arc),
             );
         }
@@ -206,6 +244,12 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
 }
 
 impl<T: DeviceTransports> Device<T> {
+    pub async fn get<X>(&self, f: impl AsyncFnOnce(&DeviceConfigurator<T>) -> X) -> X {
+        let state = self.inner.read().await;
+        let configurator = DeviceConfigurator { device: &state };
+        f(&configurator).await
+    }
+
     /// ```
     /// let device: Device<_>;
     /// device.configure(|device| {
@@ -215,10 +259,10 @@ impl<T: DeviceTransports> Device<T> {
     /// ```
     pub async fn configure<X>(
         &self,
-        f: impl AsyncFnOnce(&mut DeviceConfigurator<T>) -> X,
+        f: impl AsyncFnOnce(&mut DeviceConfiguratorMut<T>) -> X,
     ) -> Result<X, Error> {
         let mut state = self.inner.write().await;
-        let mut configurator = DeviceConfigurator {
+        let mut configurator = DeviceConfiguratorMut {
             device: &mut state,
             reconfigure: Reconfigure::No,
             set_private_key: None,
@@ -250,7 +294,8 @@ impl<T: DeviceTransports> Device<T> {
     }
 
     pub async fn clear_peers(&mut self) -> Result<(), Error> {
-        self.configure(async |device| device.clear_peers()).await
+        self.configure(async |device| device.clear_peers()).await?;
+        Ok(())
     }
 
     pub async fn add_peer(&self, peer: PeerBuilder) -> Result<(), Error> {

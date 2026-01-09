@@ -7,7 +7,7 @@
 
 pub mod builder;
 
-use ip_network::IpNetwork;
+use ipnetwork::IpNetwork;
 use parking_lot::RwLock;
 use tokio::sync::Mutex;
 
