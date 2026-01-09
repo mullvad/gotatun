@@ -435,10 +435,11 @@ pub struct WgCookieReply {
     /// An integer that identifies the WireGuard session for the handshake-initiating peer.
     pub receiver_idx: little_endian::U32,
 
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+    /// Number only used once.
     pub nonce: [u8; 24],
 
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+    /// An encrypted 16-byte value that identifies the [`WgHandshakeInit`] that this packet is in response to.
+    /// Plus a 16 byte Poly1305 authentication tag.
     pub encrypted_cookie: [u8; 32],
 }
 
