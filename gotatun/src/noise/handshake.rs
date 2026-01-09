@@ -20,6 +20,7 @@ use rand_core::OsRng;
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use std::convert::TryInto;
 use std::time::{Duration, SystemTime};
+use zerocopy::IntoBytes;
 
 #[cfg(feature = "mock_instant")]
 use mock_instant::Instant;
@@ -363,7 +364,7 @@ pub fn parse_handshake_anon(
         &mut peer_static_public,
         &key,
         0,
-        &packet.encrypted_static,
+        packet.encrypted_static.as_bytes(),
         &hash,
     )?;
 
@@ -521,7 +522,7 @@ impl Handshake {
             &mut peer_static_public_decrypted,
             &key,
             0,
-            &packet.encrypted_static,
+            packet.encrypted_static.as_bytes(),
             &hash,
         )?;
 
@@ -533,7 +534,7 @@ impl Handshake {
         }
 
         // initiator.hash = HASH(initiator.hash || msg.encrypted_static)
-        hash = b2s_hash(&hash, &packet.encrypted_static);
+        hash = b2s_hash(&hash, packet.encrypted_static.as_bytes());
         // temp = HMAC(initiator.chaining_key, DH(initiator.static_private, responder.static_public))
         let temp = b2s_hmac(&chaining_key, self.params.static_shared.as_bytes());
         // initiator.chaining_key = HMAC(temp, 0x1)
@@ -542,7 +543,7 @@ impl Handshake {
         let key = b2s_hmac2(&temp, &chaining_key, &[0x02]);
         // msg.encrypted_timestamp = AEAD(key, 0, TAI64N(), initiator.hash)
         let mut timestamp = [0u8; TIMESTAMP_LEN];
-        aead_chacha20_open(&mut timestamp, &key, 0, &packet.encrypted_timestamp, &hash)?;
+        aead_chacha20_open(&mut timestamp, &key, 0, packet.timestamp.as_bytes(), &hash)?;
 
         let timestamp = Tai64N::parse(&timestamp)?;
         if !timestamp.after(&self.last_handshake_timestamp) {
@@ -552,7 +553,7 @@ impl Handshake {
         self.last_handshake_timestamp = timestamp;
 
         // initiator.hash = HASH(initiator.hash || msg.encrypted_timestamp)
-        hash = b2s_hash(&hash, &packet.encrypted_timestamp);
+        hash = b2s_hash(&hash, packet.timestamp.as_bytes());
 
         self.previous = std::mem::replace(
             &mut self.state,
@@ -625,7 +626,7 @@ impl Handshake {
         // responder.hash = HASH(responder.hash || temp2)
         hash = b2s_hash(&hash, &temp2);
         // msg.encrypted_nothing = AEAD(key, 0, [empty], responder.hash)
-        aead_chacha20_open(&mut [], &key, 0, &packet.encrypted_nothing, &hash)?;
+        aead_chacha20_open(&mut [], &key, 0, packet.encrypted_nothing.as_bytes(), &hash)?;
 
         // responder.hash = HASH(responder.hash || msg.encrypted_nothing)
         // hash = b2s_hash(hash, buf[ENC_NOTHING_OFF..ENC_NOTHING_OFF + ENC_NOTHING_SZ]);
@@ -673,7 +674,7 @@ impl Handshake {
 
         let payload = Payload {
             aad: &mac1,
-            msg: &packet.encrypted_cookie,
+            msg: packet.encrypted_cookie.as_bytes(),
         };
         let plaintext = XChaCha20Poly1305::new_from_slice(&key)
             .unwrap()
@@ -740,14 +741,14 @@ impl Handshake {
         let key = b2s_hmac2(&temp, &chaining_key, &[0x02]);
         // msg.encrypted_static = AEAD(key, 0, initiator.static_public, initiator.hash)
         aead_chacha20_seal(
-            &mut handshake.encrypted_static,
+            handshake.encrypted_static.as_mut_bytes(),
             &key,
             0,
             self.params.static_public.as_bytes(),
             &hash,
         );
         // initiator.hash = HASH(initiator.hash || msg.encrypted_static)
-        hash = b2s_hash(&hash, &handshake.encrypted_static);
+        hash = b2s_hash(&hash, handshake.encrypted_static.as_bytes());
         // temp = HMAC(initiator.chaining_key, DH(initiator.static_private, responder.static_public))
         let temp = b2s_hmac(&chaining_key, self.params.static_shared.as_bytes());
         // initiator.chaining_key = HMAC(temp, 0x1)
@@ -757,14 +758,14 @@ impl Handshake {
         // msg.encrypted_timestamp = AEAD(key, 0, TAI64N(), initiator.hash)
         let timestamp = self.stamper.stamp();
         aead_chacha20_seal(
-            &mut handshake.encrypted_timestamp,
+            handshake.timestamp.as_mut_bytes(),
             &key,
             0,
             &timestamp,
             &hash,
         );
         // initiator.hash = HASH(initiator.hash || msg.encrypted_timestamp)
-        hash = b2s_hash(&hash, &handshake.encrypted_timestamp);
+        hash = b2s_hash(&hash, handshake.timestamp.as_bytes());
 
         let time_now = Instant::now();
         self.previous = std::mem::replace(
@@ -847,7 +848,7 @@ impl Handshake {
         // responder.hash = HASH(responder.hash || temp2)
         hash = b2s_hash(&hash, &temp2);
         // msg.encrypted_nothing = AEAD(key, 0, [empty], responder.hash)
-        aead_chacha20_seal(&mut resp.encrypted_nothing, &key, 0, &[], &hash);
+        aead_chacha20_seal(resp.encrypted_nothing.as_mut_bytes(), &key, 0, &[], &hash);
 
         // Derive keys
         // temp1 = HMAC(initiator.chaining_key, [empty])
