@@ -289,19 +289,19 @@ pub struct WgHandshakeInit {
     /// An integer that identifies the WireGuard session for the initiating peer.
     pub sender_idx: little_endian::U32,
 
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+    /// Ephemeral public key of the initiating peer.
     pub unencrypted_ephemeral: [u8; 32],
 
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+    /// Encrypted static public key, plus a 16 byte Poly1305 authentication tag.
     pub encrypted_static: [u8; 48],
 
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+    /// A TAI64N timestamp. Used to avoid replay attacks.
     pub encrypted_timestamp: [u8; 28],
 
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+    /// Message authentication code 1.
     pub mac1: [u8; 16],
 
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+    /// Message authentication code 2.
     pub mac2: [u8; 16],
 }
 
@@ -365,16 +365,16 @@ pub struct WgHandshakeResp {
     /// An integer that identifies the WireGuard session for the initiating peer.
     pub receiver_idx: little_endian::U32,
 
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+    /// Ephemeral public key of the responding peer.
     pub unencrypted_ephemeral: [u8; 32],
 
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+    /// A Poly1305 authentication tag generated from an empty message.
     pub encrypted_nothing: [u8; 16],
 
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+    /// Message authentication code 1.
     pub mac1: [u8; 16],
 
-    /// See [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
+    /// Message authentication code 2.
     pub mac2: [u8; 16],
 }
 
