@@ -3,7 +3,6 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use ipnetwork::IpNetwork;
 use x25519_dalek::{PublicKey, StaticSecret};
 
-#[cfg(target_os = "linux")]
 use crate::device::Error;
 use crate::device::{
     Connection, Device, DeviceState, DeviceTransports, Reconfigure, peer::builder::PeerBuilder,
