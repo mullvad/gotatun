@@ -8,11 +8,12 @@
 pub mod command;
 
 use super::peer::AllowedIP;
-use super::{Connection, Device, Reconfigure};
+use super::{Connection, DeviceState, Reconfigure};
 use crate::device::{DeviceTransports, PeerUpdateRequest};
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
 use eyre::{Context, bail, eyre};
+use ipnetwork::IpNetwork;
 use libc::EINVAL;
 use std::fmt::Debug;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -210,14 +211,14 @@ fn create_sock_dir() {
             // delete the files there when we exit, so we need to change the owner
             libc::chown(
                 c_path.as_bytes_with_nul().as_ptr().cast(),
-                saved_uid,
-                saved_gid,
+                saved_uid.as_raw(),
+                saved_gid.as_raw(),
             );
         }
     }
 }
 
-impl<T: DeviceTransports> Device<T> {
+impl<T: DeviceTransports> DeviceState<T> {
     pub(super) async fn handle_api(device: Weak<RwLock<Self>>, mut api: ApiServer) {
         loop {
             let Some((request, respond)) = api.recv().await else {
@@ -293,7 +294,7 @@ impl<T: DeviceTransports> Device<T> {
 }
 
 /// Handle a [Get] request.
-async fn on_api_get(_: Get, d: &Device<impl DeviceTransports>) -> GetResponse {
+async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetResponse {
     let mut peers = vec![];
     for (public_key, peer) in &d.peers {
         let peer = peer.lock().await;
@@ -309,7 +310,10 @@ async fn on_api_get(_: Get, d: &Device<impl DeviceTransports>) -> GetResponse {
                 persistent_keepalive_interval: peer.persistent_keepalive(),
                 allowed_ip: peer
                     .allowed_ips()
-                    .map(|(addr, cidr)| AllowedIP { addr, cidr })
+                    .map(|ip_network| AllowedIP {
+                        addr: ip_network.network(),
+                        cidr: ip_network.prefix(),
+                    })
                     .collect(),
             },
             last_handshake_time_sec: peer.time_since_last_handshake().map(|d| d.as_secs()),
@@ -341,7 +345,7 @@ async fn on_api_get(_: Get, d: &Device<impl DeviceTransports>) -> GetResponse {
 /// Handle a [Set] request.
 async fn on_api_set(
     set: Set,
-    device: &mut Device<impl DeviceTransports>,
+    device: &mut DeviceState<impl DeviceTransports>,
 ) -> (SetResponse, Reconfigure) {
     let Set {
         private_key,
@@ -442,7 +446,10 @@ async fn on_api_set(
             remove,
             replace_allowed_ips,
             endpoint,
-            new_allowed_ips: allowed_ip,
+            new_allowed_ips: allowed_ip
+                .iter()
+                .map(|AllowedIP { addr, cidr }| IpNetwork::new(*addr, *cidr).unwrap())
+                .collect(),
             keepalive: persistent_keepalive_interval,
             preshared_key,
             daita_settings,

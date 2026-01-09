@@ -6,19 +6,21 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::device::Error;
-#[cfg(unix)]
-use libc::{gid_t, setgid, setuid, uid_t};
-use std::io;
 
 #[cfg(target_os = "macos")]
 use nix::unistd::User;
+use nix::unistd::{Gid, Uid, setgid, setuid};
 
-pub fn get_saved_ids() -> Result<(uid_t, gid_t), Error> {
+#[cfg(target_os = "macos")]
+pub fn get_saved_ids() -> Result<(Uid, Gid), Error> {
     // Get the user name of the sudoer
-    #[cfg(target_os = "macos")]
     match std::env::var("USER") {
         Ok(uname) => match User::from_name(&uname) {
-            Ok(Some(user)) => Ok((uid_t::from(user.uid), gid_t::from(user.gid))),
+            Ok(Some(user)) => {
+                let uid = Uid::from_raw(uid_t::from(user.uid));
+                let gid = Gid::from_raw(gid_t::from(user.gid));
+                Ok((uid, gid))
+            }
             Err(e) => Err(Error::DropPrivileges(format!(
                 "Failed parse user; err: {e:?}"
             ))),
@@ -28,47 +30,40 @@ pub fn get_saved_ids() -> Result<(uid_t, gid_t), Error> {
             "Could not get environment variable for user; err: {e:?}"
         ))),
     }
-    #[cfg(not(target_os = "macos"))]
-    {
-        use libc::{getlogin, getpwnam};
+}
 
-        let uname = unsafe { getlogin() };
-        if uname.is_null() {
-            return Err(Error::DropPrivileges("NULL from getlogin".to_owned()));
-        }
-        let userinfo = unsafe { getpwnam(uname) };
-        if userinfo.is_null() {
-            return Err(Error::DropPrivileges("NULL from getpwnam".to_owned()));
-        }
+#[cfg(not(target_os = "macos"))]
+pub fn get_saved_ids() -> Result<(Uid, Gid), Error> {
+    use libc::{getlogin, getpwnam};
 
-        // Saved group ID
-        let saved_gid = unsafe { (*userinfo).pw_gid };
-        // Saved user ID
-        let saved_uid = unsafe { (*userinfo).pw_uid };
-
-        Ok((saved_uid, saved_gid))
+    let uname = unsafe { getlogin() };
+    if uname.is_null() {
+        return Err(Error::DropPrivileges("NULL from getlogin".to_owned()));
     }
+    let userinfo = unsafe { getpwnam(uname) };
+    if userinfo.is_null() {
+        return Err(Error::DropPrivileges("NULL from getpwnam".to_owned()));
+    }
+
+    // Saved group ID
+    let saved_gid = unsafe { (*userinfo).pw_gid };
+    // Saved user ID
+    let saved_uid = unsafe { (*userinfo).pw_uid };
+
+    Ok((Uid::from_raw(saved_uid), Gid::from_raw(saved_gid)))
 }
 
 pub fn drop_privileges() -> Result<(), Error> {
     let (saved_uid, saved_gid) = get_saved_ids()?;
 
-    if -1 == unsafe { setgid(saved_gid) } {
-        // Set real and effective group ID
-        return Err(Error::DropPrivileges(
-            io::Error::last_os_error().to_string(),
-        ));
-    }
+    // Set real and effective user/group ID
+    setgid(saved_gid)
+        .and_then(|_| setuid(saved_uid))
+        .map_err(|e| e.to_string())
+        .map_err(Error::DropPrivileges)?;
 
-    if -1 == unsafe { setuid(saved_uid) } {
-        // Set  real and effective user ID
-        return Err(Error::DropPrivileges(
-            io::Error::last_os_error().to_string(),
-        ));
-    }
-
-    // Validated we can't get sudo back again
-    if unsafe { (setgid(0) != -1) || (setuid(0) != -1) } {
+    // Validate that we can't get sudo back again
+    if setgid(Gid::from_raw(0)).is_ok() || setuid(Uid::from_raw(0)).is_ok() {
         Err(Error::DropPrivileges(
             "Failed to permanently drop privileges".to_owned(),
         ))

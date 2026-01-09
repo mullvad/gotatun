@@ -8,14 +8,17 @@
 pub mod allowed_ips;
 
 pub mod api;
+mod builder;
 pub mod daita;
 #[cfg(unix)]
 pub mod drop_privileges;
 #[cfg(test)]
 mod integration_tests;
+mod new_api;
 pub mod peer;
+mod transports;
 
-use ip_network::IpNetwork;
+use ipnetwork::IpNetwork;
 use std::collections::HashMap;
 use std::io::{self};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
@@ -27,6 +30,7 @@ use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
 use crate::device::daita::DaitaSettings;
+use crate::device::peer::builder::PeerBuilder;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
@@ -34,17 +38,16 @@ use crate::noise::{Tunn, TunnResult};
 use crate::packet::{PacketBufPool, WgKind};
 use crate::task::Task;
 use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
-#[cfg(feature = "tun")]
-use crate::tun::tun_async_device::TunDevice;
 use crate::tun::{IpRecv, IpSend, MtuWatcher};
 use crate::udp::buffer::{BufferedUdpReceive, BufferedUdpSend};
-#[cfg(feature = "tun")]
-use crate::udp::socket::UdpSocketFactory;
 use crate::udp::{UdpRecv, UdpSend, UdpTransportFactory, UdpTransportFactoryParams};
 use crate::x25519;
 use allowed_ips::AllowedIps;
-use peer::{AllowedIP, Peer};
+use peer::Peer;
 use rand_core::{OsRng, RngCore};
+
+pub use crate::device::transports::{DefaultDeviceTransports, DeviceTransports};
+pub use builder::DeviceBuilder;
 
 /// The number of handshakes per second to tolerate before using cookies
 const HANDSHAKE_RATE_LIMIT: u64 = 100;
@@ -82,7 +85,7 @@ pub enum Error {
     Timer(io::Error),
     #[error("iface read: {0}")]
     IfaceRead(io::Error),
-    #[error("{0}")]
+    #[error("Failed to drop privileges: {0}")]
     DropPrivileges(String),
     #[error("API socket error: {0}")]
     ApiSocket(io::Error),
@@ -93,47 +96,13 @@ pub enum Error {
     DaitaHooks(#[from] maybenot::Error),
 }
 
-pub struct DeviceHandle<T: DeviceTransports> {
-    device: Arc<RwLock<Device<T>>>,
-}
-
-#[derive(Default)]
-pub struct DeviceConfig {
-    pub api: Option<api::ApiServer>,
-}
-
-/// By default, use a UDP socket for sending datagrams and a TUN device for IP packets.
-#[cfg(feature = "tun")]
-pub type DefaultDeviceTransports = (UdpSocketFactory, TunDevice);
-
-pub trait DeviceTransports: 'static {
-    type UdpTransportFactory: UdpTransportFactory;
-    type IpSend: IpSend;
-    type IpRecv: IpRecv;
-}
-
-impl<UF, IS, IR> DeviceTransports for (UF, IS, IR)
-where
-    UF: UdpTransportFactory,
-    IS: IpSend,
-    IR: IpRecv,
-{
-    type UdpTransportFactory = UF;
-    type IpSend = IS;
-    type IpRecv = IR;
-}
-
-impl<UF, IP> DeviceTransports for (UF, IP)
-where
-    UF: UdpTransportFactory,
-    IP: IpSend + IpRecv + Clone,
-{
-    type UdpTransportFactory = UF;
-    type IpSend = IP;
-    type IpRecv = IP;
-}
-
+/// A reference-counted handle to a WireGuard device.
+#[derive(Clone)]
 pub struct Device<T: DeviceTransports> {
+    inner: Arc<RwLock<DeviceState<T>>>,
+}
+
+pub(crate) struct DeviceState<T: DeviceTransports> {
     key_pair: Option<(x25519::StaticSecret, x25519::PublicKey)>,
     fwmark: Option<u32>,
 
@@ -186,10 +155,10 @@ pub(crate) struct Connection<T: DeviceTransports> {
 }
 
 impl<T: DeviceTransports> Connection<T> {
-    pub async fn set_up(device: Arc<RwLock<Device<T>>>) -> Result<Self, Error> {
+    pub async fn set_up(device: Arc<RwLock<DeviceState<T>>>) -> Result<Self, Error> {
+        let mut device_guard = device.write().await;
         let pool = PacketBufPool::new(MAX_PACKET_BUFS);
 
-        let mut device_guard = device.write().await;
         // clean up existing connection
         if let Some(conn) = device_guard.connection.take() {
             conn.stop().await;
@@ -230,7 +199,7 @@ impl<T: DeviceTransports> Connection<T> {
         // Start device tasks
         let outgoing = Task::spawn(
             "handle_outgoing",
-            Device::handle_outgoing(
+            DeviceState::handle_outgoing(
                 Arc::downgrade(&device),
                 buffered_ip_rx,
                 buffered_udp_tx_v4.clone(),
@@ -240,7 +209,7 @@ impl<T: DeviceTransports> Connection<T> {
         );
         let timers = Task::spawn(
             "handle_timers",
-            Device::handle_timers(
+            DeviceState::handle_timers(
                 Arc::downgrade(&device),
                 buffered_udp_tx_v4.clone(),
                 buffered_udp_tx_v6.clone(),
@@ -249,7 +218,7 @@ impl<T: DeviceTransports> Connection<T> {
 
         let incoming_ipv4 = Task::spawn(
             "handle_incoming ipv4",
-            Device::handle_incoming(
+            DeviceState::handle_incoming(
                 Arc::downgrade(&device),
                 buffered_ip_tx.clone(),
                 buffered_udp_tx_v4,
@@ -259,7 +228,7 @@ impl<T: DeviceTransports> Connection<T> {
         );
         let incoming_ipv6 = Task::spawn(
             "handle_incoming ipv6",
-            Device::handle_incoming(
+            DeviceState::handle_incoming(
                 Arc::downgrade(&device),
                 buffered_ip_tx,
                 buffered_udp_tx_v6,
@@ -280,43 +249,12 @@ impl<T: DeviceTransports> Connection<T> {
     }
 }
 
-#[cfg(feature = "tun")]
-impl<T: DeviceTransports<IpRecv = TunDevice, IpSend = TunDevice>> DeviceHandle<T> {
-    pub async fn from_tun_name(
-        udp_factory: T::UdpTransportFactory,
-        tun_name: &str,
-        config: DeviceConfig,
-    ) -> Result<DeviceHandle<T>, Error> {
-        let mut tun_config = tun::Configuration::default();
-        tun_config.tun_name(tun_name);
-        #[cfg(target_os = "macos")]
-        tun_config.platform_config(|p| {
-            p.enable_routing(false);
-        });
-        let tun = tun::create_as_async(&tun_config)?;
-        let tun = TunDevice::from_tun_device(tun)?;
-        let (tun_tx, tun_rx) = (tun.clone(), tun);
-        Ok(DeviceHandle::new(udp_factory, tun_tx, tun_rx, config).await)
-    }
-}
-
-impl<T: DeviceTransports> DeviceHandle<T> {
-    pub async fn new(
-        udp_factory: T::UdpTransportFactory,
-        tun_tx: T::IpSend,
-        tun_rx: T::IpRecv,
-        config: DeviceConfig,
-    ) -> DeviceHandle<T> {
-        DeviceHandle {
-            device: Device::new(udp_factory, tun_tx, tun_rx, config).await,
-        }
-    }
-
+impl<T: DeviceTransports> Device<T> {
     pub async fn stop(self) {
-        Self::stop_inner(self.device.clone()).await
+        Self::stop_inner(self.inner.clone()).await
     }
 
-    async fn stop_inner(device: Arc<RwLock<Device<T>>>) {
+    async fn stop_inner(device: Arc<RwLock<DeviceState<T>>>) {
         log::debug!("Stopping gotatun device");
 
         let mut device = device.write().await;
@@ -331,7 +269,7 @@ impl<T: DeviceTransports> DeviceHandle<T> {
     }
 }
 
-impl<T: DeviceTransports> Drop for DeviceHandle<T> {
+impl<T: DeviceTransports> Drop for Device<T> {
     fn drop(&mut self) {
         log::debug!("Dropping gotatun device");
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
@@ -340,10 +278,10 @@ impl<T: DeviceTransports> Drop for DeviceHandle<T> {
         };
         log::debug!(
             "DeviceHandle strong count: {}",
-            Arc::strong_count(&self.device)
+            Arc::strong_count(&self.inner)
         );
-        log::debug!("DeviceHandle weak count: {}", Arc::weak_count(&self.device));
-        let device = self.device.clone();
+        log::debug!("DeviceHandle weak count: {}", Arc::weak_count(&self.inner));
+        let device = self.inner.clone();
         handle.spawn(async move {
             Self::stop_inner(device).await;
         });
@@ -351,6 +289,7 @@ impl<T: DeviceTransports> Drop for DeviceHandle<T> {
 }
 
 /// Do we need to reconfigure the socket?
+#[must_use]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Reconfigure {
     Yes,
@@ -371,13 +310,13 @@ pub struct PeerUpdateRequest {
     remove: bool,
     replace_allowed_ips: bool,
     endpoint: Option<SocketAddr>,
-    new_allowed_ips: Vec<AllowedIP>,
+    new_allowed_ips: Vec<IpNetwork>,
     keepalive: Option<u16>,
     preshared_key: Option<[u8; 32]>,
     daita_settings: Option<DaitaSettings>,
 }
 
-impl<T: DeviceTransports> Device<T> {
+impl<T: DeviceTransports> DeviceState<T> {
     fn next_index(&mut self) -> u32 {
         self.next_index.next()
     }
@@ -403,7 +342,7 @@ impl<T: DeviceTransports> Device<T> {
     /// Update or add peer
     async fn update_peer(&mut self, update_peer: PeerUpdateRequest) {
         let PeerUpdateRequest {
-            public_key: pub_key,
+            public_key,
             remove,
             replace_allowed_ips,
             endpoint,
@@ -414,29 +353,27 @@ impl<T: DeviceTransports> Device<T> {
         } = update_peer;
         if remove {
             // Completely remove a peer
-            self.remove_peer(&pub_key).await;
+            self.remove_peer(&public_key).await;
             return;
         }
 
-        let (index, old_allowed_ips, old_daita_settings) = match self.remove_peer(&pub_key).await {
+        let (index, old_allowed_ips, old_daita_settings) = match self.remove_peer(&public_key).await
+        {
             None => (self.next_index(), vec![], None),
             Some(old_peer) => {
                 // TODO: Update existing peer?
                 let peer = old_peer.lock().await;
                 let index = peer.index();
-                let old_allowed_ips = peer
-                    .allowed_ips()
-                    .map(|(addr, cidr)| AllowedIP { addr, cidr })
-                    .collect();
+                let old_allowed_ips = peer.allowed_ips().collect();
                 let old_daita_settings = peer.daita_settings().cloned();
 
                 drop(peer);
 
                 // TODO: Match pubkey instead of index
                 let mut remove_list = vec![];
-                for (peer, addr, cidr) in self.peers_by_ip.iter() {
+                for (peer, ip_network) in self.peers_by_ip.iter() {
                     if peer.lock().await.index() == index {
-                        remove_list.push(IpNetwork::new(addr, cidr).unwrap());
+                        remove_list.push(ip_network);
                     }
                 }
                 for network in remove_list {
@@ -447,6 +384,49 @@ impl<T: DeviceTransports> Device<T> {
             }
         };
 
+        let allowed_ips: Vec<IpNetwork> = if replace_allowed_ips {
+            new_allowed_ips.to_vec()
+        } else {
+            // append old allowed IPs
+            old_allowed_ips
+                .into_iter()
+                .chain(new_allowed_ips.iter().copied())
+                .collect()
+        };
+
+        let peer_builder = PeerBuilder {
+            public_key,
+            endpoint,
+            allowed_ips,
+            keepalive,
+            preshared_key,
+
+            // TODO: how to remove daita?
+            daita_settings: daita_settings.or(old_daita_settings),
+        };
+
+        self.add_peer(peer_builder, index);
+    }
+
+    fn add_peer(&mut self, peer_builder: PeerBuilder, index: u32) {
+        let pub_key = peer_builder.public_key;
+        let allowed_ips = peer_builder.allowed_ips.clone();
+        let peer = self.create_peer(peer_builder, index);
+        let peer = Arc::new(Mutex::new(peer));
+
+        self.peers_by_idx.insert(index, Arc::clone(&peer));
+        self.peers.insert(pub_key, Arc::clone(&peer));
+
+        for allowed_ip in allowed_ips {
+            let addr = allowed_ip.network();
+            let cidr = allowed_ip.prefix();
+            self.peers_by_ip.insert(addr, cidr, Arc::clone(&peer));
+        }
+
+        log::info!("Peer added");
+    }
+
+    fn create_peer(&mut self, peer_builder: PeerBuilder, index: u32) -> Peer {
         // Update an existing peer or add peer
         let device_key_pair = self
             .key_pair
@@ -460,74 +440,21 @@ impl<T: DeviceTransports> Device<T> {
 
         let tunn = Tunn::new(
             device_key_pair.0.clone(),
-            pub_key,
-            preshared_key,
-            keepalive,
+            peer_builder.public_key.clone(),
+            peer_builder.preshared_key.clone(),
+            peer_builder.keepalive,
             index,
             rate_limiter,
         );
 
-        let allowed_ips = if replace_allowed_ips {
-            new_allowed_ips.to_vec()
-        } else {
-            // append old allowed IPs
-            old_allowed_ips
-                .into_iter()
-                .chain(new_allowed_ips.iter().copied())
-                .collect()
-        };
-
-        let peer = Peer::new(
+        Peer::new(
             tunn,
             index,
-            endpoint,
-            &allowed_ips,
-            preshared_key,
-            daita_settings.or(old_daita_settings),
-        );
-        let peer = Arc::new(Mutex::new(peer));
-
-        self.peers_by_idx.insert(index, Arc::clone(&peer));
-        self.peers.insert(pub_key, Arc::clone(&peer));
-
-        for AllowedIP { addr, cidr } in allowed_ips {
-            self.peers_by_ip
-                .insert(addr, u32::from(cidr), Arc::clone(&peer));
-        }
-
-        log::info!("Peer added");
-    }
-
-    pub async fn new(
-        udp_factory: T::UdpTransportFactory,
-        tun_tx: T::IpSend,
-        tun_rx: T::IpRecv,
-        config: DeviceConfig,
-    ) -> Arc<RwLock<Device<T>>> {
-        let device = Device {
-            api: None,
-            udp_factory,
-            tun_tx: Arc::new(Mutex::new(tun_tx)),
-            tun_rx_mtu: tun_rx.mtu(),
-            tun_rx: Arc::new(Mutex::new(tun_rx)),
-            fwmark: Default::default(),
-            key_pair: Default::default(),
-            next_index: Default::default(),
-            peers: Default::default(),
-            peers_by_idx: Default::default(),
-            peers_by_ip: AllowedIps::new(),
-            rate_limiter: None,
-            port: 0,
-            connection: None,
-        };
-        let device = Arc::new(RwLock::new(device));
-        if let Some(channel) = config.api {
-            device.write().await.api = Some(Task::spawn(
-                "handle_api",
-                Device::handle_api(Arc::downgrade(&device), channel),
-            ));
-        }
-        device
+            peer_builder.endpoint,
+            peer_builder.allowed_ips.as_slice(),
+            peer_builder.preshared_key,
+            peer_builder.daita_settings,
+        )
     }
 
     fn set_port(&mut self, port: u16) -> Reconfigure {
@@ -607,10 +534,17 @@ impl<T: DeviceTransports> Device<T> {
         Ok(())
     }
 
-    fn clear_peers(&mut self) {
+    /// Remove all peers.
+    ///
+    /// # Returns
+    /// Returns the number of peers removed.
+    fn clear_peers(&mut self) -> usize {
+        let n = self.peers.len();
         self.peers.clear();
         self.peers_by_idx.clear();
         self.peers_by_ip.clear();
+        // TODO: tear down connection?
+        n
     }
 
     async fn handle_timers(device: Weak<RwLock<Self>>, udp4: impl UdpSend, udp6: impl UdpSend) {
@@ -931,7 +865,7 @@ impl<T: DeviceTransports> Connection<T> {
     }
 }
 
-impl<T: DeviceTransports> Drop for Device<T> {
+impl<T: DeviceTransports> Drop for DeviceState<T> {
     fn drop(&mut self) {
         log::info!("Stopping Device");
     }

@@ -12,9 +12,10 @@
 mod unix {
     use clap::{Arg, Command};
     use daemonize::Daemonize;
+    use eyre::Context;
+    use gotatun::device::api::ApiServer;
     use gotatun::device::drop_privileges::drop_privileges;
-    use gotatun::device::{DefaultDeviceTransports, DeviceConfig, DeviceHandle};
-    use gotatun::udp::socket::UdpSocketFactory;
+    use gotatun::device::{DefaultDeviceTransports, Device, DeviceBuilder};
     use std::fs::File;
     use std::os::unix::net::UnixDatagram;
     use std::process::exit;
@@ -89,11 +90,21 @@ mod unix {
         let background = !matches.is_present("foreground");
         let tun_name = matches.value_of("INTERFACE_NAME").unwrap();
         let log_level: Level = matches.value_of_t("verbosity").unwrap_or_else(|e| e.exit());
+        let do_drop_privileges = !matches.is_present("disable-drop-privileges");
 
         // Create a socketpair to communicate between forked processes
         let (sock1, sock2) = UnixDatagram::pair().unwrap();
         let _ = sock1.set_nonblocking(true);
+        let send_child_result = |result: &[u8]| {
+            sock1.send(result).unwrap();
+            drop(sock1);
+        };
 
+        // Status messages sent between forked processes
+        const CHILD_OK: &[u8] = &[1];
+        const CHILD_ERR: &[u8] = &[0];
+
+        // tracing_appender worker guard
         let _guard;
 
         if background {
@@ -102,8 +113,28 @@ mod unix {
             let log_file =
                 File::create(log).unwrap_or_else(|_| panic!("Could not create log file {log}"));
 
-            let (non_blocking, guard) = tracing_appender::non_blocking(log_file);
+            let daemonize = Daemonize::new().working_directory("/tmp");
 
+            let child_result = match daemonize.execute() {
+                daemonize::Outcome::Parent(Err(e)) => {
+                    eprintln!("GotaTun failed to start");
+                    eprintln!("{e:?}");
+                    exit(1);
+                }
+                daemonize::Outcome::Parent(Ok(_parent)) => {
+                    let mut b = [0u8; 1];
+                    if sock2.recv(&mut b).is_ok() && b == CHILD_OK {
+                        println!("GotaTun started successfully");
+                        return;
+                    } else {
+                        eprintln!("GotaTun failed to start");
+                        exit(1);
+                    }
+                }
+                daemonize::Outcome::Child(child) => child,
+            };
+
+            let (non_blocking, guard) = tracing_appender::non_blocking(log_file);
             _guard = guard;
 
             tracing_subscriber::fmt()
@@ -112,24 +143,10 @@ mod unix {
                 .with_ansi(false)
                 .init();
 
-            let daemonize = Daemonize::new()
-                .working_directory("/tmp")
-                .exit_action(move || {
-                    let mut b = [0u8; 1];
-                    if sock2.recv(&mut b).is_ok() && b[0] == 1 {
-                        println!("GotaTun started successfully");
-                    } else {
-                        eprintln!("GotaTun failed to start");
-                        exit(1);
-                    }
-                });
-
-            match daemonize.start() {
-                Ok(()) => log::info!("GotaTun started successfully"),
-                Err(e) => {
-                    log::error!("error = {e:?}");
-                    exit(1);
-                }
+            if let Err(e) = child_result {
+                log::error!("{e:?}");
+                send_child_result(CHILD_ERR);
+                exit(1);
             }
         } else {
             tracing_subscriber::fmt()
@@ -138,32 +155,17 @@ mod unix {
                 .init();
         }
 
-        let api = gotatun::device::api::ApiServer::default_unix_socket(tun_name).unwrap();
-
-        let config = DeviceConfig { api: Some(api) };
-
-        let device_handle: DeviceHandle<DefaultDeviceTransports> =
-            match DeviceHandle::from_tun_name(UdpSocketFactory, tun_name, config).await {
-                Ok(d) => d,
-                Err(e) => {
-                    // Notify parent that tunnel initialization failed
-                    log::error!("Failed to initialize tunnel: {e:?}");
-                    sock1.send(&[0]).unwrap();
-                    exit(1);
-                }
-            };
-
-        if !matches.is_present("disable-drop-privileges")
-            && let Err(e) = drop_privileges()
-        {
-            log::error!("Failed to drop privileges: {e:?}");
-            sock1.send(&[0]).unwrap();
-            exit(1);
-        }
+        let device = match start(tun_name, do_drop_privileges).await {
+            Ok(device) => device,
+            Err(e) => {
+                log::error!("{e:?}");
+                send_child_result(CHILD_ERR);
+                exit(1);
+            }
+        };
 
         // Notify parent that tunnel initialization succeeded
-        sock1.send(&[1]).unwrap();
-        drop(sock1);
+        send_child_result(CHILD_OK);
 
         log::info!("GotaTun started successfully");
 
@@ -175,7 +177,31 @@ mod unix {
         }
 
         log::info!("GotaTun is shutting down");
-        device_handle.stop().await;
+        device.stop().await;
+    }
+
+    async fn start(
+        tun_name: &str,
+        do_drop_privileges: bool,
+    ) -> eyre::Result<Device<DefaultDeviceTransports>> {
+        let uapi = ApiServer::default_unix_socket(tun_name)
+            .context("Failed to create UAPI unix socket")?;
+
+        let device: Device<_> = DeviceBuilder::new()
+            .with_uapi(uapi)
+            // .uapi_unix_socket(tun_name) // TODO?
+            .with_default_udp()
+            .create_tun(tun_name)
+            .context("Failed to create TUN device")?
+            .build()
+            .await
+            .context("Failed to start WireGuard device")?;
+
+        if do_drop_privileges {
+            drop_privileges().context("Failed to drop privileges")?;
+        }
+
+        Ok(device)
     }
 }
 

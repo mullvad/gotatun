@@ -339,4 +339,13 @@ impl Tunn {
             None
         }
     }
+
+    pub fn set_persistent_keepalive(&mut self, seconds: Option<u16>) {
+        self.timers.persistent_keepalive = usize::from(seconds.unwrap_or(0));
+
+        // Reset timer if we disable persistent keepalive
+        if self.timers.persistent_keepalive == 0 {
+            self.timers[TimePersistentKeepalive] = Duration::ZERO;
+        }
+    }
 }
