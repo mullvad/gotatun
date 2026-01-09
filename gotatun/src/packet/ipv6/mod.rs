@@ -107,6 +107,12 @@ impl Ipv6Header {
         let bits = self.destination_address.get();
         Ipv6Addr::from_bits(bits)
     }
+
+    /// Get [`Ipv6Header::payload_length`] plus [`Ipv6Header::LEN`].
+    /// This is a [`usize`] because the length might exceed [`u16::MAX`].
+    pub const fn total_length(&self) -> usize {
+        self.payload_length.get() as usize + Ipv6Header::LEN
+    }
 }
 
 impl Debug for Ipv6Header {
