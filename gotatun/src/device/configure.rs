@@ -178,20 +178,21 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
         self.device.add_peer(peer, index);
     }
 
-    pub fn add_peers(&mut self, peers: impl IntoIterator<Item = PeerBuilder>) {
+    pub fn add_peers(&mut self, peers: impl IntoIterator<Item = PeerBuilder>) -> bool {
         let peers: Vec<_> = peers.into_iter().collect();
 
         if peers
             .iter()
             .any(|peer| self.device.peers.contains_key(&peer.public_key))
         {
-            return; // TODO: error? yes please
+            return false;
         }
 
         for peer in peers {
             let index = self.device.next_index();
             self.device.add_peer(peer, index);
         }
+        true
     }
 
     pub async fn add_or_update_peer(&mut self, peer: PeerBuilder) {
@@ -397,7 +398,7 @@ impl<T: DeviceTransports> Device<T> {
     pub async fn add_peers(
         &self,
         peers: impl IntoIterator<Item = PeerBuilder>,
-    ) -> Result<(), Error> {
+    ) -> Result<bool, Error> {
         self.configure(async |device| device.add_peers(peers)).await
     }
 
