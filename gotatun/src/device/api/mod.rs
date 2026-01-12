@@ -24,14 +24,18 @@ use tokio::sync::{RwLock, mpsc, oneshot};
 #[cfg(unix)]
 const SOCK_DIR: &str = "/var/run/wireguard/";
 
-/// A server that receives [`Request`]s. Should be passed a [`Device`] when created.
+/// A server that receives [`Request`]s. Should be passed to [`DeviceBuilder::with_uapi`].
+///
+/// [`DeviceBuilder::with_uapi`]: crate::device::builder::DeviceBuilder::with_uapi
 pub struct ApiServer {
     rx: mpsc::Receiver<(Request, oneshot::Sender<Response>)>,
 }
 
-/// An api client to a gotatun [`Device`].
+/// An API client to a gotatun [`Device`].
 ///
 /// Use [`ApiClient::send`] or [`ApiClient::send_sync`] to configure the [`Device`] by adding peers, etc.
+///
+/// [`Device`]: crate::device::Device
 #[derive(Clone)]
 pub struct ApiClient {
     tx: mpsc::Sender<(Request, oneshot::Sender<Response>)>,
