@@ -7,6 +7,7 @@ use tokio::{sync::watch, time::sleep};
 use tun::AbstractDevice;
 
 use crate::{
+    device::Error,
     packet::{Ip, Packet, PacketBufPool},
     task::Task,
     tun::{IpRecv, IpSend, MtuWatcher},
@@ -31,6 +32,23 @@ struct TunDeviceState {
 }
 
 impl TunDevice {
+    /// Construct from a name.
+    pub fn from_name(name: &str) -> Result<Self, Error> {
+        let mut tun_config = tun::Configuration::default();
+        if cfg!(not(target_os = "macos")) || name != "utun" {
+            // If the name is 'utun', automatically assign a name
+            tun_config.tun_name(name);
+        }
+        #[cfg(target_os = "macos")]
+        tun_config.platform_config(|p| {
+            p.enable_routing(false);
+        });
+        // FIXME: for wintun, must set path or enable signature check
+        let tun = tun::create_as_async(&tun_config).map_err(crate::device::Error::OpenTun)?;
+        let tun = TunDevice::from_tun_device(tun)?;
+        Ok(tun)
+    }
+
     /// Construct from a [`tun::AsyncDevice`].
     pub fn from_tun_device(tun: tun::AsyncDevice) -> io::Result<Self> {
         #[cfg(target_os = "linux")]
@@ -70,6 +88,10 @@ impl TunDevice {
                 _mtu_monitor: mtu_monitor,
             }),
         })
+    }
+
+    pub fn name(&self) -> Result<String, Error> {
+        self.tun.tun_name().map_err(Error::GetTunName)
     }
 }
 

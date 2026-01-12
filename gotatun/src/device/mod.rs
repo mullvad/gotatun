@@ -76,6 +76,10 @@ pub enum Error {
     #[error("Failed to open TUN device: {0}")]
     OpenTun(#[source] tun::Error),
 
+    #[cfg(feature = "tun")]
+    #[error("Failed to get TUN device name: {0}")]
+    GetTunName(#[source] tun::Error),
+
     #[error("Failed to initialize DAITA hooks")]
     #[cfg(feature = "daita")]
     DaitaHooks(#[from] daita::Error),
