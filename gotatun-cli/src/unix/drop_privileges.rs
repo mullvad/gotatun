@@ -16,11 +16,7 @@ pub fn get_saved_ids() -> eyre::Result<(Uid, Gid)> {
     // Get the user name of the sudoer
     match std::env::var("USER") {
         Ok(uname) => match User::from_name(&uname) {
-            Ok(Some(user)) => {
-                let uid = Uid::from_raw(uid_t::from(user.uid));
-                let gid = Gid::from_raw(gid_t::from(user.gid));
-                Ok((uid, gid))
-            }
+            Ok(Some(user)) => Ok((user.uid, user.gid)),
             Err(e) => bail!("Failed parse user; err: {e:?}"),
             Ok(None) => bail!("Failed to find user"),
         },
