@@ -131,7 +131,7 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
         self
     }
 
-    pub fn with_listen_port(mut self, port: u16) -> Self {
+    pub const fn with_listen_port(mut self, port: u16) -> Self {
         self.port = port;
         self
     }
