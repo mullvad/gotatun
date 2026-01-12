@@ -562,37 +562,3 @@ fn to_key_value(line: &str) -> eyre::Result<(&str, &str)> {
     line.split_once('=')
         .ok_or(eyre!("expected {line:?} to be `<key>=<value>`"))
 }
-
-fn testy() {
-    let public_key = [0x77u8; 32];
-    let get = Peer::builder().public_key(public_key).build();
-    let get = GetPeer::builder().peer(get).build();
-    let _get = GetResponse::builder()
-        .fwmark(123u32)
-        .listen_port(18u16)
-        .errno(0)
-        .build()
-        .peer(get);
-
-    let _set = Set::builder()
-        .fwmark(1234u32)
-        .private_key(public_key)
-        .build()
-        .peer(
-            SetPeer::builder()
-                .peer(Peer::builder().public_key(public_key).build())
-                .remove()
-                .update_only()
-                .build(),
-        )
-        .peer(
-            SetPeer::builder()
-                .peer(
-                    Peer::builder()
-                        .public_key(public_key)
-                        .endpoint(([127, 0, 0, 1], 1234u16))
-                        .build(),
-                )
-                .build(),
-        );
-}
