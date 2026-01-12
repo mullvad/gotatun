@@ -7,7 +7,8 @@ use crate::device::Error;
 #[cfg(feature = "daita")]
 use crate::device::daita::DaitaSettings;
 use crate::device::{
-    Connection, Device, DeviceState, DeviceTransports, Reconfigure, peer::builder::PeerBuilder,
+    Connection, Device, DeviceState, DeviceTransports, Reconfigure,
+    peer_state::builder::PeerBuilder,
 };
 
 pub struct DeviceConfigurator<'a, T: DeviceTransports> {

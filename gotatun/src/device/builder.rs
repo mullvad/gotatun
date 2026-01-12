@@ -9,7 +9,8 @@ use tokio::sync::{Mutex, RwLock};
 use crate::device::Error;
 use crate::{
     device::{
-        Device, DeviceState, allowed_ips::AllowedIps, api::ApiServer, peer::builder::PeerBuilder,
+        Device, DeviceState, allowed_ips::AllowedIps, api::ApiServer,
+        peer_state::builder::PeerBuilder,
     },
     task::Task,
     tun::{IpRecv, IpSend, tun_async_device::TunDevice},

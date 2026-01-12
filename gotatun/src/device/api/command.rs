@@ -13,7 +13,7 @@ use std::{
 use eyre::{bail, ensure, eyre};
 use typed_builder::TypedBuilder;
 
-use crate::{device::peer::AllowedIP, serialization::KeyBytes};
+use crate::{device::peer_state::AllowedIP, serialization::KeyBytes};
 
 #[cfg(feature = "daita")]
 use crate::device::daita::api::DaitaSettings;
