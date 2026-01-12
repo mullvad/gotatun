@@ -50,7 +50,7 @@ pub async fn main() {
             Arg::new("disable-drop-privileges")
                 .long("disable-drop-privileges")
                 .env("WG_SUDO")
-                .help("Do not drop sudo privileges"),
+                .help("Do not drop sudo privileges. This has no effect if the UID is root"),
         ])
         .get_matches();
 

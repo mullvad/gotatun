@@ -48,6 +48,11 @@ pub fn get_saved_ids() -> eyre::Result<(Uid, Gid)> {
 pub fn drop_privileges() -> eyre::Result<()> {
     let (saved_uid, saved_gid) = get_saved_ids()?;
 
+    if saved_uid.is_root() {
+        tracing::warn!("Not dropping privileges as saved UID is root");
+        return Ok(());
+    }
+
     // Set real and effective user/group ID
     setgid(saved_gid)
         .and_then(|_| setuid(saved_uid))
