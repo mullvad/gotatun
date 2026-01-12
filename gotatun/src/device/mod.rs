@@ -17,7 +17,7 @@ mod integration_tests;
 pub mod peer;
 mod transports;
 
-use ip_network::IpNetwork;
+use ipnetwork::IpNetwork;
 use std::collections::HashMap;
 use std::io::{self};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
@@ -41,7 +41,7 @@ use crate::udp::buffer::{BufferedUdpReceive, BufferedUdpSend};
 use crate::udp::{UdpRecv, UdpSend, UdpTransportFactory, UdpTransportFactoryParams};
 use crate::x25519;
 use allowed_ips::AllowedIps;
-use peer::{AllowedIP, Peer};
+use peer::Peer;
 use rand_core::{OsRng, RngCore};
 
 pub use crate::device::transports::{DefaultDeviceTransports, DeviceTransports};
@@ -307,7 +307,7 @@ pub struct PeerUpdateRequest {
     remove: bool,
     replace_allowed_ips: bool,
     endpoint: Option<SocketAddr>,
-    new_allowed_ips: Vec<AllowedIP>,
+    new_allowed_ips: Vec<IpNetwork>,
     keepalive: Option<u16>,
     preshared_key: Option<[u8; 32]>,
     daita_settings: Option<DaitaSettings>,
@@ -360,19 +360,16 @@ impl<T: DeviceTransports> DeviceState<T> {
                 // TODO: Update existing peer?
                 let peer = old_peer.lock().await;
                 let index = peer.index();
-                let old_allowed_ips = peer
-                    .allowed_ips()
-                    .map(|(addr, cidr)| AllowedIP { addr, cidr })
-                    .collect();
+                let old_allowed_ips = peer.allowed_ips().collect();
                 let old_daita_settings = peer.daita_settings().cloned();
 
                 drop(peer);
 
                 // TODO: Match pubkey instead of index
                 let mut remove_list = vec![];
-                for (peer, addr, cidr) in self.peers_by_ip.iter() {
+                for (peer, ip_network) in self.peers_by_ip.iter() {
                     if peer.lock().await.index() == index {
-                        remove_list.push(IpNetwork::new(addr, cidr).unwrap());
+                        remove_list.push(ip_network);
                     }
                 }
                 for network in remove_list {
@@ -403,7 +400,7 @@ impl<T: DeviceTransports> DeviceState<T> {
             rate_limiter,
         );
 
-        let allowed_ips = if replace_allowed_ips {
+        let allowed_ips: Vec<IpNetwork> = if replace_allowed_ips {
             new_allowed_ips.to_vec()
         } else {
             // append old allowed IPs
