@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix dropping privileges not working when running the CLI with `sudo` on macOS. Only the setuid bit
   worked as expected.
 - Automatically assign a name in the CLI when passing `utun` as the tunnel name.
+- Fix bad file descriptor error when running CLI daemonized.
 
 
 ## [0.1.1] - 2025-12-23
