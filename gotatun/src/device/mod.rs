@@ -419,8 +419,8 @@ impl<T: DeviceTransports> DeviceState<T> {
 
         let tunn = Tunn::new(
             device_key_pair.0.clone(),
-            peer_builder.public_key.clone(),
-            peer_builder.preshared_key.clone(),
+            peer_builder.public_key,
+            peer_builder.preshared_key,
             peer_builder.keepalive,
             index,
             rate_limiter,
