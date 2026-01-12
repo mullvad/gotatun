@@ -7,7 +7,7 @@
 
 pub mod command;
 
-use super::peer::AllowedIP;
+use super::peer_state::AllowedIP;
 use super::{Connection, DeviceState, Reconfigure};
 use crate::device::{DeviceTransports, PeerUpdateRequest};
 use crate::serialization::KeyBytes;

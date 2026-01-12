@@ -13,7 +13,7 @@ pub mod configure;
 pub mod daita;
 #[cfg(test)]
 mod integration_tests;
-mod peer;
+mod peer_state;
 mod transports;
 
 use ipnetwork::IpNetwork;
@@ -27,7 +27,7 @@ use tokio::join;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
-use crate::device::peer::builder::PeerBuilder;
+use crate::device::peer_state::builder::PeerBuilder;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
@@ -40,7 +40,7 @@ use crate::udp::buffer::{BufferedUdpReceive, BufferedUdpSend};
 use crate::udp::{UdpRecv, UdpSend, UdpTransportFactory, UdpTransportFactoryParams};
 use crate::x25519;
 use allowed_ips::AllowedIps;
-use peer::Peer;
+use peer_state::PeerState;
 use rand_core::{OsRng, RngCore};
 
 pub use crate::device::transports::{DefaultDeviceTransports, DeviceTransports};
@@ -101,9 +101,9 @@ pub(crate) struct DeviceState<T: DeviceTransports> {
     /// MTU watcher of the TUN device.
     tun_rx_mtu: MtuWatcher,
 
-    peers: HashMap<x25519::PublicKey, Arc<Mutex<Peer>>>,
-    peers_by_ip: AllowedIps<Arc<Mutex<Peer>>>,
-    peers_by_idx: HashMap<u32, Arc<Mutex<Peer>>>,
+    peers: HashMap<x25519::PublicKey, Arc<Mutex<PeerState>>>,
+    peers_by_ip: AllowedIps<Arc<Mutex<PeerState>>>,
+    peers_by_idx: HashMap<u32, Arc<Mutex<PeerState>>>,
     next_index: IndexLfsr,
 
     rate_limiter: Option<Arc<RateLimiter>>,
@@ -166,7 +166,7 @@ impl<T: DeviceTransports> Connection<T> {
         // Start DAITA/hooks tasks
         #[cfg(feature = "daita")]
         for peer_arc in device_guard.peers.values() {
-            Peer::maybe_start_daita(
+            PeerState::maybe_start_daita(
                 peer_arc,
                 pool.clone(),
                 device_guard.tun_rx_mtu.clone(),
@@ -304,7 +304,7 @@ impl<T: DeviceTransports> DeviceState<T> {
         self.next_index.next()
     }
 
-    async fn remove_peer(&mut self, pub_key: &x25519::PublicKey) -> Option<Arc<Mutex<Peer>>> {
+    async fn remove_peer(&mut self, pub_key: &x25519::PublicKey) -> Option<Arc<Mutex<PeerState>>> {
         if let Some(peer) = self.peers.remove(pub_key) {
             // Found a peer to remove, now purge all references to it:
             {
@@ -312,7 +312,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                 self.peers_by_idx.remove(&p.index());
             }
             self.peers_by_ip
-                .remove(&|p: &Arc<Mutex<Peer>>| Arc::ptr_eq(&peer, p));
+                .remove(&|p: &Arc<Mutex<PeerState>>| Arc::ptr_eq(&peer, p));
 
             log::info!("Peer removed");
 
@@ -421,7 +421,7 @@ impl<T: DeviceTransports> DeviceState<T> {
         log::info!("Peer added");
     }
 
-    fn create_peer(&mut self, peer_builder: PeerBuilder, index: u32) -> Peer {
+    fn create_peer(&mut self, peer_builder: PeerBuilder, index: u32) -> PeerState {
         // Update an existing peer or add peer
         let device_key_pair = self
             .key_pair
@@ -442,7 +442,7 @@ impl<T: DeviceTransports> DeviceState<T> {
             rate_limiter,
         );
 
-        Peer::new(
+        PeerState::new(
             tunn,
             index,
             peer_builder.endpoint,
@@ -649,9 +649,9 @@ impl<T: DeviceTransports> DeviceState<T> {
             let mut peer = peer.lock().await;
 
             #[cfg(feature = "daita")]
-            let Peer { tunnel, daita, .. } = &mut *peer;
+            let PeerState { tunnel, daita, .. } = &mut *peer;
             #[cfg(not(feature = "daita"))]
-            let Peer { tunnel, .. } = &mut *peer;
+            let PeerState { tunnel, .. } = &mut *peer;
 
             #[cfg(feature = "daita")]
             if let Some(daita) = daita
@@ -775,9 +775,9 @@ impl<T: DeviceTransports> DeviceState<T> {
                 };
 
                 #[cfg(feature = "daita")]
-                let Peer { tunnel, daita, .. } = &mut *peer;
+                let PeerState { tunnel, daita, .. } = &mut *peer;
                 #[cfg(not(feature = "daita"))]
-                let Peer { tunnel, .. } = &mut *peer;
+                let PeerState { tunnel, .. } = &mut *peer;
 
                 #[cfg(feature = "daita")]
                 let packet = match daita {

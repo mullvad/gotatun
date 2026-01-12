@@ -6,7 +6,7 @@ use crate::device::daita::DaitaSettings;
 use crate::device::daita::actions::ActionHandler;
 use crate::device::daita::events::handle_events;
 use crate::device::daita::types::{self, BlockingWatcher, PaddingMarker};
-use crate::device::peer::Peer;
+use crate::device::peer_state::PeerState;
 use crate::packet::{self, Ip, WgData, WgKind};
 use crate::task::Task;
 use crate::udp::UdpSend;
@@ -56,7 +56,7 @@ const RNG_RESEED_THRESHOLD: u64 = 1024 * 64; // 64 KiB
 impl DaitaHooks {
     pub fn new<US>(
         daita_settings: DaitaSettings,
-        peer: Weak<Mutex<Peer>>,
+        peer: Weak<Mutex<PeerState>>,
         mtu: MtuWatcher,
         udp_send_v4: US,
         udp_send_v6: US,

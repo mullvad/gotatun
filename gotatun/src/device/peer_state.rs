@@ -30,7 +30,7 @@ pub struct Endpoint {
     pub addr: Option<SocketAddr>,
 }
 
-pub struct Peer {
+pub struct PeerState {
     /// The associated tunnel struct
     pub(crate) tunnel: Tunn,
     /// The index the tunnel uses
@@ -69,7 +69,7 @@ impl FromStr for AllowedIP {
     }
 }
 
-impl Peer {
+impl PeerState {
     pub fn new(
         tunnel: Tunn,
         index: u32,
@@ -77,8 +77,8 @@ impl Peer {
         allowed_ips: &[IpNetwork],
         preshared_key: Option<[u8; 32]>,
         #[cfg(feature = "daita")] daita_settings: Option<DaitaSettings>,
-    ) -> Peer {
-        Peer {
+    ) -> PeerState {
+        Self {
             tunnel,
             index,
             endpoint: Endpoint { addr: endpoint },
@@ -93,7 +93,7 @@ impl Peer {
 
     #[cfg(feature = "daita")]
     pub(crate) async fn maybe_start_daita<US: UdpSend + Clone + 'static>(
-        peer: &std::sync::Arc<tokio::sync::Mutex<Peer>>,
+        peer: &std::sync::Arc<tokio::sync::Mutex<PeerState>>,
         pool: packet::PacketBufPool,
         tun_rx_mtu: MtuWatcher,
         udp_tx_v4: US,
