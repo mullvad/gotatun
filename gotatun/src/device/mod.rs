@@ -54,43 +54,25 @@ const HANDSHAKE_RATE_LIMIT: u64 = 100;
 /// Maximum number of packet buffers that each channel may contain
 const MAX_PACKET_BUFS: usize = 4000;
 
+/// Error of [`Device`]-related operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("i/o error: {0}")]
     IoError(#[from] io::Error),
-    #[error("{0}")]
-    Socket(io::Error),
-    #[error("{1}: {0}")]
-    Bind(#[source] io::Error, String),
-    #[error("{0}")]
-    FCntl(io::Error),
-    #[error("{0}")]
-    EventQueue(io::Error),
-    #[error("{0}")]
-    IOCtl(io::Error),
-    #[error("{0}")]
-    Connect(String),
-    #[error("{0}")]
-    SetSockOpt(String),
+
+    #[error("Failed to bind UDP sockets (params={1:?}): {0}")]
+    Bind(#[source] io::Error, UdpTransportFactoryParams),
+
     #[error("Invalid tunnel name")]
     InvalidTunnelName,
-    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
-    #[error("{0}")]
-    GetSockOpt(io::Error),
-    #[error("{0}")]
-    GetSockName(String),
-    #[cfg(target_os = "linux")]
-    #[error("{0}")]
-    Timer(io::Error),
-    #[error("iface read: {0}")]
-    IfaceRead(io::Error),
+
     #[error("Failed to drop privileges: {0}")]
     DropPrivileges(String),
-    #[error("API socket error: {0}")]
-    ApiSocket(io::Error),
+
     #[cfg(feature = "tun")]
-    #[error("Device error: {0}")]
-    OpenDevice(#[from] tun::Error),
+    #[error("Failed to open TUN device: {0}")]
+    OpenTun(#[source] tun::Error),
+
     #[error("Failed to initialize DAITA hooks")]
     DaitaHooks(#[from] maybenot::Error),
 }
@@ -484,7 +466,11 @@ impl<T: DeviceTransports> DeviceState<T> {
             #[cfg(target_os = "linux")]
             fwmark: self.fwmark,
         };
-        let ((udp4_tx, udp4_rx), (udp6_tx, udp6_rx)) = self.udp_factory.bind(&params).await?;
+        let ((udp4_tx, udp4_rx), (udp6_tx, udp6_rx)) = self
+            .udp_factory
+            .bind(&params)
+            .await
+            .map_err(|e| Error::Bind(e, params))?;
         Ok((udp4_tx, udp4_rx, udp6_tx, udp6_rx))
     }
 
