@@ -7,24 +7,8 @@
 
 use eyre::{Context, bail};
 
-#[cfg(target_os = "macos")]
-use nix::unistd::User;
 use nix::unistd::{Gid, Uid, setgid, setuid};
 
-#[cfg(target_os = "macos")]
-pub fn get_saved_ids() -> eyre::Result<(Uid, Gid)> {
-    // Get the user name of the sudoer
-    match std::env::var("USER") {
-        Ok(uname) => match User::from_name(&uname) {
-            Ok(Some(user)) => Ok((user.uid, user.gid)),
-            Err(e) => bail!("Failed parse user; err: {e:?}"),
-            Ok(None) => bail!("Failed to find user"),
-        },
-        Err(e) => bail!("Could not get environment variable for user; err: {e:?}"),
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
 pub fn get_saved_ids() -> eyre::Result<(Uid, Gid)> {
     use libc::{getlogin, getpwnam};
 
