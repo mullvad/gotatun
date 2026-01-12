@@ -9,9 +9,9 @@ use x25519_dalek::PublicKey;
 #[cfg(feature = "daita")]
 use crate::device::daita::DaitaSettings;
 
-// TODO: name
+/// Peer data. Used to construct and update peers in a [`Device`](crate::device::Device).
 #[non_exhaustive]
-pub struct PeerBuilder {
+pub struct Peer {
     pub public_key: PublicKey,
     pub endpoint: Option<SocketAddr>,
     pub allowed_ips: Vec<IpNetwork>,
@@ -23,7 +23,7 @@ pub struct PeerBuilder {
     pub(crate) daita_settings: Option<DaitaSettings>,
 }
 
-impl PeerBuilder {
+impl Peer {
     pub const fn new(public_key: PublicKey) -> Self {
         Self {
             public_key,
