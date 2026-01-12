@@ -381,10 +381,13 @@ impl<T: DeviceTransports> Device<T> {
     ///
     /// # Example
     /// ```
-    /// # let device: Device<_> = todo!();
+    /// use gotatun::device::Device;
+    /// # async {
+    /// # let device: Device<gotatun::device::DefaultDeviceTransports> = todo!();
     /// let (port, peers) = device.get(async |device| {
-    ///     (device.listen_port(), device.peers())
+    ///     (device.listen_port(), device.peers().await)
     /// }).await;
+    /// # };
     /// ```
     pub async fn get<X>(&self, f: impl AsyncFnOnce(&DeviceConfigurator<T>) -> X) -> X {
         let state = self.inner.read().await;
@@ -399,11 +402,15 @@ impl<T: DeviceTransports> Device<T> {
     ///
     /// # Example
     /// ```
-    /// # let device: Device<_> = todo!();
+    /// use gotatun::device::Device;
+    /// # async {
+    /// # let device: Device<gotatun::device::DefaultDeviceTransports> = todo!();
+    /// # let peer = todo!();
     /// device.configure(async |device| {
     ///     device.clear_peers();
     ///     device.add_peer(peer);
-    /// }).await?;
+    /// }).await.unwrap();
+    /// # };
     /// ```
     pub async fn configure<X>(
         &self,
@@ -498,11 +505,15 @@ impl<T: DeviceTransports> Device<T> {
     /// Takes a callback `f` which allows you to configure individual fields on this peer.
     ///
     /// ```
-    /// let device: Device<_>;
-    /// device.modify_peer(pubkey, |peer| {
+    /// use gotatun::device::Device;
+    /// # async {
+    /// # let device: Device<gotatun::device::DefaultDeviceTransports> = todo!();
+    /// # let public_key = todo!();
+    /// device.modify_peer(public_key, |peer| {
     ///     peer.set_endpoint(None);
     ///     peer.set_keepalive(Some(123));
-    /// }).await?;
+    /// }).await.unwrap();
+    /// # };
     /// ```
     pub async fn modify_peer(
         &mut self,
