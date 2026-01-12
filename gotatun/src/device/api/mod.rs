@@ -15,6 +15,8 @@ use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, 
 use eyre::{Context, bail, eyre};
 use ipnetwork::IpNetwork;
 use libc::EINVAL;
+#[cfg(unix)]
+use nix::unistd::{Gid, Uid};
 use std::fmt::Debug;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::str::FromStr;
@@ -209,15 +211,10 @@ fn create_sock_dir() {
     let _ = std::fs::create_dir(SOCK_DIR); // Create the directory if it does not exist
 
     if let Ok((saved_uid, saved_gid)) = get_saved_ids() {
-        unsafe {
-            let c_path = std::ffi::CString::new(SOCK_DIR).unwrap();
-            // The directory is under the root user, but we want to be able to
-            // delete the files there when we exit, so we need to change the owner
-            libc::chown(
-                c_path.as_bytes_with_nul().as_ptr().cast(),
-                saved_uid.as_raw(),
-                saved_gid.as_raw(),
-            );
+        // The directory is under the root user, but we want to be able to
+        // delete the files there when we exit, so we need to change the owner
+        if let Err(err) = nix::unistd::chown(SOCK_DIR, Some(saved_uid), Some(saved_gid)) {
+            log::warn!("Failed to change owner of socket directory: {err}");
         }
     }
 }
