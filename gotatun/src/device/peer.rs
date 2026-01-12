@@ -5,6 +5,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+pub mod builder;
+
 use ipnetwork::IpNetwork;
 use parking_lot::RwLock;
 use tokio::sync::Mutex;
@@ -31,9 +33,9 @@ pub struct Peer {
     pub(crate) tunnel: Tunn,
     /// The index the tunnel uses
     index: u32,
-    endpoint: RwLock<Endpoint>,
+    pub(crate) endpoint: RwLock<Endpoint>,
     pub(crate) allowed_ips: AllowedIps<()>,
-    preshared_key: Option<[u8; 32]>,
+    pub(crate) preshared_key: Option<[u8; 32]>,
 
     daita_settings: Option<DaitaSettings>,
     pub(crate) daita: Option<DaitaHooks>,
@@ -83,7 +85,7 @@ impl Peer {
         }
     }
 
-    pub async fn maybe_start_daita<US: UdpSend + Clone + 'static>(
+    pub(crate) async fn maybe_start_daita<US: UdpSend + Clone + 'static>(
         peer: &Arc<Mutex<Peer>>,
         pool: packet::PacketBufPool,
         tun_rx_mtu: MtuWatcher,

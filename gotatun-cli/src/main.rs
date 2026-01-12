@@ -192,7 +192,9 @@ mod unix {
             .with_default_udp()
             .create_tun(tun_name)
             .context("Failed to create TUN device")?
-            .build();
+            .build()
+            .await
+            .context("Failed to start WireGuard device")?;
 
         if do_drop_privileges {
             drop_privileges().context("Failed to drop privileges")?;
