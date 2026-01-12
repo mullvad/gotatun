@@ -10,6 +10,7 @@ use x25519_dalek::PublicKey;
 use crate::device::daita::DaitaSettings;
 
 /// Peer data. Used to construct and update peers in a [`Device`](crate::device::Device).
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct Peer {
     pub public_key: PublicKey,
