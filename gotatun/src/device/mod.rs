@@ -523,7 +523,7 @@ impl<T: DeviceTransports> DeviceState<T> {
         Reconfigure::Yes
     }
 
-    #[cfg(any(target_os = "fuchsia", target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     fn set_fwmark(&mut self, mark: u32) -> Result<(), Error> {
         self.fwmark = Some(mark);
 
