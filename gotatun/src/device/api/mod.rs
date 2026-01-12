@@ -141,7 +141,7 @@ impl ApiServer {
         (ApiClient { tx }, ApiServer { rx })
     }
 
-    /// Spawn a unix socket in [`SOCK_DIR`] called `<name>.sock`. This socket speaks the official
+    /// Spawn a unix socket at `/var/run/wireguard/<name>.sock`. This socket speaks the official
     /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
     #[cfg(unix)]
     pub fn default_unix_socket(name: &str) -> eyre::Result<Self> {
