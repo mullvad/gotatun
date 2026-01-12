@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Removed unused `device::Error` variants.
 - Remove `AllowedIp` and `AllowedIps` type from public API.
+- Remove `drop_privileges` module from public API.
 
 
 ## [0.1.2] - 2026-01-07
