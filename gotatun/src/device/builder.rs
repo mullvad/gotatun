@@ -137,7 +137,7 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
     }
 
     #[cfg(target_os = "linux")]
-    pub fn with_fwmark(mut self, fwmark: u32) -> Self {
+    pub const fn with_fwmark(mut self, fwmark: u32) -> Self {
         self.fwmark = Some(fwmark);
         self
     }
