@@ -19,11 +19,12 @@ mod tests {
     use std::fmt::Write as _;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-    use std::os::unix::net::UnixStream;
     use std::process::Command;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+    use tokio::net::UnixStream;
 
     static NEXT_IFACE_IDX: AtomicUsize = AtomicUsize::new(100); // utun 100+ should be vacant during testing on CI
     static NEXT_PORT: AtomicUsize = AtomicUsize::new(61111); // Use ports starting with 61111, hoping we don't run into a taken port 🤷
@@ -401,10 +402,9 @@ mod tests {
 
         /// Issue a get command on the interface
         async fn wg_get(&self) -> String {
-            use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
             let path = format!("/var/run/wireguard/{}.sock", self.name);
 
-            let mut socket = tokio::net::UnixStream::connect(path).await.unwrap();
+            let mut socket = UnixStream::connect(path).await.unwrap();
             socket.write_all(b"get=1\n\n").await.unwrap();
 
             let mut ret = String::new();
@@ -415,28 +415,33 @@ mod tests {
         }
 
         /// Issue a set command on the interface
-        fn wg_set(&self, setting: &str) -> String {
+        async fn wg_set(&self, setting: &str) -> String {
             let path = format!("/var/run/wireguard/{}.sock", self.name);
-            let mut socket = UnixStream::connect(path).unwrap();
-            write!(socket, "set=1\n{setting}\n\n").unwrap();
+            let mut socket = UnixStream::connect(path).await.unwrap();
+            socket
+                .write_all(format!("set=1\n{setting}\n\n").as_bytes())
+                .await
+                .unwrap();
 
             let mut ret = String::new();
-            socket.read_to_string(&mut ret).unwrap();
+            let mut reader = tokio::io::BufReader::new(socket);
+            while reader.read_line(&mut ret).await.unwrap() > 1 {}
             ret
         }
 
         /// Assign a listen_port to the interface
-        fn wg_set_port(&self, port: u16) -> String {
-            self.wg_set(&format!("listen_port={port}"))
+        async fn wg_set_port(&self, port: u16) -> String {
+            self.wg_set(&format!("listen_port={port}")).await
         }
 
         /// Assign a private_key to the interface
-        fn wg_set_key(&self, key: StaticSecret) -> String {
+        async fn wg_set_key(&self, key: StaticSecret) -> String {
             self.wg_set(&format!("private_key={}", encode(key.to_bytes())))
+                .await
         }
 
         /// Assign a peer to the interface (with public_key, endpoint and a series of nallowed_ip)
-        fn wg_set_peer(
+        async fn wg_set_peer(
             &self,
             key: &PublicKey,
             ep: &SocketAddr,
@@ -447,16 +452,17 @@ mod tests {
                 let _ = write!(req, "\nallowed_ip={ip}/{cidr}");
             }
 
-            self.wg_set(&req)
+            self.wg_set(&req).await
         }
 
         /// Add a new known peer
-        fn add_peer(&mut self, peer: Arc<Peer>) {
+        async fn add_peer(&mut self, peer: Arc<Peer>) {
             self.wg_set_peer(
                 &PublicKey::from(&peer.key),
                 &peer.endpoint,
                 &peer.allowed_ips,
-            );
+            )
+            .await;
             self.peers.push(peer);
         }
     }
@@ -491,8 +497,8 @@ mod tests {
 
         let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap()).await;
         assert!(wg.wg_get().await.ends_with("errno=0\n\n"));
-        assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
-        assert_eq!(wg.wg_set_key(own_private_key.clone()), "errno=0\n\n");
+        assert_eq!(wg.wg_set_port(port).await, "errno=0\n\n");
+        assert_eq!(wg.wg_set_key(own_private_key.clone()).await, "errno=0\n\n");
 
         let own_private_key = encode(own_private_key.as_bytes());
         // Check that the response matches what we expect
@@ -516,7 +522,7 @@ mod tests {
         ];
 
         assert_eq!(
-            wg.wg_set_peer(&peer_pub_key, &endpoint, &allowed_ips),
+            wg.wg_set_peer(&peer_pub_key, &endpoint, &allowed_ips).await,
             "errno=0\n\n"
         );
 
@@ -552,8 +558,8 @@ mod tests {
 
         let mut wg = WGHandle::init(addr_v4, addr_v6).await;
 
-        assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
-        assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
+        assert_eq!(wg.wg_set_port(port).await, "errno=0\n\n");
+        assert_eq!(wg.wg_set_key(private_key).await, "errno=0\n\n");
 
         // Create a new peer whose endpoint is on this machine
         let mut peer = Peer::new(
@@ -568,7 +574,7 @@ mod tests {
 
         let peer = Arc::new(peer);
 
-        wg.add_peer(Arc::clone(&peer));
+        wg.add_peer(Arc::clone(&peer)).await;
         wg.start();
 
         let response = peer.get_request();
@@ -588,8 +594,8 @@ mod tests {
 
         let mut wg = WGHandle::init(addr_v4, addr_v6).await;
 
-        assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
-        assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
+        assert_eq!(wg.wg_set_port(port).await, "errno=0\n\n");
+        assert_eq!(wg.wg_set_key(private_key).await, "errno=0\n\n");
 
         // Create a new peer whose endpoint is on this machine
         let mut peer = Peer::new(
@@ -604,7 +610,7 @@ mod tests {
 
         let peer = Arc::new(peer);
 
-        wg.add_peer(Arc::clone(&peer));
+        wg.add_peer(Arc::clone(&peer)).await;
         wg.start();
 
         let response = peer.get_request();
@@ -624,8 +630,8 @@ mod tests {
 
         let mut wg = WGHandle::init(addr_v4, addr_v6).await;
 
-        assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
-        assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
+        assert_eq!(wg.wg_set_port(port).await, "errno=0\n\n");
+        assert_eq!(wg.wg_set_key(private_key).await, "errno=0\n\n");
 
         let mut peer = Peer::new(
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), next_port()),
@@ -639,7 +645,7 @@ mod tests {
 
         let peer = Arc::new(peer);
 
-        wg.add_peer(Arc::clone(&peer));
+        wg.add_peer(Arc::clone(&peer)).await;
         wg.start();
 
         let response = peer.get_request();
@@ -660,8 +666,8 @@ mod tests {
 
         let mut wg = WGHandle::init(addr_v4, addr_v6).await;
 
-        assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
-        assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
+        assert_eq!(wg.wg_set_port(port).await, "errno=0\n\n");
+        assert_eq!(wg.wg_set_key(private_key).await, "errno=0\n\n");
 
         let mut peer = Peer::new(
             SocketAddr::new(
@@ -678,7 +684,7 @@ mod tests {
 
         let peer = Arc::new(peer);
 
-        wg.add_peer(Arc::clone(&peer));
+        wg.add_peer(Arc::clone(&peer)).await;
         wg.start();
 
         let response = peer.get_request();
@@ -699,8 +705,8 @@ mod tests {
 
         let mut wg = WGHandle::init(addr_v4, addr_v6).await;
 
-        assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
-        assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
+        assert_eq!(wg.wg_set_port(port).await, "errno=0\n\n");
+        assert_eq!(wg.wg_set_key(private_key).await, "errno=0\n\n");
 
         let mut peer = Peer::new(
             SocketAddr::new(
@@ -717,7 +723,7 @@ mod tests {
 
         let peer = Arc::new(peer);
 
-        wg.add_peer(Arc::clone(&peer));
+        wg.add_peer(Arc::clone(&peer)).await;
         wg.start();
 
         let response = peer.get_request();
@@ -737,8 +743,8 @@ mod tests {
 
         let mut wg = WGHandle::init(addr_v4, addr_v6).await;
 
-        assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
-        assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
+        assert_eq!(wg.wg_set_port(port).await, "errno=0\n\n");
+        assert_eq!(wg.wg_set_key(private_key).await, "errno=0\n\n");
 
         for _ in 0..5 {
             // Create a new peer whose endpoint is on this machine
@@ -754,7 +760,7 @@ mod tests {
 
             let peer = Arc::new(peer);
 
-            wg.add_peer(Arc::clone(&peer));
+            wg.add_peer(Arc::clone(&peer)).await;
         }
 
         wg.start();
@@ -788,8 +794,8 @@ mod tests {
 
         let mut wg = WGHandle::init(addr_v4, addr_v6).await;
 
-        assert_eq!(wg.wg_set_port(port), "errno=0\n\n");
-        assert_eq!(wg.wg_set_key(private_key), "errno=0\n\n");
+        assert_eq!(wg.wg_set_port(port).await, "errno=0\n\n");
+        assert_eq!(wg.wg_set_key(private_key).await, "errno=0\n\n");
 
         for _ in 0..5 {
             // Create a new peer whose endpoint is on this machine
@@ -805,7 +811,7 @@ mod tests {
 
             let peer = Arc::new(peer);
 
-            wg.add_peer(Arc::clone(&peer));
+            wg.add_peer(Arc::clone(&peer)).await;
         }
 
         wg.start();
