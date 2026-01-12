@@ -35,7 +35,13 @@ pub struct DeviceBuilder<Udp, TunTx, TunRx> {
 }
 
 impl DeviceBuilder<Nul, Nul, Nul> {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Default for DeviceBuilder<Nul, Nul, Nul> {
+    fn default() -> Self {
         Self {
             udp: Nul,
             tun_tx: Nul,
