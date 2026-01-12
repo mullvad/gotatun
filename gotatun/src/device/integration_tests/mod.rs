@@ -404,7 +404,9 @@ mod tests {
         async fn wg_get(&self) -> String {
             let path = format!("/var/run/wireguard/{}.sock", self.name);
 
-            let mut socket = UnixStream::connect(path).await.unwrap();
+            let mut socket = UnixStream::connect(path)
+                .await
+                .expect("Must create UNIX socket to send UAPI requests");
             socket.write_all(b"get=1\n\n").await.unwrap();
 
             let mut ret = String::new();
@@ -417,7 +419,9 @@ mod tests {
         /// Issue a set command on the interface
         async fn wg_set(&self, setting: &str) -> String {
             let path = format!("/var/run/wireguard/{}.sock", self.name);
-            let mut socket = UnixStream::connect(path).await.unwrap();
+            let mut socket = UnixStream::connect(path)
+                .await
+                .expect("Must create UNIX socket to send UAPI requests");
             socket
                 .write_all(format!("set=1\n{setting}\n\n").as_bytes())
                 .await
