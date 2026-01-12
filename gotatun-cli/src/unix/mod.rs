@@ -154,6 +154,8 @@ async fn start(
 ) -> eyre::Result<Device<DefaultDeviceTransports>> {
     let (socket_uid, socket_gid) = drop_privileges::get_saved_ids()?;
 
+    // We must create the tun device first because its name will change on macOS
+    // if "utun" is passed.
     let tun = TunDevice::from_name(tun_name).context("Failed to create TUN device")?;
 
     let uapi = UapiServer::default_unix_socket(&tun.name()?, Some(socket_uid), Some(socket_gid))
