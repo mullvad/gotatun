@@ -110,17 +110,7 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
         self,
         tun_name: &str,
     ) -> Result<DeviceBuilder<X, TunDevice, TunDevice>, Error> {
-        let mut tun_config = tun::Configuration::default();
-        tun_config.tun_name(tun_name);
-        #[cfg(target_os = "macos")]
-        tun_config.platform_config(|p| {
-            p.enable_routing(false);
-        });
-        // TODO: for wintun, must set path or enable signature check
-        // we should upstream to `tun`
-        let tun = tun::create_as_async(&tun_config).map_err(Error::OpenTun)?;
-        let tun = TunDevice::from_tun_device(tun)?;
-
+        let tun = TunDevice::from_name(tun_name)?;
         Ok(self.with_ip(tun))
     }
 
