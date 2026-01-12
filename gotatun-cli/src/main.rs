@@ -81,9 +81,6 @@ mod unix {
                     .long("disable-drop-privileges")
                     .env("WG_SUDO")
                     .help("Do not drop sudo privileges"),
-                //Arg::new("disable-connected-udp")
-                //    .long("disable-connected-udp")
-                //    .help("Disable connected UDP sockets to each peer"),
             ])
             .get_matches();
 
