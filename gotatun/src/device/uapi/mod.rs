@@ -13,7 +13,7 @@
 //! The most common use-case is probably to create a unix socket with
 //! [`UapiServer::default_unix_socket`] and pass it to [`DeviceBuilder::with_uapi`]:
 //!
-//! ```no_run,ignore_windows
+//! ```no_run,ignore-windows
 //! use gotatun::device::{self, uapi::UapiServer};
 //!
 //! let uapi = UapiServer::default_unix_socket("my-gotatun", None, None)
