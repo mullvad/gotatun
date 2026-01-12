@@ -101,7 +101,7 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
                 public_key: pubkey.clone(),
                 preshared_key: p.preshared_key.clone(),
                 allowed_ips: p.allowed_ips.iter().map(|(_, net)| net).collect(),
-                endpoint: p.endpoint.read().addr,
+                endpoint: p.endpoint.addr,
                 keepalive: p.tunnel.persistent_keepalive(),
                 stats: Stats {
                     tx_bytes,
@@ -178,7 +178,7 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
         }
 
         if let Update::Set(addr) = endpoint {
-            existing_peer.endpoint.write().addr = addr;
+            existing_peer.endpoint.addr = addr;
         }
 
         if clear_allowed_ips {

@@ -8,7 +8,6 @@
 pub mod builder;
 
 use ipnetwork::IpNetwork;
-use parking_lot::RwLock;
 use tokio::sync::Mutex;
 
 use std::net::{IpAddr, SocketAddr};
@@ -33,7 +32,7 @@ pub struct Peer {
     pub(crate) tunnel: Tunn,
     /// The index the tunnel uses
     index: u32,
-    pub(crate) endpoint: RwLock<Endpoint>,
+    pub(crate) endpoint: Endpoint,
     pub(crate) allowed_ips: AllowedIps<()>,
     pub(crate) preshared_key: Option<[u8; 32]>,
 
@@ -77,7 +76,7 @@ impl Peer {
         Peer {
             tunnel,
             index,
-            endpoint: RwLock::new(Endpoint { addr: endpoint }),
+            endpoint: Endpoint { addr: endpoint },
             allowed_ips: allowed_ips.iter().map(|ip| (ip, ())).collect(),
             preshared_key,
             daita_settings,
@@ -122,12 +121,12 @@ impl Peer {
         self.daita.as_ref()
     }
 
-    pub fn endpoint(&self) -> parking_lot::RwLockReadGuard<'_, Endpoint> {
-        self.endpoint.read()
+    pub fn endpoint(&self) -> &Endpoint {
+        &self.endpoint
     }
 
-    pub fn set_endpoint(&self, addr: SocketAddr) {
-        self.endpoint.write().addr = Some(addr);
+    pub fn set_endpoint(&mut self, addr: SocketAddr) {
+        self.endpoint.addr = Some(addr);
     }
 
     pub fn is_allowed_ip<I: Into<IpAddr>>(&self, addr: I) -> bool {
