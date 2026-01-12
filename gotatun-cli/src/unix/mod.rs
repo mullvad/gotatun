@@ -201,6 +201,7 @@ fn check_tun_name(_v: &str) -> eyre::Result<()> {
 
 #[cfg(test)]
 mod test {
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
     use super::*;
 
     #[test]
