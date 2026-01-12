@@ -5,12 +5,13 @@ use std::sync::Arc;
 
 use tokio::sync::{Mutex, RwLock};
 
-#[cfg(feature = "tun")]
 use crate::device::Error;
+#[cfg(feature = "tun")]
+use crate::tun::tun_async_device::TunDevice;
 use crate::{
     device::{Device, DeviceState, allowed_ips::AllowedIps, api::ApiServer, peer::Peer},
     task::Task,
-    tun::{IpRecv, IpSend, tun_async_device::TunDevice},
+    tun::{IpRecv, IpSend},
     udp::{UdpTransportFactory, socket::UdpSocketFactory},
 };
 

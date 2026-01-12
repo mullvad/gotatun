@@ -43,7 +43,9 @@ use allowed_ips::AllowedIps;
 use peer_state::PeerState;
 use rand_core::{OsRng, RngCore};
 
-pub use crate::device::transports::{DefaultDeviceTransports, DeviceTransports};
+#[cfg(feature = "tun")]
+pub use crate::device::transports::DefaultDeviceTransports;
+pub use crate::device::transports::DeviceTransports;
 pub use builder::DeviceBuilder;
 pub use peer::Peer;
 
