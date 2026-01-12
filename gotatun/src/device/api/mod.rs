@@ -20,7 +20,9 @@ use nix::unistd::{Gid, Uid};
 use std::fmt::Debug;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::str::FromStr;
-use std::sync::{Weak, atomic};
+use std::sync::Weak;
+#[cfg(feature = "daita")]
+use std::sync::atomic;
 use tokio::sync::{RwLock, mpsc, oneshot};
 
 #[cfg(unix)]
@@ -303,6 +305,7 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
         let peer = peer.lock().await;
         let (_, tx_bytes, rx_bytes, ..) = peer.tunnel.stats();
         let endpoint = peer.endpoint().addr;
+        #[cfg(feature = "daita")]
         let padding_overhead = peer.daita.as_ref().map(|daita| daita.padding_overhead());
 
         peers.push(GetPeer {
@@ -323,11 +326,23 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
             last_handshake_time_nsec: peer.time_since_last_handshake().map(|d| d.subsec_nanos()),
             rx_bytes: Some(rx_bytes as u64),
             tx_bytes: Some(tx_bytes as u64),
+            #[cfg(feature = "daita")]
             tx_padding_bytes: padding_overhead.map(|p| p.tx_padding_bytes as u64),
+            #[cfg(not(feature = "daita"))]
+            tx_padding_bytes: None,
+            #[cfg(feature = "daita")]
             tx_padding_packet_bytes: padding_overhead
                 .map(|p| p.tx_padding_packet_bytes.load(atomic::Ordering::SeqCst) as u64),
+            #[cfg(not(feature = "daita"))]
+            tx_padding_packet_bytes: None,
+            #[cfg(feature = "daita")]
             rx_padding_bytes: padding_overhead.map(|p| p.rx_padding_bytes as u64),
+            #[cfg(not(feature = "daita"))]
+            rx_padding_bytes: None,
+            #[cfg(feature = "daita")]
             rx_padding_packet_bytes: padding_overhead.map(|p| p.rx_padding_packet_bytes as u64),
+            #[cfg(not(feature = "daita"))]
+            rx_padding_packet_bytes: None,
         });
     }
 
@@ -414,6 +429,7 @@ async fn on_api_set(
             remove,
             update_only,
             replace_allowed_ips,
+            #[cfg(feature = "daita")]
             daita_settings,
         } = peer;
 
@@ -428,6 +444,7 @@ async fn on_api_set(
             command::SetUnset::Unset => todo!("not sure how to handle this"),
         });
 
+        #[cfg(feature = "daita")]
         let daita_settings = match daita_settings {
             Some(daita_settings) => {
                 // TODO: Check if there are any changes
@@ -455,6 +472,7 @@ async fn on_api_set(
                 .collect(),
             keepalive: persistent_keepalive_interval,
             preshared_key,
+            #[cfg(feature = "daita")]
             daita_settings,
         };
         pending_peer_updates.push(update_peer);
