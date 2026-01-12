@@ -4,6 +4,7 @@ use ipnetwork::IpNetwork;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::device::Error;
+use crate::device::daita::DaitaSettings;
 use crate::device::{
     Connection, Device, DeviceState, DeviceTransports, Reconfigure, peer::builder::PeerBuilder,
 };
@@ -28,6 +29,7 @@ pub struct Peer {
     pub endpoint: Option<SocketAddr>,
     pub keepalive: Option<u16>,
     pub allowed_ips: Vec<IpNetwork>,
+    pub daita: Option<DaitaSettings>,
     pub stats: Stats,
 }
 
@@ -96,6 +98,13 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
 
             let (_, tx_bytes, rx_bytes, ..) = p.tunnel.stats();
             let last_handshake = p.time_since_last_handshake();
+            let stats = Stats {
+                tx_bytes,
+                rx_bytes,
+                last_handshake,
+            };
+
+            let daita = p.daita_settings().cloned();
 
             peers.push(Peer {
                 public_key: *pubkey,
@@ -103,11 +112,8 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
                 allowed_ips: p.allowed_ips.iter().map(|(_, net)| net).collect(),
                 endpoint: p.endpoint.addr,
                 keepalive: p.tunnel.persistent_keepalive(),
-                stats: Stats {
-                    tx_bytes,
-                    rx_bytes,
-                    last_handshake,
-                },
+                daita,
+                stats,
             });
         }
         peers
@@ -247,7 +253,9 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
 
     /// Return a read-only "configurator"
     fn as_configurator(&self) -> DeviceConfigurator<'_, T> {
-        DeviceConfigurator { device: self.device }
+        DeviceConfigurator {
+            device: self.device,
+        }
     }
 }
 
