@@ -17,9 +17,7 @@ pub struct PeerBuilder {
     // TODO: zeroize
     pub preshared_key: Option<[u8; 32]>,
     pub keepalive: Option<u16>,
-
-    // TODO
-    pub(crate) daita_settings: Option<DaitaSettings>,
+    pub daita_settings: Option<DaitaSettings>,
 }
 
 impl PeerBuilder {
