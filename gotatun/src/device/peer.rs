@@ -8,7 +8,6 @@
 pub mod builder;
 
 use ipnetwork::IpNetwork;
-use parking_lot::RwLock;
 use tokio::sync::Mutex;
 
 use std::net::{IpAddr, SocketAddr};
