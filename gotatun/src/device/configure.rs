@@ -98,8 +98,8 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
             let last_handshake = p.time_since_last_handshake();
 
             peers.push(Peer {
-                public_key: pubkey.clone(),
-                preshared_key: p.preshared_key.clone(),
+                public_key: *pubkey,
+                preshared_key: p.preshared_key,
                 allowed_ips: p.allowed_ips.iter().map(|(_, net)| net).collect(),
                 endpoint: p.endpoint.addr,
                 keepalive: p.tunnel.persistent_keepalive(),
@@ -155,7 +155,7 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
             return false;
         };
 
-        let existing_peer_arc = Arc::clone(&existing_peer);
+        let existing_peer_arc = Arc::clone(existing_peer);
         let mut existing_peer = existing_peer_arc.lock().await;
 
         let mut peer_mut = PeerMut::default();
@@ -196,7 +196,7 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
         let mut remove_list = vec![];
         for (peer, ip_network) in self.device.peers_by_ip.iter() {
             if Arc::ptr_eq(&existing_peer_arc, peer) {
-                remove_list.push(ip_network.clone());
+                remove_list.push(ip_network);
             }
         }
         for network in remove_list {
