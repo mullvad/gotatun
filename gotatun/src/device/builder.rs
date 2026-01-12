@@ -29,6 +29,9 @@ pub struct DeviceBuilder<Udp, TunTx, TunRx> {
 
     // TODO: consider turning this into a typestate, and adding a special case for single peer
     peers: Vec<PeerBuilder>,
+
+    #[cfg(target_os = "linux")]
+    fwmark: Option<u32>,
 }
 
 impl DeviceBuilder<Nul, Nul, Nul> {
@@ -40,6 +43,8 @@ impl DeviceBuilder<Nul, Nul, Nul> {
             uapi: None,
             port: 0,
             peers: Vec::new(),
+            #[cfg(target_os = "linux")]
+            fwmark: None,
         }
     }
 }
@@ -57,6 +62,8 @@ impl<X, Y> DeviceBuilder<Nul, X, Y> {
             uapi: self.uapi,
             port: self.port,
             peers: self.peers,
+            #[cfg(target_os = "linux")]
+            fwmark: self.fwmark,
         }
     }
 }
@@ -96,6 +103,8 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
             uapi: self.uapi,
             port: self.port,
             peers: self.peers,
+            #[cfg(target_os = "linux")]
+            fwmark: self.fwmark,
         }
     }
 }
@@ -115,6 +124,12 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
         self.port = port;
         self
     }
+
+    #[cfg(target_os = "linux")]
+    pub const fn with_fwmark(mut self, fwmark: u32) -> Self {
+        self.fwmark = Some(fwmark);
+        self
+    }
 }
 
 impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, TunTx, TunRx> {
@@ -125,7 +140,7 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             tun_tx: Arc::new(Mutex::new(self.tun_tx)),
             tun_rx_mtu: self.tun_rx.mtu(),
             tun_rx: Arc::new(Mutex::new(self.tun_rx)),
-            fwmark: Default::default(),
+            fwmark: self.fwmark,
             key_pair: Default::default(),
             next_index: Default::default(),
             peers: Default::default(),
