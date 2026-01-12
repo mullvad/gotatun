@@ -5,8 +5,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-pub mod allowed_ips;
-
+pub(crate) mod allowed_ips;
 pub mod api;
 mod builder;
 pub mod configure;
