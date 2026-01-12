@@ -6,7 +6,7 @@ use x25519_dalek::{PublicKey, StaticSecret};
 use crate::device::Error;
 use crate::device::{Connection, Device, DeviceState, DeviceTransports, Peer, Reconfigure};
 
-pub struct DeviceConfigurator<'a, T: DeviceTransports> {
+pub struct DeviceRead<'a, T: DeviceTransports> {
     device: &'a DeviceState<T>,
 }
 
@@ -39,7 +39,7 @@ pub struct PeerStats {
     pub stats: Stats,
 }
 
-pub struct DeviceConfiguratorMut<'a, T: DeviceTransports> {
+pub struct DeviceWrite<'a, T: DeviceTransports> {
     device: &'a mut DeviceState<T>,
     reconfigure: Reconfigure,
     set_private_key: Option<StaticSecret>,
@@ -96,7 +96,7 @@ impl PeerMut {
     }
 }
 
-impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
+impl<T: DeviceTransports> DeviceRead<'_, T> {
     /// Return the private key on the device
     pub fn private_key(&self) -> Option<&StaticSecret> {
         self.device.key_pair.as_ref().map(|kp| &kp.0)
@@ -161,7 +161,7 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
     }
 }
 
-impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
+impl<T: DeviceTransports> DeviceWrite<'_, T> {
     /// Change the private key of the device.
     pub async fn set_private_key(&mut self, private_key: StaticSecret) {
         self.reconfigure |= self.device.set_key(private_key).await;
@@ -252,7 +252,7 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
     /// # let device: Device<gotatun::device::DefaultDeviceTransports> = todo!();
     /// # let peer = todo!();
     /// # let public_key = todo!();
-    /// device.configure(async |device| {
+    /// device.write(async |device| {
     ///     device.modify_peer(public_key, |peer| {
     ///         peer.set_endpoint(None);
     ///         peer.set_keepalive(Some(123));
@@ -371,8 +371,8 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
     }
 
     /// Return a read-only "configurator"
-    fn as_configurator(&self) -> DeviceConfigurator<'_, T> {
-        DeviceConfigurator {
+    fn as_configurator(&self) -> DeviceRead<'_, T> {
+        DeviceRead {
             device: self.device,
         }
     }
@@ -389,14 +389,14 @@ impl<T: DeviceTransports> Device<T> {
     /// use gotatun::device::Device;
     /// # async {
     /// # let device: Device<gotatun::device::DefaultDeviceTransports> = todo!();
-    /// let (port, peers) = device.get(async |device| {
+    /// let (port, peers) = device.read(async |device| {
     ///     (device.listen_port(), device.peers().await)
     /// }).await;
     /// # };
     /// ```
-    pub async fn get<X>(&self, f: impl AsyncFnOnce(&DeviceConfigurator<T>) -> X) -> X {
+    pub async fn read<X>(&self, f: impl AsyncFnOnce(&DeviceRead<T>) -> X) -> X {
         let state = self.inner.read().await;
-        let configurator = DeviceConfigurator { device: &state };
+        let configurator = DeviceRead { device: &state };
         f(&configurator).await
     }
 
@@ -411,18 +411,18 @@ impl<T: DeviceTransports> Device<T> {
     /// # async {
     /// # let device: Device<gotatun::device::DefaultDeviceTransports> = todo!();
     /// # let peer = todo!();
-    /// device.configure(async |device| {
+    /// device.write(async |device| {
     ///     device.clear_peers();
     ///     device.add_peer(peer);
     /// }).await.unwrap();
     /// # };
     /// ```
-    pub async fn configure<X>(
+    pub async fn write<X>(
         &self,
-        f: impl AsyncFnOnce(&mut DeviceConfiguratorMut<T>) -> X,
+        f: impl AsyncFnOnce(&mut DeviceWrite<T>) -> X,
     ) -> Result<X, Error> {
         let mut state = self.inner.write().await;
-        let mut configurator = DeviceConfiguratorMut {
+        let mut configurator = DeviceWrite {
             device: &mut state,
             reconfigure: Reconfigure::No,
             set_private_key: None,
@@ -448,7 +448,7 @@ impl<T: DeviceTransports> Device<T> {
 
     /// Change the private key of the device.
     pub async fn set_private_key(&self, private_key: StaticSecret) -> Result<(), Error> {
-        self.configure(async |device| {
+        self.write(async |device| {
             device.set_private_key(private_key).await;
         })
         .await
@@ -456,7 +456,7 @@ impl<T: DeviceTransports> Device<T> {
 
     /// Remove all peers, returning the number of peers removed.
     pub async fn clear_peers(&self) -> Result<usize, Error> {
-        self.configure(async |device| device.clear_peers()).await
+        self.write(async |device| device.clear_peers()).await
     }
 
     /// Add a single new peer to this [`Device`].
@@ -464,7 +464,7 @@ impl<T: DeviceTransports> Device<T> {
     /// Returns `false` if the [`Device`] already contains a peer with the same public key.
     /// See also [`Self::add_or_update_peer`].
     pub async fn add_peer(&self, peer: Peer) -> Result<bool, Error> {
-        self.configure(async |device| device.add_peer(peer)).await
+        self.write(async |device| device.add_peer(peer)).await
     }
 
     /// Add multiple new peers to this [`Device`].
@@ -472,7 +472,7 @@ impl<T: DeviceTransports> Device<T> {
     /// If _any_ new peer has the same public key as an existing peer, no new peers are added
     /// and this function returns `false`. See also [`Self::add_or_update_peers`].
     pub async fn add_peers(&self, peers: impl IntoIterator<Item = Peer>) -> Result<bool, Error> {
-        self.configure(async |device| device.add_peers(peers)).await
+        self.write(async |device| device.add_peers(peers)).await
     }
 
     /// Add or update a peer.
@@ -480,7 +480,7 @@ impl<T: DeviceTransports> Device<T> {
     /// If a peer with the same public key already exists, it will be updated.
     /// Otherwise, a new peer is added.
     pub async fn add_or_update_peer(&self, peer: Peer) -> Result<(), Error> {
-        self.configure(async |device| device.add_or_update_peer(peer).await)
+        self.write(async |device| device.add_or_update_peer(peer).await)
             .await
     }
 
@@ -489,7 +489,7 @@ impl<T: DeviceTransports> Device<T> {
         &mut self,
         peers: impl IntoIterator<Item = Peer>,
     ) -> Result<(), Error> {
-        self.configure(async |device| device.add_or_update_peers(peers).await)
+        self.write(async |device| device.add_or_update_peers(peers).await)
             .await
     }
 
@@ -498,7 +498,7 @@ impl<T: DeviceTransports> Device<T> {
     /// All fields of the peer will be overwritten. Returns `false` if no peer with this public key
     /// exists. See also [`Self::add_or_update_peer`] and [`Self::modify_peer`].
     pub async fn update_peer(&self, peer: Peer) -> Result<bool, Error> {
-        self.configure(async |device| device.update_peer(peer).await)
+        self.write(async |device| device.update_peer(peer).await)
             .await
     }
 
@@ -522,7 +522,7 @@ impl<T: DeviceTransports> Device<T> {
         public_key: &PublicKey,
         f: impl for<'a> FnOnce(&mut PeerMut),
     ) -> Result<bool, Error> {
-        self.configure(async |device| device.modify_peer(public_key, f).await)
+        self.write(async |device| device.modify_peer(public_key, f).await)
             .await
     }
 
@@ -530,13 +530,13 @@ impl<T: DeviceTransports> Device<T> {
     ///
     /// Returns `false` if no peer with `public_key` exists.
     pub async fn remove_peer(&self, public_key: &PublicKey) -> Result<bool, Error> {
-        self.configure(async |device| device.remove_peer(public_key).await)
+        self.write(async |device| device.remove_peer(public_key).await)
             .await
     }
 
     /// Change the listen port of the UDP socket of this [`Device`].
     pub async fn set_listen_port(&self, port: u16) -> Result<(), Error> {
-        self.configure(async |device| device.set_listen_port(port))
+        self.write(async |device| device.set_listen_port(port))
             .await
     }
 
@@ -545,7 +545,6 @@ impl<T: DeviceTransports> Device<T> {
     /// `set_fwmark(0)` will effectively unset it.
     #[cfg(target_os = "linux")]
     pub async fn set_fwmark(&self, mark: u32) -> Result<(), Error> {
-        self.configure(async |device| device.set_fwmark(mark))
-            .await?
+        self.write(async |device| device.set_fwmark(mark)).await?
     }
 }
