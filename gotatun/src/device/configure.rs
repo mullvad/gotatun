@@ -103,6 +103,23 @@ impl PeerMut {
 }
 
 impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
+    /// Return the private key on the device
+    pub fn private_key(&self) -> Option<&StaticSecret> {
+        self.device.key_pair.as_ref().map(|kp| &kp.0)
+    }
+
+    /// Return port that the UDP socket(s) is listening on
+    pub fn listen_port(&self) -> u16 {
+        self.device.port
+    }
+
+    /// Return mark to use for the UDP socket(s)
+    #[cfg(target_os = "linux")]
+    pub fn fwmark(&self) -> Option<u32> {
+        self.device.fwmark
+    }
+
+    /// Return all peers on the device
     pub async fn peers(&self) -> Vec<Peer> {
         let mut peers = vec![];
         for (pubkey, peer) in self.device.peers.iter() {
