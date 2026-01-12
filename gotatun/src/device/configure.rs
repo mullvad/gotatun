@@ -145,6 +145,10 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
 }
 
 impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
+    pub async fn set_private_key(&mut self, private_key: StaticSecret) {
+        self.reconfigure |= self.device.set_key(private_key).await;
+    }
+
     pub fn clear_peers(&mut self) -> usize {
         self.device.clear_peers()
     }
@@ -157,12 +161,39 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
         self.device.add_peer(peer, index);
     }
 
+    pub fn add_peers(&mut self, peers: impl IntoIterator<Item = PeerBuilder>) {
+        let peers: Vec<_> = peers.into_iter().collect();
+
+        if peers
+            .iter()
+            .any(|peer| self.device.peers.contains_key(&peer.public_key))
+        {
+            return; // TODO: error? yes please
+        }
+
+        for peer in peers {
+            let index = self.device.next_index();
+            self.device.add_peer(peer, index);
+        }
+    }
+
     pub async fn add_or_update_peer(&mut self, peer: PeerBuilder) {
         if self.device.peers.contains_key(&peer.public_key) {
             self.update_peer(peer).await;
         } else {
             self.add_peer(peer);
         }
+    }
+
+    pub async fn update_peer(&mut self, peer: PeerBuilder) -> bool {
+        self.modify_peer(&peer.public_key, |peer_mut| {
+            peer_mut.clear_allowed_ips();
+            peer_mut.add_allowed_ips(peer.allowed_ips);
+            peer_mut.set_endpoint(peer.endpoint);
+            peer_mut.set_keepalive(peer.keepalive);
+            peer_mut.set_preshared_key(peer.preshared_key);
+        })
+        .await
     }
 
     /// ```
@@ -247,21 +278,6 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
         self.device.remove_peer(public_key).await.is_some()
     }
 
-    pub async fn update_peer(&mut self, peer: PeerBuilder) -> bool {
-        self.modify_peer(&peer.public_key, |peer_mut| {
-            peer_mut.clear_allowed_ips();
-            peer_mut.add_allowed_ips(peer.allowed_ips);
-            peer_mut.set_endpoint(peer.endpoint);
-            peer_mut.set_keepalive(peer.keepalive);
-            peer_mut.set_preshared_key(peer.preshared_key);
-        })
-        .await
-    }
-
-    pub async fn set_private_key(&mut self, private_key: StaticSecret) {
-        self.reconfigure |= self.device.set_key(private_key).await;
-    }
-
     pub fn set_listen_port(&mut self, port: u16) {
         self.reconfigure |= self.device.set_port(port);
     }
@@ -326,14 +342,14 @@ impl<T: DeviceTransports> Device<T> {
         Ok(t)
     }
 
-    pub async fn set_private_key(&mut self, private_key: StaticSecret) -> Result<(), Error> {
+    pub async fn set_private_key(&self, private_key: StaticSecret) -> Result<(), Error> {
         self.configure(async |device| {
             device.set_private_key(private_key).await;
         })
         .await
     }
 
-    pub async fn clear_peers(&mut self) -> Result<(), Error> {
+    pub async fn clear_peers(&self) -> Result<(), Error> {
         self.configure(async |device| device.clear_peers()).await?;
         Ok(())
     }
@@ -346,18 +362,41 @@ impl<T: DeviceTransports> Device<T> {
         &self,
         peers: impl IntoIterator<Item = PeerBuilder>,
     ) -> Result<(), Error> {
-        self.configure(async |device| {
-            for peer in peers {
-                device.add_peer(peer)
-            }
-        })
-        .await
+        self.configure(async |device| device.add_peers(peers)).await
     }
 
-    pub async fn remove_peer(&self, public_key: &PublicKey) -> Result<(), Error> {
-        self.configure(async |device| {
-            device.remove_peer(public_key).await;
-        })
-        .await
+    pub async fn add_or_update_peer(&self, peer: PeerBuilder) -> Result<(), Error> {
+        self.configure(async |device| device.add_or_update_peer(peer).await)
+            .await
+    }
+
+    pub async fn update_peer(&self, peer: PeerBuilder) -> Result<bool, Error> {
+        self.configure(async |device| device.update_peer(peer).await)
+            .await
+    }
+
+    pub async fn modify_peer(
+        &mut self,
+        public_key: &PublicKey,
+        f: impl for<'a> FnOnce(&mut PeerMut),
+    ) -> Result<bool, Error> {
+        self.configure(async |device| device.modify_peer(public_key, f).await)
+            .await
+    }
+
+    pub async fn remove_peer(&self, public_key: &PublicKey) -> Result<bool, Error> {
+        self.configure(async |device| device.remove_peer(public_key).await)
+            .await
+    }
+
+    pub async fn set_listen_port(&self, port: u16) -> Result<(), Error> {
+        self.configure(async |device| device.set_listen_port(port))
+            .await
+    }
+
+    #[cfg(target_os = "linux")]
+    pub async fn set_fwmark(&self, mark: u32) -> Result<(), Error> {
+        self.configure(async |device| device.set_fwmark(mark))
+            .await?
     }
 }
