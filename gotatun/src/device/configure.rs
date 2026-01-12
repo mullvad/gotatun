@@ -240,6 +240,15 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
     pub fn set_fwmark(&mut self, mark: u32) -> Result<(), Error> {
         self.device.set_fwmark(mark)
     }
+
+    pub async fn peers(&self) -> Vec<Peer> {
+        self.as_configurator().peers().await
+    }
+
+    /// Return a read-only "configurator"
+    fn as_configurator(&self) -> DeviceConfigurator<'_, T> {
+        DeviceConfigurator { device: self.device }
+    }
 }
 
 impl<T: DeviceTransports> Device<T> {
