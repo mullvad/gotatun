@@ -5,14 +5,14 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::device::Error;
+use eyre::{Context, bail};
 
 #[cfg(target_os = "macos")]
 use nix::unistd::User;
 use nix::unistd::{Gid, Uid, setgid, setuid};
 
 #[cfg(target_os = "macos")]
-pub fn get_saved_ids() -> Result<(Uid, Gid), Error> {
+pub fn get_saved_ids() -> eyre::Result<(Uid, Gid)> {
     // Get the user name of the sudoer
     match std::env::var("USER") {
         Ok(uname) => match User::from_name(&uname) {
@@ -21,28 +21,24 @@ pub fn get_saved_ids() -> Result<(Uid, Gid), Error> {
                 let gid = Gid::from_raw(gid_t::from(user.gid));
                 Ok((uid, gid))
             }
-            Err(e) => Err(Error::DropPrivileges(format!(
-                "Failed parse user; err: {e:?}"
-            ))),
-            Ok(None) => Err(Error::DropPrivileges("Failed to find user".to_owned())),
+            Err(e) => bail!("Failed parse user; err: {e:?}"),
+            Ok(None) => bail!("Failed to find user"),
         },
-        Err(e) => Err(Error::DropPrivileges(format!(
-            "Could not get environment variable for user; err: {e:?}"
-        ))),
+        Err(e) => bail!("Could not get environment variable for user; err: {e:?}"),
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn get_saved_ids() -> Result<(Uid, Gid), Error> {
+pub fn get_saved_ids() -> eyre::Result<(Uid, Gid)> {
     use libc::{getlogin, getpwnam};
 
     let uname = unsafe { getlogin() };
     if uname.is_null() {
-        return Err(Error::DropPrivileges("NULL from getlogin".to_owned()));
+        bail!("NULL from getlogin");
     }
     let userinfo = unsafe { getpwnam(uname) };
     if userinfo.is_null() {
-        return Err(Error::DropPrivileges("NULL from getpwnam".to_owned()));
+        bail!("NULL from getpwnam");
     }
 
     // Saved group ID
@@ -53,20 +49,17 @@ pub fn get_saved_ids() -> Result<(Uid, Gid), Error> {
     Ok((Uid::from_raw(saved_uid), Gid::from_raw(saved_gid)))
 }
 
-pub fn drop_privileges() -> Result<(), Error> {
+pub fn drop_privileges() -> eyre::Result<()> {
     let (saved_uid, saved_gid) = get_saved_ids()?;
 
     // Set real and effective user/group ID
     setgid(saved_gid)
         .and_then(|_| setuid(saved_uid))
-        .map_err(|e| e.to_string())
-        .map_err(Error::DropPrivileges)?;
+        .context("Failed to set user/group ID")?;
 
     // Validate that we can't get sudo back again
     if setgid(Gid::from_raw(0)).is_ok() || setuid(Uid::from_raw(0)).is_ok() {
-        Err(Error::DropPrivileges(
-            "Failed to permanently drop privileges".to_owned(),
-        ))
+        bail!("Failed to permanently drop privileges");
     } else {
         Ok(())
     }
