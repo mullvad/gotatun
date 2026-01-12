@@ -6,10 +6,7 @@ use x25519_dalek::{PublicKey, StaticSecret};
 use crate::device::Error;
 #[cfg(feature = "daita")]
 use crate::device::daita::DaitaSettings;
-use crate::device::{
-    Connection, Device, DeviceState, DeviceTransports, Reconfigure,
-    peer_state::builder::PeerBuilder,
-};
+use crate::device::{Connection, Device, DeviceState, DeviceTransports, Peer, Reconfigure};
 
 pub struct DeviceConfigurator<'a, T: DeviceTransports> {
     device: &'a DeviceState<T>,
@@ -39,7 +36,7 @@ pub struct DaitaStats {
 /// Read-only peer info
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct Peer {
+pub struct PeerRef {
     pub public_key: PublicKey,
     pub preshared_key: Option<[u8; 32]>,
     pub endpoint: Option<SocketAddr>,
@@ -125,7 +122,7 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
     }
 
     /// Return all peers on the device
-    pub async fn peers(&self) -> Vec<Peer> {
+    pub async fn peers(&self) -> Vec<PeerRef> {
         let mut peers = vec![];
         for (pubkey, peer) in self.device.peers.iter() {
             let p = peer.lock().await;
@@ -155,7 +152,7 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
                 daita: daita_stats,
             };
 
-            peers.push(Peer {
+            peers.push(PeerRef {
                 public_key: *pubkey,
                 preshared_key: p.preshared_key,
                 allowed_ips: p.allowed_ips.iter().map(|(_, net)| net).collect(),
@@ -185,7 +182,7 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
     ///
     /// Returns `false` if the [`Device`] already contains a peer with the same public key.
     /// See also [`Self::add_or_update_peer`].
-    pub fn add_peer(&mut self, peer: PeerBuilder) -> bool {
+    pub fn add_peer(&mut self, peer: Peer) -> bool {
         if self.device.peers.contains_key(&peer.public_key) {
             return false;
         }
@@ -198,7 +195,7 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
     ///
     /// If _any_ new peer has the same public key as an existing peer, no new peers are added
     /// and this function returns `false`. See also [`Self::add_or_update_peers`].
-    pub fn add_peers(&mut self, peers: impl IntoIterator<Item = PeerBuilder>) -> bool {
+    pub fn add_peers(&mut self, peers: impl IntoIterator<Item = Peer>) -> bool {
         let peers: Vec<_> = peers.into_iter().collect();
 
         if peers
@@ -219,7 +216,7 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
     ///
     /// If a peer with the same public key already exists, it will be updated.
     /// Otherwise, a new peer is added.
-    pub async fn add_or_update_peer(&mut self, peer: PeerBuilder) {
+    pub async fn add_or_update_peer(&mut self, peer: Peer) {
         if self.device.peers.contains_key(&peer.public_key) {
             self.update_peer(peer).await;
         } else {
@@ -230,7 +227,7 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
     /// Add or update multiple peers.
     ///
     /// This is equivalent to calling [`Self::add_or_update_peer`] in a loop.
-    pub async fn add_or_update_peers(&mut self, peers: impl IntoIterator<Item = PeerBuilder>) {
+    pub async fn add_or_update_peers(&mut self, peers: impl IntoIterator<Item = Peer>) {
         for peer in peers {
             self.add_or_update_peer(peer).await;
         }
@@ -240,7 +237,7 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
     ///
     /// All fields of the peer will be overwritten. Returns `false` if no peer with this public key
     /// exists. See also [`Self::add_or_update_peer`] and [`Self::modify_peer`].
-    pub async fn update_peer(&mut self, peer: PeerBuilder) -> bool {
+    pub async fn update_peer(&mut self, peer: Peer) -> bool {
         self.modify_peer(&peer.public_key, |peer_mut| {
             peer_mut.clear_allowed_ips();
             peer_mut.add_allowed_ips(peer.allowed_ips);
@@ -375,7 +372,7 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
     }
 
     /// Return all peers on the device
-    pub async fn peers(&self) -> Vec<Peer> {
+    pub async fn peers(&self) -> Vec<PeerRef> {
         self.as_configurator().peers().await
     }
 
@@ -472,7 +469,7 @@ impl<T: DeviceTransports> Device<T> {
     ///
     /// Returns `false` if the [`Device`] already contains a peer with the same public key.
     /// See also [`Self::add_or_update_peer`].
-    pub async fn add_peer(&self, peer: PeerBuilder) -> Result<bool, Error> {
+    pub async fn add_peer(&self, peer: Peer) -> Result<bool, Error> {
         self.configure(async |device| device.add_peer(peer)).await
     }
 
@@ -480,10 +477,7 @@ impl<T: DeviceTransports> Device<T> {
     ///
     /// If _any_ new peer has the same public key as an existing peer, no new peers are added
     /// and this function returns `false`. See also [`Self::add_or_update_peers`].
-    pub async fn add_peers(
-        &self,
-        peers: impl IntoIterator<Item = PeerBuilder>,
-    ) -> Result<bool, Error> {
+    pub async fn add_peers(&self, peers: impl IntoIterator<Item = Peer>) -> Result<bool, Error> {
         self.configure(async |device| device.add_peers(peers)).await
     }
 
@@ -491,7 +485,7 @@ impl<T: DeviceTransports> Device<T> {
     ///
     /// If a peer with the same public key already exists, it will be updated.
     /// Otherwise, a new peer is added.
-    pub async fn add_or_update_peer(&self, peer: PeerBuilder) -> Result<(), Error> {
+    pub async fn add_or_update_peer(&self, peer: Peer) -> Result<(), Error> {
         self.configure(async |device| device.add_or_update_peer(peer).await)
             .await
     }
@@ -499,7 +493,7 @@ impl<T: DeviceTransports> Device<T> {
     /// Add or update multiple peers.
     pub async fn add_or_update_peers(
         &mut self,
-        peers: impl IntoIterator<Item = PeerBuilder>,
+        peers: impl IntoIterator<Item = Peer>,
     ) -> Result<(), Error> {
         self.configure(async |device| device.add_or_update_peers(peers).await)
             .await
@@ -509,7 +503,7 @@ impl<T: DeviceTransports> Device<T> {
     ///
     /// All fields of the peer will be overwritten. Returns `false` if no peer with this public key
     /// exists. See also [`Self::add_or_update_peer`] and [`Self::modify_peer`].
-    pub async fn update_peer(&self, peer: PeerBuilder) -> Result<bool, Error> {
+    pub async fn update_peer(&self, peer: Peer) -> Result<bool, Error> {
         self.configure(async |device| device.update_peer(peer).await)
             .await
     }
