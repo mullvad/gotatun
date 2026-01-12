@@ -1,7 +1,7 @@
 use clap::{Arg, Command};
 use daemonize::Daemonize;
 use eyre::Context;
-use gotatun::device::api::ApiServer;
+use gotatun::device::uapi::UapiServer;
 use gotatun::device::{DefaultDeviceTransports, Device, DeviceBuilder};
 use std::fs::File;
 use std::os::unix::net::UnixDatagram;
@@ -153,7 +153,7 @@ async fn start(
 ) -> eyre::Result<Device<DefaultDeviceTransports>> {
     let (socket_uid, socket_gid) = drop_privileges::get_saved_ids()?;
 
-    let uapi = ApiServer::default_unix_socket(tun_name, Some(socket_uid), Some(socket_gid))
+    let uapi = UapiServer::default_unix_socket(tun_name, Some(socket_uid), Some(socket_gid))
         .context("Failed to create UAPI unix socket")?;
 
     let device: Device<_> = DeviceBuilder::new()

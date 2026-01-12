@@ -5,6 +5,31 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! Userspace API.
+//!
+//! This is the implementation of the official WireGuard
+//! [configuration protocol].
+//!
+//! The most common use-case is probably to create a unix socket with
+//! [`UapiServer::default_unix_socket`] and pass it to [`DeviceBuilder::with_uapi`]:
+//!
+//! ```no_run
+//! use gotatun::device::{self, uapi::UapiServer};
+//!
+//! let uapi = UapiServer::default_unix_socket("my-gotatun", None, None)
+//!     .expect("Failed to create unix socket");
+//!
+//! let device = device::build()
+//!     .with_uapi(uapi)
+//! #   .with_default_udp()
+//! #   .create_tun("tun").unwrap()
+//!     /* .with_xyz(..) */
+//!     .build();
+//! ```
+//!
+//! [configuration protocol]: https://www.wireguard.com/xplatform/#configuration-protocol
+//! [`DeviceBuilder::with_uapi`]: crate::device::builder::DeviceBuilder::with_uapi
+
 pub mod command;
 
 use super::peer_state::AllowedIP;
@@ -31,21 +56,21 @@ const SOCK_DIR: &str = "/var/run/wireguard/";
 /// A server that receives [`Request`]s. Should be passed to [`DeviceBuilder::with_uapi`].
 ///
 /// [`DeviceBuilder::with_uapi`]: crate::device::builder::DeviceBuilder::with_uapi
-pub struct ApiServer {
+pub struct UapiServer {
     rx: mpsc::Receiver<(Request, oneshot::Sender<Response>)>,
 }
 
 /// An API client to a gotatun [`Device`].
 ///
-/// Use [`ApiClient::send`] or [`ApiClient::send_sync`] to configure the [`Device`] by adding peers, etc.
+/// Use [`UapiClient::send`] or [`UapiClient::send_sync`] to configure the [`Device`] by adding peers, etc.
 ///
 /// [`Device`]: crate::device::Device
 #[derive(Clone)]
-pub struct ApiClient {
+pub struct UapiClient {
     tx: mpsc::Sender<(Request, oneshot::Sender<Response>)>,
 }
 
-impl ApiClient {
+impl UapiClient {
     pub async fn send(&self, request: impl Into<Request>) -> eyre::Result<Response> {
         let request = request.into();
         log::trace!("Handling API request: {request:?}");
@@ -74,7 +99,7 @@ impl ApiClient {
     }
 }
 
-impl ApiClient {
+impl UapiClient {
     /// Wrap a [Read] + [Write] and spawn a thread to convert between the textual configuration
     /// protocol and [Request]/[Response].
     ///
@@ -138,11 +163,11 @@ impl ApiClient {
     }
 }
 
-impl ApiServer {
-    pub fn new() -> (ApiClient, ApiServer) {
+impl UapiServer {
+    pub fn new() -> (UapiClient, UapiServer) {
         let (tx, rx) = mpsc::channel(100);
 
-        (ApiClient { tx }, ApiServer { rx })
+        (UapiClient { tx }, UapiServer { rx })
     }
 
     /// Spawn a unix socket at `/var/run/wireguard/<name>.sock`. This socket speaks the official
@@ -173,7 +198,7 @@ impl ApiServer {
             }
         }
 
-        let (tx, rx) = ApiServer::new();
+        let (tx, rx) = UapiServer::new();
 
         std::thread::spawn(move || {
             loop {
@@ -192,7 +217,7 @@ impl ApiServer {
         //self.cleanup_paths.push(path.clone());
     }
 
-    /// Create an [`ApiServer`] from a reader+writer that speaks the official
+    /// Create an [`UapiServer`] from a reader+writer that speaks the official
     /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
     pub fn from_read_write<RW>(rw: RW) -> Self
     where
@@ -212,9 +237,9 @@ impl ApiServer {
     }
 }
 
-impl Debug for ApiServer {
+impl Debug for UapiServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ApiServer").finish()
+        f.debug_tuple("UapiServer").finish()
     }
 }
 
@@ -235,7 +260,7 @@ fn create_sock_dir() -> eyre::Result<()> {
 }
 
 impl<T: DeviceTransports> DeviceState<T> {
-    pub(super) async fn handle_api(device: Weak<RwLock<Self>>, mut api: ApiServer) {
+    pub(super) async fn handle_api(device: Weak<RwLock<Self>>, mut api: UapiServer) {
         loop {
             let Some((request, respond)) = api.recv().await else {
                 // The remote side is closed
