@@ -18,6 +18,18 @@ pub struct Stats {
     pub last_handshake: Option<Duration>,
     pub rx_bytes: usize,
     pub tx_bytes: usize,
+    pub daita: Option<DaitaStats>,
+}
+
+#[derive(Debug)]
+pub struct DaitaStats {
+    pub tx_padding_bytes: usize,
+    /// Bytes of standalone padding packets transmitted for the previously added peer entry.
+    pub tx_padding_packet_bytes: usize,
+    /// Total extra bytes removed due to constant-size padding of data packets for the previously added peer entry.
+    pub rx_padding_bytes: usize,
+    /// Bytes of standalone padding packets received for the previously added peer entry.
+    pub rx_padding_packet_bytes: usize,
 }
 
 /// Read-only peer info
@@ -96,15 +108,27 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
         for (pubkey, peer) in self.device.peers.iter() {
             let p = peer.lock().await;
 
+            let daita = p.daita_settings().cloned();
+            let daita_stats = p.daita().map(|daita| {
+                let padding = daita.padding_overhead();
+                DaitaStats {
+                    tx_padding_bytes: padding.tx_padding_bytes,
+                    tx_padding_packet_bytes: padding
+                        .tx_padding_packet_bytes
+                        .load(std::sync::atomic::Ordering::SeqCst),
+                    rx_padding_bytes: padding.rx_padding_bytes,
+                    rx_padding_packet_bytes: padding.rx_padding_packet_bytes,
+                }
+            });
+
             let (_, tx_bytes, rx_bytes, ..) = p.tunnel.stats();
             let last_handshake = p.time_since_last_handshake();
             let stats = Stats {
                 tx_bytes,
                 rx_bytes,
                 last_handshake,
+                daita: daita_stats,
             };
-
-            let daita = p.daita_settings().cloned();
 
             peers.push(Peer {
                 public_key: *pubkey,
