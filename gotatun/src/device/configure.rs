@@ -170,28 +170,30 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
         self.device.clear_peers()
     }
 
-    pub fn add_peer(&mut self, peer: PeerBuilder) {
+    pub fn add_peer(&mut self, peer: PeerBuilder) -> bool {
         if self.device.peers.contains_key(&peer.public_key) {
-            return; // TODO: error? yes please
+            return false;
         }
         let index = self.device.next_index();
         self.device.add_peer(peer, index);
+        true
     }
 
-    pub fn add_peers(&mut self, peers: impl IntoIterator<Item = PeerBuilder>) {
+    pub fn add_peers(&mut self, peers: impl IntoIterator<Item = PeerBuilder>) -> bool {
         let peers: Vec<_> = peers.into_iter().collect();
 
         if peers
             .iter()
             .any(|peer| self.device.peers.contains_key(&peer.public_key))
         {
-            return; // TODO: error? yes please
+            return false;
         }
 
         for peer in peers {
             let index = self.device.next_index();
             self.device.add_peer(peer, index);
         }
+        true
     }
 
     pub async fn add_or_update_peer(&mut self, peer: PeerBuilder) {
@@ -390,14 +392,14 @@ impl<T: DeviceTransports> Device<T> {
         Ok(())
     }
 
-    pub async fn add_peer(&self, peer: PeerBuilder) -> Result<(), Error> {
+    pub async fn add_peer(&self, peer: PeerBuilder) -> Result<bool, Error> {
         self.configure(async |device| device.add_peer(peer)).await
     }
 
     pub async fn add_peers(
         &self,
         peers: impl IntoIterator<Item = PeerBuilder>,
-    ) -> Result<(), Error> {
+    ) -> Result<bool, Error> {
         self.configure(async |device| device.add_peers(peers)).await
     }
 
