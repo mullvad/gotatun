@@ -61,7 +61,7 @@ impl<D> AllowedIps<D> {
         self.ips.remove(network);
     }
 
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a D, IpNetwork)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&D, IpNetwork)> {
         self.ips.iter().map(|(ip_network, d)| {
             let ip_network = IpNetwork::new(ip_network.network_address(), ip_network.netmask())
                 .expect("cidr is valid length");
