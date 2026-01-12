@@ -373,6 +373,18 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
 }
 
 impl<T: DeviceTransports> Device<T> {
+    /// Read the configuration of a [`Device`] using a callback.
+    ///
+    /// The callback will have read-access to the device for the duration of the callback,
+    /// this makes it useful for reading multiple fields at the same time.
+    ///
+    /// # Example
+    /// ```
+    /// # let device: Device<_> = todo!();
+    /// let (port, peers) = device.get(async |device| {
+    ///     (device.listen_port(), device.peers())
+    /// }).await;
+    /// ```
     pub async fn get<X>(&self, f: impl AsyncFnOnce(&DeviceConfigurator<T>) -> X) -> X {
         let state = self.inner.read().await;
         let configurator = DeviceConfigurator { device: &state };
@@ -421,6 +433,7 @@ impl<T: DeviceTransports> Device<T> {
         Ok(t)
     }
 
+    /// Change the private key of the device.
     pub async fn set_private_key(&self, private_key: StaticSecret) -> Result<(), Error> {
         self.configure(async |device| {
             device.set_private_key(private_key).await;
@@ -428,15 +441,23 @@ impl<T: DeviceTransports> Device<T> {
         .await
     }
 
-    pub async fn clear_peers(&self) -> Result<(), Error> {
-        self.configure(async |device| device.clear_peers()).await?;
-        Ok(())
+    /// Remove all peers, returning the number of peers removed.
+    pub async fn clear_peers(&self) -> Result<usize, Error> {
+        self.configure(async |device| device.clear_peers()).await
     }
 
+    /// Add a single new peer to this [`Device`].
+    ///
+    /// Returns `false` if the [`Device`] already contains a peer with the same public key.
+    /// See also [`Self::add_or_update_peer`].
     pub async fn add_peer(&self, peer: PeerBuilder) -> Result<(), Error> {
         self.configure(async |device| device.add_peer(peer)).await
     }
 
+    /// Add multiple new peers to this [`Device`].
+    ///
+    /// If _any_ new peer has the same public key as an existing peer, no new peers are added
+    /// and this function returns `false`. See also [`Self::add_or_update_peers`].
     pub async fn add_peers(
         &self,
         peers: impl IntoIterator<Item = PeerBuilder>,
@@ -444,16 +465,44 @@ impl<T: DeviceTransports> Device<T> {
         self.configure(async |device| device.add_peers(peers)).await
     }
 
+    /// Add or update a peer.
+    ///
+    /// If a peer with the same public key already exists, it will be updated.
+    /// Otherwise, a new peer is added.
     pub async fn add_or_update_peer(&self, peer: PeerBuilder) -> Result<(), Error> {
         self.configure(async |device| device.add_or_update_peer(peer).await)
             .await
     }
 
+    /// Add or update multiple peers.
+    pub async fn add_or_update_peers(
+        &mut self,
+        peers: impl IntoIterator<Item = PeerBuilder>,
+    ) -> Result<(), Error> {
+        self.configure(async |device| device.add_or_update_peers(peers).await)
+            .await
+    }
+
+    /// Update a single peer in this [`Device`].
+    ///
+    /// All fields of the peer will be overwritten. Returns `false` if no peer with this public key
+    /// exists. See also [`Self::add_or_update_peer`] and [`Self::modify_peer`].
     pub async fn update_peer(&self, peer: PeerBuilder) -> Result<bool, Error> {
         self.configure(async |device| device.update_peer(peer).await)
             .await
     }
 
+    /// Update a single peer in this [`Device`].
+    ///
+    /// Takes a callback `f` which allows you to configure individual fields on this peer.
+    ///
+    /// ```
+    /// let device: Device<_>;
+    /// device.modify_peer(pubkey, |peer| {
+    ///     peer.set_endpoint(None);
+    ///     peer.set_keepalive(Some(123));
+    /// }).await?;
+    /// ```
     pub async fn modify_peer(
         &mut self,
         public_key: &PublicKey,
@@ -463,16 +512,23 @@ impl<T: DeviceTransports> Device<T> {
             .await
     }
 
+    /// Remove a single peer from this [`Device`].
+    ///
+    /// Returns `false` if no peer with `public_key` exists.
     pub async fn remove_peer(&self, public_key: &PublicKey) -> Result<bool, Error> {
         self.configure(async |device| device.remove_peer(public_key).await)
             .await
     }
 
+    /// Change the listen port of the UDP socket of this [`Device`].
     pub async fn set_listen_port(&self, port: u16) -> Result<(), Error> {
         self.configure(async |device| device.set_listen_port(port))
             .await
     }
 
+    /// Set the fwmark of the UDP socket of this [`Device`].
+    ///
+    /// `set_fwmark(0)` will effectively unset it.
     #[cfg(target_os = "linux")]
     pub async fn set_fwmark(&self, mark: u32) -> Result<(), Error> {
         self.configure(async |device| device.set_fwmark(mark))
