@@ -5,7 +5,7 @@ use super::types::{Action, BlockingState, ErrorAction, PacketCount, PaddingHeade
 use crate::{
     device::{
         daita::types::{BlockingWatcher, IgnoreReason},
-        peer::Peer,
+        peer_state::PeerState,
     },
     packet::{self, Packet, WgData},
     tun::MtuWatcher,
@@ -39,7 +39,7 @@ where
     packet_count: Arc<PacketCount>,
     blocking_queue_rx: mpsc::Receiver<Packet<WgData>>,
     blocking_watcher: BlockingWatcher,
-    peer: Weak<Mutex<Peer>>,
+    peer: Weak<Mutex<PeerState>>,
     packet_pool: packet::PacketBufPool,
     udp_send_v4: US,
     udp_send_v6: US,
@@ -221,7 +221,7 @@ where
 
     pub(crate) fn encapsulate_padding(
         &self,
-        peer: &mut tokio::sync::OwnedMutexGuard<Peer>,
+        peer: &mut tokio::sync::OwnedMutexGuard<PeerState>,
         mtu: u16,
     ) -> Result<Packet<WgData>> {
         self.tx_padding_packet_bytes
@@ -255,7 +255,7 @@ where
     pub(crate) async fn send(
         &self,
         packet: Packet<WgData>,
-        peer: tokio::sync::OwnedMutexGuard<Peer>,
+        peer: tokio::sync::OwnedMutexGuard<PeerState>,
     ) -> Result<()> {
         let endpoint_addr = peer.endpoint().addr;
         let Some(addr) = endpoint_addr else {
@@ -277,7 +277,7 @@ where
         Ok(())
     }
 
-    pub(crate) async fn get_peer(&self) -> Result<tokio::sync::OwnedMutexGuard<Peer>> {
+    pub(crate) async fn get_peer(&self) -> Result<tokio::sync::OwnedMutexGuard<PeerState>> {
         let Some(peer) = self.peer.upgrade() else {
             return Err(ErrorAction::Close);
         };
