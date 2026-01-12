@@ -20,7 +20,7 @@ mod types;
 use std::str::FromStr;
 
 pub use hooks::DaitaHooks;
-use maybenot::Machine;
+pub use maybenot::Machine;
 
 pub mod api {
     #[derive(Debug, Clone)]
