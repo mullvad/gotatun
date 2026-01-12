@@ -17,6 +17,7 @@ mod peer;
 mod peer_state;
 mod transports;
 
+use builder::Nul;
 use ipnetwork::IpNetwork;
 use std::collections::HashMap;
 use std::io::{self};
@@ -83,6 +84,10 @@ pub enum Error {
 #[derive(Clone)]
 pub struct Device<T: DeviceTransports> {
     inner: Arc<RwLock<DeviceState<T>>>,
+}
+
+pub fn build() -> DeviceBuilder<Nul, Nul, Nul> {
+    DeviceBuilder::new()
 }
 
 pub(crate) struct DeviceState<T: DeviceTransports> {
