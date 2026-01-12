@@ -160,13 +160,18 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
 
 impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, TunTx, TunRx> {
     pub async fn build(self) -> Result<Device<(Udp, TunTx, TunRx)>, Error> {
+        #[cfg(target_os = "linux")]
+        let fwmark = self.fwmark;
+        #[cfg(not(target_os = "linux"))]
+        let fwmark = None;
+
         let mut state = DeviceState {
             api: None,
             udp_factory: self.udp,
             tun_tx: Arc::new(Mutex::new(self.tun_tx)),
             tun_rx_mtu: self.tun_rx.mtu(),
             tun_rx: Arc::new(Mutex::new(self.tun_rx)),
-            fwmark: self.fwmark,
+            fwmark,
             key_pair: Default::default(),
             next_index: Default::default(),
             peers: Default::default(),
