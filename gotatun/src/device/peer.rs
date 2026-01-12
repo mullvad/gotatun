@@ -5,6 +5,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+use ipnetwork::IpNetwork;
 use parking_lot::RwLock;
 use tokio::sync::Mutex;
 
@@ -31,7 +32,7 @@ pub struct Peer {
     /// The index the tunnel uses
     index: u32,
     endpoint: RwLock<Endpoint>,
-    allowed_ips: AllowedIps<()>,
+    pub(crate) allowed_ips: AllowedIps<()>,
     preshared_key: Option<[u8; 32]>,
 
     daita_settings: Option<DaitaSettings>,
@@ -67,7 +68,7 @@ impl Peer {
         tunnel: Tunn,
         index: u32,
         endpoint: Option<SocketAddr>,
-        allowed_ips: &[AllowedIP],
+        allowed_ips: &[IpNetwork],
         preshared_key: Option<[u8; 32]>,
         daita_settings: Option<DaitaSettings>,
     ) -> Peer {
@@ -131,8 +132,8 @@ impl Peer {
         self.allowed_ips.find(addr.into()).is_some()
     }
 
-    pub fn allowed_ips(&self) -> impl Iterator<Item = (IpAddr, u8)> + '_ {
-        self.allowed_ips.iter().map(|((), ip, cidr)| (ip, cidr))
+    pub fn allowed_ips(&self) -> impl Iterator<Item = IpNetwork> + '_ {
+        self.allowed_ips.iter().map(|((), network)| network)
     }
 
     pub fn time_since_last_handshake(&self) -> Option<std::time::Duration> {
