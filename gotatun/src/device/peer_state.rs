@@ -153,10 +153,6 @@ impl PeerState {
         self.tunnel.persistent_keepalive()
     }
 
-    pub fn preshared_key(&self) -> Option<&[u8; 32]> {
-        self.preshared_key.as_ref()
-    }
-
     pub fn index(&self) -> u32 {
         self.index
     }
