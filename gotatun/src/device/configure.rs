@@ -246,7 +246,7 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
     }
 
     /// Return a read-only "configurator"
-    fn as_configurator(&self) -> DeviceConfigurator<T> {
+    fn as_configurator(&self) -> DeviceConfigurator<'_, T> {
         DeviceConfigurator { device: self.device }
     }
 }
