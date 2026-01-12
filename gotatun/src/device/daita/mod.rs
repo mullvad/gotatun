@@ -1,9 +1,7 @@
 // Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! # NOTES
-//!
-//! This module is an implementation of DAITA version 3 for GotaTun.
+//! Implementation of DAITA for GotaTun.
 //!
 //! DAITA (Defense Against AI-guided Traffic Analysis) is MullvadVPN's implementation of
 //! an anti-fingerprinting protocol based on the [maybenot] crate.
