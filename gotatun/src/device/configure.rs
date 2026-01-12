@@ -247,13 +247,18 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
     /// Takes a callback `f` which allows you to configure individual fields on this peer.
     ///
     /// ```
-    /// let device: Device<_>;
-    /// device.configure(|device| {
-    ///     device.modify_peer(pubkey, |peer| {
+    /// use gotatun::device::Device;
+    /// # async {
+    /// # let device: Device<gotatun::device::DefaultDeviceTransports> = todo!();
+    /// # let peer = todo!();
+    /// # let public_key = todo!();
+    /// device.configure(async |device| {
+    ///     device.modify_peer(public_key, |peer| {
     ///         peer.set_endpoint(None);
     ///         peer.set_keepalive(Some(123));
     ///     });
-    /// }).await?;
+    /// }).await.unwrap();
+    /// # };
     /// ```
     pub async fn modify_peer(
         &mut self,
