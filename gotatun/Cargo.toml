@@ -78,6 +78,7 @@ windows-sys = { version = ">=0.59, <=0.61", features = [
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.30", default-features = false, features = [
+    "fs",
     "time",
     "user",
     "socket",
