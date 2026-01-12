@@ -145,13 +145,19 @@ impl ApiServer {
 
     /// Spawn a unix socket at `/var/run/wireguard/<name>.sock`. This socket speaks the official
     /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
+    ///
+    /// Optionally, set the owner of the socket using `uid` and `gid`.
     #[cfg(unix)]
-    pub fn default_unix_socket(name: &str) -> eyre::Result<Self> {
+    pub fn default_unix_socket(
+        name: &str,
+        uid: Option<Uid>,
+        gid: Option<Gid>,
+    ) -> eyre::Result<Self> {
         use std::os::unix::net::UnixListener;
 
         let path = format!("{SOCK_DIR}/{name}.sock");
 
-        create_sock_dir();
+        create_sock_dir(uid, gid);
 
         let _ = std::fs::remove_file(&path); // Attempt to remove the socket if already exists
 
@@ -205,17 +211,13 @@ impl Debug for ApiServer {
 }
 
 #[cfg(unix)]
-fn create_sock_dir() {
-    use super::drop_privileges::get_saved_ids;
-
+fn create_sock_dir(uid: Option<Uid>, gid: Option<Gid>) {
     let _ = std::fs::create_dir(SOCK_DIR); // Create the directory if it does not exist
 
-    if let Ok((saved_uid, saved_gid)) = get_saved_ids() {
-        // The directory is under the root user, but we want to be able to
-        // delete the files there when we exit, so we need to change the owner
-        if let Err(err) = nix::unistd::chown(SOCK_DIR, Some(saved_uid), Some(saved_gid)) {
-            log::warn!("Failed to change owner of socket directory: {err}");
-        }
+    // The directory is under the root user, but we want to be able to
+    // delete the files there when we exit, so we need to change the owner
+    if let Err(err) = nix::unistd::chown(SOCK_DIR, uid, gid) {
+        log::warn!("Failed to change owner of socket directory: {err}");
     }
 }
 
