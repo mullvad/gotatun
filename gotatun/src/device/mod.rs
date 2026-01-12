@@ -12,7 +12,7 @@ pub mod configure;
 pub mod daita;
 #[cfg(test)]
 mod integration_tests;
-pub mod peer;
+mod peer;
 mod transports;
 
 use ipnetwork::IpNetwork;
