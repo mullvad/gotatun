@@ -159,7 +159,7 @@ impl ApiServer {
 
         let path = format!("{SOCK_DIR}/{name}.sock");
 
-        create_sock_dir(uid, gid);
+        create_sock_dir(uid, gid)?;
 
         let _ = std::fs::remove_file(&path); // Attempt to remove the socket if already exists
 
@@ -213,14 +213,26 @@ impl Debug for ApiServer {
 }
 
 #[cfg(unix)]
-fn create_sock_dir(uid: Option<Uid>, gid: Option<Gid>) {
-    let _ = std::fs::create_dir(SOCK_DIR); // Create the directory if it does not exist
+fn create_sock_dir(uid: Option<Uid>, gid: Option<Gid>) -> eyre::Result<()> {
+    match std::fs::create_dir(SOCK_DIR) {
+        Ok(_) => {
+            log::info!("Created socket directory at {SOCK_DIR}");
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            // Directory already exists, which is fine
+        }
+        Err(e) => {
+            bail!("Failed to create socket directory {SOCK_DIR}: {e}");
+        }
+    }
 
     // The directory is under the root user, but we want to be able to
     // delete the files there when we exit, so we need to change the owner
     if let Err(err) = nix::unistd::chown(SOCK_DIR, uid, gid) {
         log::warn!("Failed to change owner of socket directory: {err}");
     }
+
+    Ok(())
 }
 
 impl<T: DeviceTransports> DeviceState<T> {
