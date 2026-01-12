@@ -13,6 +13,7 @@ pub mod configure;
 pub mod daita;
 #[cfg(test)]
 mod integration_tests;
+mod peer;
 mod peer_state;
 mod transports;
 
@@ -27,7 +28,6 @@ use tokio::join;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
-use crate::device::peer_state::builder::PeerBuilder;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
@@ -45,6 +45,7 @@ use rand_core::{OsRng, RngCore};
 
 pub use crate::device::transports::{DefaultDeviceTransports, DeviceTransports};
 pub use builder::DeviceBuilder;
+pub use peer::Peer;
 
 /// The number of handshakes per second to tolerate before using cookies
 const HANDSHAKE_RATE_LIMIT: u64 = 100;
@@ -388,7 +389,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                 .collect()
         };
 
-        let peer_builder = PeerBuilder {
+        let peer_builder = Peer {
             public_key,
             endpoint,
             allowed_ips,
@@ -403,7 +404,7 @@ impl<T: DeviceTransports> DeviceState<T> {
         self.add_peer(peer_builder, index);
     }
 
-    fn add_peer(&mut self, peer_builder: PeerBuilder, index: u32) {
+    fn add_peer(&mut self, peer_builder: Peer, index: u32) {
         let pub_key = peer_builder.public_key;
         let allowed_ips = peer_builder.allowed_ips.clone();
         let peer = self.create_peer(peer_builder, index);
@@ -421,7 +422,7 @@ impl<T: DeviceTransports> DeviceState<T> {
         log::info!("Peer added");
     }
 
-    fn create_peer(&mut self, peer_builder: PeerBuilder, index: u32) -> PeerState {
+    fn create_peer(&mut self, peer_builder: Peer, index: u32) -> PeerState {
         // Update an existing peer or add peer
         let device_key_pair = self
             .key_pair

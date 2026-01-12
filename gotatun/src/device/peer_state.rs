@@ -5,8 +5,6 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-pub mod builder;
-
 use ipnetwork::IpNetwork;
 
 use std::net::{IpAddr, SocketAddr};
