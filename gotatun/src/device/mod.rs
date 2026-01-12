@@ -9,6 +9,7 @@ pub(crate) mod allowed_ips;
 pub mod api;
 mod builder;
 pub mod configure;
+#[cfg(feature = "daita")]
 pub mod daita;
 #[cfg(test)]
 mod integration_tests;
@@ -26,7 +27,6 @@ use tokio::join;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
-use crate::device::daita::DaitaSettings;
 use crate::device::peer::builder::PeerBuilder;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
@@ -72,7 +72,8 @@ pub enum Error {
     OpenTun(#[source] tun::Error),
 
     #[error("Failed to initialize DAITA hooks")]
-    DaitaHooks(#[from] maybenot::Error),
+    #[cfg(feature = "daita")]
+    DaitaHooks(#[from] daita::Error),
 }
 
 /// A reference-counted handle to a WireGuard device.
@@ -96,6 +97,7 @@ pub(crate) struct DeviceState<T: DeviceTransports> {
     /// stopped.
     tun_rx: Arc<Mutex<T::IpRecv>>,
 
+    #[cfg_attr(not(feature = "daita"), expect(dead_code))]
     /// MTU watcher of the TUN device.
     tun_rx_mtu: MtuWatcher,
 
@@ -162,6 +164,7 @@ impl<T: DeviceTransports> Connection<T> {
         >(MAX_PACKET_BUFS, udp6_rx, pool.clone());
 
         // Start DAITA/hooks tasks
+        #[cfg(feature = "daita")]
         for peer_arc in device_guard.peers.values() {
             Peer::maybe_start_daita(
                 peer_arc,
@@ -292,7 +295,8 @@ struct PeerUpdateRequest {
     new_allowed_ips: Vec<IpNetwork>,
     keepalive: Option<u16>,
     preshared_key: Option<[u8; 32]>,
-    daita_settings: Option<DaitaSettings>,
+    #[cfg(feature = "daita")]
+    daita_settings: Option<daita::DaitaSettings>,
 }
 
 impl<T: DeviceTransports> DeviceState<T> {
@@ -328,6 +332,7 @@ impl<T: DeviceTransports> DeviceState<T> {
             new_allowed_ips,
             keepalive,
             preshared_key,
+            #[cfg(feature = "daita")]
             daita_settings,
         } = update_peer;
         if remove {
@@ -336,32 +341,42 @@ impl<T: DeviceTransports> DeviceState<T> {
             return;
         }
 
-        let (index, old_allowed_ips, old_daita_settings) = match self.remove_peer(&public_key).await
-        {
-            None => (self.next_index(), vec![], None),
-            Some(old_peer) => {
-                // TODO: Update existing peer?
-                let peer = old_peer.lock().await;
-                let index = peer.index();
-                let old_allowed_ips = peer.allowed_ips().collect();
-                let old_daita_settings = peer.daita_settings().cloned();
+        let (index, old_allowed_ips, _old_daita_settings) =
+            match self.remove_peer(&public_key).await {
+                None => {
+                    #[cfg(feature = "daita")]
+                    let old_daita_settings = None;
+                    #[cfg(not(feature = "daita"))]
+                    let old_daita_settings = ();
 
-                drop(peer);
+                    (self.next_index(), vec![], old_daita_settings)
+                }
+                Some(old_peer) => {
+                    // TODO: Update existing peer?
+                    let peer = old_peer.lock().await;
+                    let index = peer.index();
+                    let old_allowed_ips: Vec<IpNetwork> = peer.allowed_ips().collect();
+                    #[cfg(feature = "daita")]
+                    let old_daita_settings = peer.daita_settings().cloned();
+                    #[cfg(not(feature = "daita"))]
+                    let old_daita_settings = ();
 
-                // TODO: Match pubkey instead of index
-                let mut remove_list = vec![];
-                for (peer, ip_network) in self.peers_by_ip.iter() {
-                    if peer.lock().await.index() == index {
-                        remove_list.push(ip_network);
+                    drop(peer);
+
+                    // TODO: Match pubkey instead of index
+                    let mut remove_list = vec![];
+                    for (peer, ip_network) in self.peers_by_ip.iter() {
+                        if peer.lock().await.index() == index {
+                            remove_list.push(ip_network);
+                        }
                     }
-                }
-                for network in remove_list {
-                    self.peers_by_ip.remove_network(network);
-                }
+                    for network in remove_list {
+                        self.peers_by_ip.remove_network(network);
+                    }
 
-                (index, old_allowed_ips, old_daita_settings)
-            }
-        };
+                    (index, old_allowed_ips, old_daita_settings)
+                }
+            };
 
         let allowed_ips: Vec<IpNetwork> = if replace_allowed_ips {
             new_allowed_ips.to_vec()
@@ -381,7 +396,8 @@ impl<T: DeviceTransports> DeviceState<T> {
             preshared_key,
 
             // TODO: how to remove daita?
-            daita_settings: daita_settings.or(old_daita_settings),
+            #[cfg(feature = "daita")]
+            daita_settings: daita_settings.or(_old_daita_settings),
         };
 
         self.add_peer(peer_builder, index);
@@ -432,6 +448,7 @@ impl<T: DeviceTransports> DeviceState<T> {
             peer_builder.endpoint,
             peer_builder.allowed_ips.as_slice(),
             peer_builder.preshared_key,
+            #[cfg(feature = "daita")]
             peer_builder.daita_settings,
         )
     }
@@ -631,8 +648,12 @@ impl<T: DeviceTransports> DeviceState<T> {
             let Some(peer) = peer else { continue };
             let mut peer = peer.lock().await;
 
+            #[cfg(feature = "daita")]
             let Peer { tunnel, daita, .. } = &mut *peer;
+            #[cfg(not(feature = "daita"))]
+            let Peer { tunnel, .. } = &mut *peer;
 
+            #[cfg(feature = "daita")]
             if let Some(daita) = daita
                 && let WgKind::Data(packet) = &parsed_packet
             {
@@ -646,9 +667,16 @@ impl<T: DeviceTransports> DeviceState<T> {
                 TunnResult::WriteToNetwork(packet) => {
                     let not_blocked_packets = std::iter::once(packet)
                         .chain(std::iter::from_fn(|| tunnel.next_queued_packet()))
-                        .filter_map(|p| match daita {
-                            Some(daita) => daita.after_data_encapsulate(p),
-                            None => Some(p),
+                        .filter_map(|p| {
+                            #[cfg(feature = "daita")]
+                            {
+                                match daita {
+                                    Some(daita) => daita.after_data_encapsulate(p),
+                                    None => Some(p),
+                                }
+                            }
+                            #[cfg(not(feature = "daita"))]
+                            Some(p)
                         });
 
                     for packet in not_blocked_packets {
@@ -658,7 +686,9 @@ impl<T: DeviceTransports> DeviceState<T> {
                         }
                     }
                 }
+                #[cfg_attr(not(feature = "daita"), expect(unused_mut))]
                 TunnResult::WriteToTunnel(mut packet) => {
+                    #[cfg(feature = "daita")]
                     if let Some(daita) = daita {
                         match daita.after_data_decapsulate(packet) {
                             Some(new) => packet = new,
@@ -743,17 +773,24 @@ impl<T: DeviceTransports> DeviceState<T> {
                     continue;
                 };
 
+                #[cfg(feature = "daita")]
                 let Peer { tunnel, daita, .. } = &mut *peer;
+                #[cfg(not(feature = "daita"))]
+                let Peer { tunnel, .. } = &mut *peer;
 
+                #[cfg(feature = "daita")]
                 let packet = match daita {
                     Some(daita) => daita.before_data_encapsulate(packet),
                     None => packet.into(),
                 };
+                #[cfg(not(feature = "daita"))]
+                let packet = packet.into();
 
                 let Some(packet) = tunnel.handle_outgoing_packet(packet) else {
                     continue;
                 };
 
+                #[cfg(feature = "daita")]
                 let packet = match daita {
                     None => packet.into(),
                     Some(daita) => match daita.after_data_encapsulate(packet) {
@@ -761,6 +798,8 @@ impl<T: DeviceTransports> DeviceState<T> {
                         None => continue,
                     },
                 };
+                #[cfg(not(feature = "daita"))]
+                let packet = packet.into();
 
                 drop(peer); // release lock
 

@@ -4,6 +4,7 @@ use ipnetwork::IpNetwork;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::device::Error;
+#[cfg(feature = "daita")]
 use crate::device::daita::DaitaSettings;
 use crate::device::{
     Connection, Device, DeviceState, DeviceTransports, Reconfigure, peer::builder::PeerBuilder,
@@ -18,9 +19,11 @@ pub struct Stats {
     pub last_handshake: Option<Duration>,
     pub rx_bytes: usize,
     pub tx_bytes: usize,
+    #[cfg(feature = "daita")]
     pub daita: Option<DaitaStats>,
 }
 
+#[cfg(feature = "daita")]
 #[derive(Debug)]
 pub struct DaitaStats {
     pub tx_padding_bytes: usize,
@@ -41,6 +44,7 @@ pub struct Peer {
     pub endpoint: Option<SocketAddr>,
     pub persistent_keepalive: Option<u16>,
     pub allowed_ips: Vec<IpNetwork>,
+    #[cfg(feature = "daita")]
     pub daita: Option<DaitaSettings>,
     pub stats: Stats,
 }
@@ -125,7 +129,9 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
         for (pubkey, peer) in self.device.peers.iter() {
             let p = peer.lock().await;
 
+            #[cfg(feature = "daita")]
             let daita = p.daita_settings().cloned();
+            #[cfg(feature = "daita")]
             let daita_stats = p.daita().map(|daita| {
                 let padding = daita.padding_overhead();
                 DaitaStats {
@@ -144,6 +150,7 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
                 tx_bytes,
                 rx_bytes,
                 last_handshake,
+                #[cfg(feature = "daita")]
                 daita: daita_stats,
             };
 
@@ -153,6 +160,7 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
                 allowed_ips: p.allowed_ips.iter().map(|(_, net)| net).collect(),
                 endpoint: p.endpoint.addr,
                 persistent_keepalive: p.tunnel.persistent_keepalive(),
+                #[cfg(feature = "daita")]
                 daita,
                 stats,
             });
