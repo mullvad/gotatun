@@ -176,12 +176,13 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
     ///
     /// Returns `false` if the [`Device`] already contains a peer with the same public key.
     /// See also [`Self::add_or_update_peer`].
-    pub fn add_peer(&mut self, peer: PeerBuilder) {
+    pub fn add_peer(&mut self, peer: PeerBuilder) -> bool {
         if self.device.peers.contains_key(&peer.public_key) {
-            return; // TODO: error? yes please
+            return false;
         }
         let index = self.device.next_index();
         self.device.add_peer(peer, index);
+        true
     }
 
     /// Add multiple new peers to this [`Device`].
@@ -450,7 +451,7 @@ impl<T: DeviceTransports> Device<T> {
     ///
     /// Returns `false` if the [`Device`] already contains a peer with the same public key.
     /// See also [`Self::add_or_update_peer`].
-    pub async fn add_peer(&self, peer: PeerBuilder) -> Result<(), Error> {
+    pub async fn add_peer(&self, peer: PeerBuilder) -> Result<bool, Error> {
         self.configure(async |device| device.add_peer(peer)).await
     }
 
