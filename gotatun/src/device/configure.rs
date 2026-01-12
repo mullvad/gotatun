@@ -39,7 +39,7 @@ pub struct Peer {
     pub public_key: PublicKey,
     pub preshared_key: Option<[u8; 32]>,
     pub endpoint: Option<SocketAddr>,
-    pub keepalive: Option<u16>,
+    pub persistent_keepalive: Option<u16>,
     pub allowed_ips: Vec<IpNetwork>,
     pub daita: Option<DaitaSettings>,
     pub stats: Stats,
@@ -135,7 +135,7 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
                 preshared_key: p.preshared_key,
                 allowed_ips: p.allowed_ips.iter().map(|(_, net)| net).collect(),
                 endpoint: p.endpoint.addr,
-                keepalive: p.tunnel.persistent_keepalive(),
+                persistent_keepalive: p.tunnel.persistent_keepalive(),
                 daita,
                 stats,
             });
