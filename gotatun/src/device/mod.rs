@@ -305,7 +305,7 @@ impl BitOrAssign for Reconfigure {
     }
 }
 
-pub struct PeerUpdateRequest {
+struct PeerUpdateRequest {
     public_key: x25519::PublicKey,
     remove: bool,
     replace_allowed_ips: bool,
