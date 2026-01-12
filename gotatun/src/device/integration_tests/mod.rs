@@ -9,7 +9,7 @@
 // Those tests require docker and sudo privileges to run
 #[cfg(all(test, not(target_os = "macos"), not(target_os = "windows")))]
 mod tests {
-    use crate::device::{DefaultDeviceTransports, Device, DeviceConfig};
+    use crate::device::{DefaultDeviceTransports, Device, DeviceBuilder};
     use crate::udp::socket::UdpSocketFactory;
     use crate::x25519::{PublicKey, StaticSecret};
     use base64::encode as base64encode;
@@ -264,23 +264,27 @@ mod tests {
         async fn init(addr_v4: IpAddr, addr_v6: IpAddr) -> WGHandle {
             // Generate a new name, utun100+ should work on macOS and Linux
             let tun_name = format!("utun{}", NEXT_IFACE_IDX.fetch_add(1, Ordering::Relaxed));
-            let config = DeviceConfig {
-                #[cfg(target_os = "linux")]
-                api: Some(crate::device::api::ApiServer::default_unix_socket(&tun_name).unwrap()),
-            };
-            WGHandle::init_with_config(addr_v4, addr_v6, config, tun_name).await
+
+            let uapi = Some(crate::device::api::ApiServer::default_unix_socket(&tun_name).unwrap());
+            WGHandle::init_with_config(addr_v4, addr_v6, uapi, tun_name).await
         }
 
         /// Create a new interface for the tunnel with the given address
         async fn init_with_config(
             addr_v4: IpAddr,
             addr_v6: IpAddr,
-            config: DeviceConfig,
+            uapi: Option<crate::device::api::ApiServer>,
             tun_name: String,
         ) -> WGHandle {
-            let _device = Device::from_tun_name(UdpSocketFactory, &tun_name, config)
-                .await
-                .unwrap();
+            let mut device_builder = DeviceBuilder::new()
+                .create_tun(&tun_name)
+                .unwrap()
+                .with_udp(UdpSocketFactory);
+            if let Some(uapi) = uapi {
+                device_builder = device_builder.with_uapi(uapi);
+            }
+            let _device = device_builder.build().await.unwrap();
+
             WGHandle {
                 _device,
                 name: tun_name,
