@@ -24,6 +24,7 @@ pub struct DeviceBuilder<Udp, TunTx, TunRx> {
     udp: Udp,
     tun_tx: TunTx,
     tun_rx: TunRx,
+    port: u16,
     uapi: Option<ApiServer>,
 
     // TODO: consider turning this into a typestate, and adding a special case for single peer
@@ -37,6 +38,7 @@ impl DeviceBuilder<Nul, Nul, Nul> {
             tun_tx: Nul,
             tun_rx: Nul,
             uapi: None,
+            port: 0,
             peers: Vec::new(),
         }
     }
@@ -53,6 +55,7 @@ impl<X, Y> DeviceBuilder<Nul, X, Y> {
             tun_tx: self.tun_tx,
             tun_rx: self.tun_rx,
             uapi: self.uapi,
+            port: self.port,
             peers: self.peers,
         }
     }
@@ -106,6 +109,7 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
             tun_tx: ip_tx,
             tun_rx: ip_rx,
             uapi: self.uapi,
+            port: self.port,
             peers: self.peers,
         }
     }
@@ -119,6 +123,11 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
 
     pub fn with_peer(mut self, peer: PeerBuilder) -> Self {
         self.peers.push(peer);
+        self
+    }
+
+    pub fn with_listen_port(mut self, port: u16) -> Self {
+        self.port = port;
         self
     }
 }
@@ -138,7 +147,7 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             peers_by_idx: Default::default(),
             peers_by_ip: AllowedIps::new(),
             rate_limiter: None,
-            port: 0,
+            port: self.port,
             connection: None,
         };
 
