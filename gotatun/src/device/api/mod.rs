@@ -159,13 +159,19 @@ impl ApiServer {
 
         let path = format!("{SOCK_DIR}/{name}.sock");
 
-        create_sock_dir(uid, gid)?;
+        create_sock_dir()?;
 
         let _ = std::fs::remove_file(&path); // Attempt to remove the socket if already exists
 
         // Bind a new socket to the path
         let api_listener =
             UnixListener::bind(&path).map_err(|e| eyre!("Failed to bidd unix socket: {e}"))?;
+
+        if uid.is_some() || gid.is_some() {
+            if let Err(err) = nix::unistd::chown(std::path::Path::new(&path), uid, gid) {
+                log::warn!("Failed to change owner of UDS: {err}");
+            }
+        }
 
         let (tx, rx) = ApiServer::new();
 
@@ -213,7 +219,7 @@ impl Debug for ApiServer {
 }
 
 #[cfg(unix)]
-fn create_sock_dir(uid: Option<Uid>, gid: Option<Gid>) -> eyre::Result<()> {
+fn create_sock_dir() -> eyre::Result<()> {
     match std::fs::create_dir(SOCK_DIR) {
         Ok(_) => {
             log::info!("Created socket directory at {SOCK_DIR}");
@@ -225,13 +231,6 @@ fn create_sock_dir(uid: Option<Uid>, gid: Option<Gid>) -> eyre::Result<()> {
             bail!("Failed to create socket directory {SOCK_DIR}: {e}");
         }
     }
-
-    // The directory is under the root user, but we want to be able to
-    // delete the files there when we exit, so we need to change the owner
-    if let Err(err) = nix::unistd::chown(SOCK_DIR, uid, gid) {
-        log::warn!("Failed to change owner of socket directory: {err}");
-    }
-
     Ok(())
 }
 
