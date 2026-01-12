@@ -10,8 +10,6 @@ pub mod api;
 mod builder;
 pub mod configure;
 pub mod daita;
-#[cfg(unix)]
-pub mod drop_privileges;
 #[cfg(test)]
 mod integration_tests;
 pub mod peer;
