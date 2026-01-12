@@ -21,7 +21,7 @@ pub struct Peer {
     pub keepalive: Option<u16>,
 
     #[cfg(feature = "daita")]
-    pub(crate) daita_settings: Option<DaitaSettings>,
+    pub daita_settings: Option<DaitaSettings>,
 }
 
 impl Peer {
