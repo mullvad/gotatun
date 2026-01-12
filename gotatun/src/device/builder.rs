@@ -26,7 +26,7 @@ pub struct DeviceBuilder<Udp, TunTx, TunRx> {
     tun_rx: TunRx,
     uapi: Option<ApiServer>,
 
-    // TODO: consider turning this into a typestat, and adding a special case for single peer
+    // TODO: consider turning this into a typestate, and adding a special case for single peer
     peers: Vec<PeerBuilder>,
 }
 
