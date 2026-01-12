@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hide `daita` implementation behind feature gate.
 - Replace crate `ip_network` with the more popular `ipnetwork` in public API.
 - Don't change ownership of `/var/run/wireguard` when dropping privileges in the CLI.
+- Re-export `maybenot` crate.
 
 ### Fixed
 - Update daemonize to `0.5` in CLI to resolve deprecation warning.
