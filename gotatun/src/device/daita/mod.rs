@@ -7,10 +7,6 @@
 //!
 //! DAITA (Defense Against AI-guided Traffic Analysis) is MullvadVPN's implementation of
 //! an anti-fingerprinting protocol based on the [maybenot] crate.
-//!
-//! ## TODO
-//!
-//! - Support mocked time for tests (this is supported in other parts of GotaTun using `mock_instant` crate)
 
 mod actions;
 mod events;
