@@ -265,7 +265,10 @@ mod tests {
             // Generate a new name, utun100+ should work on macOS and Linux
             let tun_name = format!("utun{}", NEXT_IFACE_IDX.fetch_add(1, Ordering::Relaxed));
 
-            let uapi = Some(crate::device::api::ApiServer::default_unix_socket(&tun_name).unwrap());
+            let uapi = Some(
+                crate::device::uapi::UapiServer::default_unix_socket(&tun_name, None, None)
+                    .unwrap(),
+            );
             WGHandle::init_with_config(addr_v4, addr_v6, uapi, tun_name).await
         }
 
@@ -273,7 +276,7 @@ mod tests {
         async fn init_with_config(
             addr_v4: IpAddr,
             addr_v6: IpAddr,
-            uapi: Option<crate::device::api::ApiServer>,
+            uapi: Option<crate::device::uapi::UapiServer>,
             tun_name: String,
         ) -> WGHandle {
             let mut device_builder = DeviceBuilder::new()
