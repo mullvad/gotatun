@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- Rework `device` API.
+- Rename `DeviceHandle` to `Device` (and make the old `Device` type private).
+- Replace `Device` constructor with `DeviceBuilder`.
+- Expose `Device` configuration through `Device::write` and `Device::read`.
+- Rename `device::api::{ApiServer, ApiClient}` to `device::uapi::{UapiServer, UapiClient}`.
+- Hide `daita` implementation behind feature gate.
+- Replace crate `ip_network` with the more popular `ipnetwork` in public API.
+- Don't change ownership of `/var/run/wireguard` when dropping privileges in the CLI.
+- Re-export `maybenot` crate.
+
+### Fixed
+- Update daemonize to `0.5` in CLI to resolve deprecation warning.
+
+### Removed
+- Removed unused `device::Error` variants.
+- Remove `AllowedIp` and `AllowedIps` type from public API.
+- Remove `drop_privileges` module from public API.
 
 
 ## [0.1.2] - 2026-01-07
