@@ -4,8 +4,6 @@ use ipnetwork::IpNetwork;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::device::Error;
-#[cfg(feature = "daita")]
-use crate::device::daita::DaitaSettings;
 use crate::device::{Connection, Device, DeviceState, DeviceTransports, Peer, Reconfigure};
 
 pub struct DeviceConfigurator<'a, T: DeviceTransports> {
@@ -33,17 +31,11 @@ pub struct DaitaStats {
     pub rx_padding_packet_bytes: usize,
 }
 
-/// Read-only peer info
+/// A [`Peer`] with [`Stats`].
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct PeerRef {
-    pub public_key: PublicKey,
-    pub preshared_key: Option<[u8; 32]>,
-    pub endpoint: Option<SocketAddr>,
-    pub persistent_keepalive: Option<u16>,
-    pub allowed_ips: Vec<IpNetwork>,
-    #[cfg(feature = "daita")]
-    pub daita: Option<DaitaSettings>,
+pub struct PeerStats {
+    pub peer: Peer,
     pub stats: Stats,
 }
 
@@ -122,7 +114,7 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
     }
 
     /// Return all peers on the device
-    pub async fn peers(&self) -> Vec<PeerRef> {
+    pub async fn peers(&self) -> Vec<PeerStats> {
         let mut peers = vec![];
         for (pubkey, peer) in self.device.peers.iter() {
             let p = peer.lock().await;
@@ -152,14 +144,16 @@ impl<T: DeviceTransports> DeviceConfigurator<'_, T> {
                 daita: daita_stats,
             };
 
-            peers.push(PeerRef {
-                public_key: *pubkey,
-                preshared_key: p.preshared_key,
-                allowed_ips: p.allowed_ips.iter().map(|(_, net)| net).collect(),
-                endpoint: p.endpoint.addr,
-                persistent_keepalive: p.tunnel.persistent_keepalive(),
-                #[cfg(feature = "daita")]
-                daita,
+            peers.push(PeerStats {
+                peer: Peer {
+                    public_key: *pubkey,
+                    preshared_key: p.preshared_key,
+                    allowed_ips: p.allowed_ips.iter().map(|(_, net)| net).collect(),
+                    endpoint: p.endpoint.addr,
+                    keepalive: p.tunnel.persistent_keepalive(),
+                    #[cfg(feature = "daita")]
+                    daita_settings: daita,
+                },
                 stats,
             });
         }
@@ -372,7 +366,7 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
     }
 
     /// Return all peers on the device
-    pub async fn peers(&self) -> Vec<PeerRef> {
+    pub async fn peers(&self) -> Vec<PeerStats> {
         self.as_configurator().peers().await
     }
 
