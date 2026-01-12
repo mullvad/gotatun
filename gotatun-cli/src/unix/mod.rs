@@ -12,7 +12,11 @@ use tracing::Level;
 
 mod drop_privileges;
 
-pub async fn main() {
+// Status messages sent between forked processes
+const CHILD_OK: &[u8] = &[1];
+const CHILD_ERR: &[u8] = &[0];
+
+pub fn main() {
     let matches = Command::new("gotatun")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Mullvad VPN <https://github.com/mullvad/gotatun>")
@@ -68,10 +72,6 @@ pub async fn main() {
         drop(sock1);
     };
 
-    // Status messages sent between forked processes
-    const CHILD_OK: &[u8] = &[1];
-    const CHILD_ERR: &[u8] = &[0];
-
     // tracing_appender worker guard
     let _guard;
 
@@ -123,6 +123,15 @@ pub async fn main() {
             .init();
     }
 
+    tokio_main(tun_name, do_drop_privileges, send_child_result);
+}
+
+#[tokio::main]
+async fn tokio_main(
+    tun_name: &str,
+    do_drop_privileges: bool,
+    send_child_result: impl FnOnce(&[u8]),
+) {
     let device = match start(tun_name, do_drop_privileges).await {
         Ok(device) => device,
         Err(e) => {

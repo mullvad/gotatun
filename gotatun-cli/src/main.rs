@@ -12,9 +12,8 @@
 mod unix;
 
 #[cfg(unix)]
-#[tokio::main]
-async fn main() {
-    unix::main().await;
+fn main() {
+    unix::main();
 }
 
 #[cfg(not(unix))]
