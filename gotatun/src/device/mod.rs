@@ -6,7 +6,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 pub(crate) mod allowed_ips;
-pub mod api;
 mod builder;
 pub mod configure;
 #[cfg(feature = "daita")]
@@ -16,6 +15,7 @@ mod integration_tests;
 mod peer;
 mod peer_state;
 mod transports;
+pub mod uapi;
 
 use builder::Nul;
 use ipnetwork::IpNetwork;
