@@ -207,7 +207,7 @@ mod test {
     #[test]
     #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
     fn test_check_tun_name() {
-        assert!(check_tun_name("utun").is_ok());
+        assert!(check_tun_name("utun").is_err());
         assert!(check_tun_name("utun0").is_ok());
         assert!(check_tun_name("utun123").is_ok());
         assert!(check_tun_name("mytun").is_err());
