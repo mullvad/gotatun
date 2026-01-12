@@ -34,14 +34,14 @@ pub struct DeviceBuilder<Udp, TunTx, TunRx> {
     fwmark: Option<u32>,
 }
 
-impl DeviceBuilder<Nul, Nul, Nul> {
-    pub fn new() -> Self {
-        Self::default()
+impl Default for DeviceBuilder<Nul, Nul, Nul> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-impl Default for DeviceBuilder<Nul, Nul, Nul> {
-    fn default() -> Self {
+impl DeviceBuilder<Nul, Nul, Nul> {
+    pub const fn new() -> Self {
         Self {
             udp: Nul,
             tun_tx: Nul,
