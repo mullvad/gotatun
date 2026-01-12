@@ -8,18 +8,21 @@
 pub mod builder;
 
 use ipnetwork::IpNetwork;
-use tokio::sync::Mutex;
 
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
-use std::sync::Arc;
 
 use crate::device::AllowedIps;
+#[cfg(feature = "daita")]
 use crate::device::daita::{DaitaHooks, DaitaSettings};
 use crate::noise::Tunn;
 use crate::noise::errors::WireGuardError;
-use crate::packet::{self, WgKind};
+#[cfg(feature = "daita")]
+use crate::packet;
+use crate::packet::WgKind;
+#[cfg(feature = "daita")]
 use crate::tun::MtuWatcher;
+#[cfg(feature = "daita")]
 use crate::udp::UdpSend;
 
 #[derive(Default, Debug)]
@@ -36,7 +39,9 @@ pub struct Peer {
     pub(crate) allowed_ips: AllowedIps<()>,
     pub(crate) preshared_key: Option<[u8; 32]>,
 
+    #[cfg(feature = "daita")]
     daita_settings: Option<DaitaSettings>,
+    #[cfg(feature = "daita")]
     pub(crate) daita: Option<DaitaHooks>,
 }
 
@@ -71,7 +76,7 @@ impl Peer {
         endpoint: Option<SocketAddr>,
         allowed_ips: &[IpNetwork],
         preshared_key: Option<[u8; 32]>,
-        daita_settings: Option<DaitaSettings>,
+        #[cfg(feature = "daita")] daita_settings: Option<DaitaSettings>,
     ) -> Peer {
         Peer {
             tunnel,
@@ -79,13 +84,16 @@ impl Peer {
             endpoint: Endpoint { addr: endpoint },
             allowed_ips: allowed_ips.iter().map(|ip| (ip, ())).collect(),
             preshared_key,
+            #[cfg(feature = "daita")]
             daita_settings,
+            #[cfg(feature = "daita")]
             daita: None,
         }
     }
 
+    #[cfg(feature = "daita")]
     pub(crate) async fn maybe_start_daita<US: UdpSend + Clone + 'static>(
-        peer: &Arc<Mutex<Peer>>,
+        peer: &std::sync::Arc<tokio::sync::Mutex<Peer>>,
         pool: packet::PacketBufPool,
         tun_rx_mtu: MtuWatcher,
         udp_tx_v4: US,
@@ -99,7 +107,7 @@ impl Peer {
 
         peer_g.daita = Some(DaitaHooks::new(
             daita_settings,
-            Arc::downgrade(peer),
+            std::sync::Arc::downgrade(peer),
             tun_rx_mtu,
             udp_tx_v4,
             udp_tx_v6,
@@ -113,10 +121,12 @@ impl Peer {
         self.tunnel.update_timers()
     }
 
+    #[cfg(feature = "daita")]
     pub fn daita_settings(&self) -> Option<&DaitaSettings> {
         self.daita_settings.as_ref()
     }
 
+    #[cfg(feature = "daita")]
     pub fn daita(&self) -> Option<&DaitaHooks> {
         self.daita.as_ref()
     }

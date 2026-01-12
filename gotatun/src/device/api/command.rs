@@ -13,10 +13,10 @@ use std::{
 use eyre::{bail, ensure, eyre};
 use typed_builder::TypedBuilder;
 
-use crate::{
-    device::{daita::api::DaitaSettings, peer::AllowedIP},
-    serialization::KeyBytes,
-};
+use crate::{device::peer::AllowedIP, serialization::KeyBytes};
+
+#[cfg(feature = "daita")]
+use crate::device::daita::api::DaitaSettings;
 
 #[derive(Debug)]
 pub enum Request {
@@ -143,6 +143,7 @@ pub struct SetPeer {
     #[builder(setter(strip_bool))]
     pub replace_allowed_ips: bool,
 
+    #[cfg(feature = "daita")]
     #[builder(default, setter(strip_option, into))]
     pub daita_settings: Option<DaitaSettings>,
 }
@@ -236,6 +237,7 @@ impl SetPeer {
             remove: false,
             update_only: false,
             replace_allowed_ips: false,
+            #[cfg(feature = "daita")]
             daita_settings: None,
         }
     }
@@ -502,7 +504,8 @@ impl SetPeer {
             remove,
             update_only,
             replace_allowed_ips,
-            daita_settings: _, // NOTE: Non-standard feature
+            #[cfg(feature = "daita")]
+                daita_settings: _, // NOTE: Non-standard feature
         } = &mut set_peer;
 
         loop {
