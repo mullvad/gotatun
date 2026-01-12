@@ -9,7 +9,7 @@ use crate::device::Error;
 #[cfg(feature = "tun")]
 use crate::tun::tun_async_device::TunDevice;
 use crate::{
-    device::{Device, DeviceState, allowed_ips::AllowedIps, api::ApiServer, peer::Peer},
+    device::{Device, DeviceState, allowed_ips::AllowedIps, peer::Peer, uapi::UapiServer},
     task::Task,
     tun::{IpRecv, IpSend},
     udp::{UdpTransportFactory, socket::UdpSocketFactory},
@@ -24,7 +24,7 @@ pub struct DeviceBuilder<Udp, TunTx, TunRx> {
     tun_tx: TunTx,
     tun_rx: TunRx,
     port: u16,
-    uapi: Option<ApiServer>,
+    uapi: Option<UapiServer>,
 
     // TODO: consider turning this into a typestate, and adding a special case for single peer
     peers: Vec<Peer>,
@@ -130,7 +130,7 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
 }
 
 impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
-    pub fn with_uapi(mut self, uapi: ApiServer) -> Self {
+    pub fn with_uapi(mut self, uapi: UapiServer) -> Self {
         self.uapi = Some(uapi);
         self
     }
