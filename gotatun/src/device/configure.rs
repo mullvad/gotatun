@@ -304,6 +304,25 @@ impl<T: DeviceTransports> DeviceConfiguratorMut<'_, T> {
         self.device.set_fwmark(mark)
     }
 
+    /// Return the private key on the device
+    pub fn private_key(&self) -> Option<&StaticSecret> {
+        // Note: cannot use `as_configurator` here without cloning.
+        // But we want to avoid creating additional copies of the private key if possible
+        self.device.key_pair.as_ref().map(|kp| &kp.0)
+    }
+
+    /// Return port that the UDP socket(s) is listening on
+    pub fn listen_port(&self) -> u16 {
+        self.as_configurator().listen_port()
+    }
+
+    /// Return mark to use for the UDP socket(s)
+    #[cfg(target_os = "linux")]
+    pub fn fwmark(&self) -> Option<u32> {
+        self.as_configurator().fwmark()
+    }
+
+    /// Return all peers on the device
     pub async fn peers(&self) -> Vec<Peer> {
         self.as_configurator().peers().await
     }
