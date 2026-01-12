@@ -8,10 +8,7 @@ use tokio::sync::{Mutex, RwLock};
 #[cfg(feature = "tun")]
 use crate::device::Error;
 use crate::{
-    device::{
-        Device, DeviceState, allowed_ips::AllowedIps, api::ApiServer,
-        peer_state::builder::PeerBuilder,
-    },
+    device::{Device, DeviceState, allowed_ips::AllowedIps, api::ApiServer, peer::Peer},
     task::Task,
     tun::{IpRecv, IpSend, tun_async_device::TunDevice},
     udp::{UdpTransportFactory, socket::UdpSocketFactory},
@@ -29,7 +26,7 @@ pub struct DeviceBuilder<Udp, TunTx, TunRx> {
     uapi: Option<ApiServer>,
 
     // TODO: consider turning this into a typestate, and adding a special case for single peer
-    peers: Vec<PeerBuilder>,
+    peers: Vec<Peer>,
 
     #[cfg(target_os = "linux")]
     fwmark: Option<u32>,
@@ -137,12 +134,12 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
         self
     }
 
-    pub fn with_peer(mut self, peer: PeerBuilder) -> Self {
+    pub fn with_peer(mut self, peer: Peer) -> Self {
         self.peers.push(peer);
         self
     }
 
-    pub fn with_peers(mut self, peers: impl IntoIterator<Item = PeerBuilder>) -> Self {
+    pub fn with_peers(mut self, peers: impl IntoIterator<Item = Peer>) -> Self {
         self.peers.extend(peers);
         self
     }
