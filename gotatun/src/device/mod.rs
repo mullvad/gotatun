@@ -564,11 +564,11 @@ impl<T: DeviceTransports> Device<T> {
 
     async fn set_key(&mut self, private_key: x25519::StaticSecret) -> Reconfigure {
         let public_key = x25519::PublicKey::from(&private_key);
-        let key_pair = Some((private_key.clone(), public_key));
-
         // x25519 (rightly) doesn't let us expose secret keys for comparison.
         // If the public keys are the same, then the private keys are the same.
-        if Some(&public_key) == self.key_pair.as_ref().map(|p| &p.1) {
+        if let Some(key_pair) = self.key_pair.as_ref()
+            && key_pair.1 == public_key
+        {
             return Reconfigure::No;
         }
 
@@ -582,7 +582,7 @@ impl<T: DeviceTransports> Device<T> {
             )
         }
 
-        self.key_pair = key_pair;
+        self.key_pair = Some((private_key, public_key));
         self.rate_limiter = Some(rate_limiter);
 
         Reconfigure::Yes
