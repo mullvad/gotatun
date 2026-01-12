@@ -11,25 +11,6 @@ use tracing::Level;
 
 mod drop_privileges;
 
-fn check_tun_name(_v: String) -> Result<(), String> {
-    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
-    {
-        // TODO: fix validation
-        /*
-        if gotatun::device::tun::parse_utun_name(&_v).is_ok() {
-            Ok(())
-        } else {
-            Err("Tunnel name must have the format 'utun[0-9]+', use 'utun' for automatic assignment".to_owned())
-        }
-        */
-        Ok(())
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
-    {
-        Ok(())
-    }
-}
-
 pub async fn main() {
     let matches = Command::new("gotatun")
         .version(env!("CARGO_PKG_VERSION"))
@@ -38,7 +19,7 @@ pub async fn main() {
             Arg::new("INTERFACE_NAME")
                 .required(true)
                 .takes_value(true)
-                .validator(|tunname| check_tun_name(tunname.to_string()))
+                .validator(check_tun_name)
                 .help("The name of the created interface"),
             Arg::new("foreground")
                 .long("foreground")
@@ -190,4 +171,48 @@ async fn start(
     }
 
     Ok(device)
+}
+
+fn check_tun_name(_v: &str) -> eyre::Result<()> {
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
+    {
+        use eyre::{ContextCompat, bail};
+
+        const ERROR_MSG: &str = "Tunnel name must have the format 'utun[0-9]+'";
+
+        let suffix = _v.strip_prefix("utun").context(ERROR_MSG)?;
+
+        if suffix.is_empty() {
+            // TODO: "utun" alone should automatically assign a number
+            // but the tun crate does not handle this
+            bail!(ERROR_MSG);
+        }
+
+        if suffix.chars().all(|c| c.is_ascii_digit()) {
+            Ok(())
+        } else {
+            bail!(ERROR_MSG)
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
+    {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
+    fn test_check_tun_name() {
+        assert!(check_tun_name("utun").is_ok());
+        assert!(check_tun_name("utun0").is_ok());
+        assert!(check_tun_name("utun123").is_ok());
+        assert!(check_tun_name("mytun").is_err());
+        assert!(check_tun_name("utunX").is_err());
+        assert!(check_tun_name("utun-1").is_err());
+        assert!(check_tun_name("utun123abc").is_err());
+    }
 }
