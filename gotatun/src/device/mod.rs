@@ -665,6 +665,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                 TunnResult::Err(_) => continue,
                 // Flush pending queue
                 TunnResult::WriteToNetwork(packet) => {
+                    #[cfg_attr(not(feature = "daita"), expect(clippy::unnecessary_filter_map))]
                     let not_blocked_packets = std::iter::once(packet)
                         .chain(std::iter::from_fn(|| tunnel.next_queued_packet()))
                         .filter_map(|p| {
