@@ -5,8 +5,6 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! Implementation of Device blah blah
-
 pub(crate) mod allowed_ips;
 mod builder;
 pub mod configure;
