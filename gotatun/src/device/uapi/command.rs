@@ -490,19 +490,6 @@ impl FromStr for Set {
     }
 }
 
-impl<T: FromStr> FromStr for SetUnset<T> {
-    type Err = T::Err;
-
-    /// Parse an empty str to [`SetUnset::Unset`], and a non-empty str `T`.
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(if s.is_empty() {
-            SetUnset::Unset
-        } else {
-            SetUnset::Set(T::from_str(s)?)
-        })
-    }
-}
-
 impl SetPeer {
     fn from_lines<'a>(
         public_key: impl Into<KeyBytes>,
