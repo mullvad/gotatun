@@ -781,7 +781,7 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "gotatun"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "aead",
  "base64 0.13.1",
@@ -818,14 +818,14 @@ dependencies = [
  "tokio",
  "tun",
  "typed-builder",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
  "x25519-dalek",
  "zerocopy",
 ]
 
 [[package]]
 name = "gotatun-cli"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "clap 3.2.25",
  "daemonize",
