@@ -17,8 +17,14 @@ use crate::{
 
 use super::Connection;
 
+/// Uninitialized [`DeviceBuilder`] transport parameter.
 pub struct Nul;
 
+/// Builder for a [`Device`].
+///
+/// The type-parameters represent the final [device transport] implementation.
+///
+/// [device transport]: crate::device::transports::DeviceTransports
 pub struct DeviceBuilder<Udp, TunTx, TunRx> {
     udp: Udp,
     tun_tx: TunTx,
