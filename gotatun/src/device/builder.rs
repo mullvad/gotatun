@@ -74,6 +74,18 @@ impl<X, Y> DeviceBuilder<Nul, X, Y> {
 }
 
 impl<X> DeviceBuilder<X, Nul, Nul> {
+    /// Create a TUN device with the given name.
+    ///
+    /// # Warning
+    ///
+    /// If this is used on Windows, you are recommended to enable the `verify_binary_signature`
+    /// feature for the `tun` crate. By default, `tun` will load `wintun.dll` using the
+    /// [default search order], which includes the `PATH` environment variable.
+    ///
+    /// The recommended way is to use [`Self::with_tun`] and pass an absolute path to `wintun.dll`
+    /// to the `tun` config.
+    ///
+    /// [default search order]: <https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order>
     #[cfg(feature = "tun")]
     pub fn create_tun(
         self,
@@ -85,7 +97,8 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
         tun_config.platform_config(|p| {
             p.enable_routing(false);
         });
-        // FIXME: for wintun, must set path or enable signature check
+        // TODO: for wintun, must set path or enable signature check
+        // we should upstream to `tun`
         let tun = tun::create_as_async(&tun_config).map_err(Error::OpenTun)?;
         let tun = TunDevice::from_tun_device(tun)?;
 
