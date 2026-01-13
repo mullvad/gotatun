@@ -3,6 +3,7 @@ use daemonize::Daemonize;
 use eyre::Context;
 use gotatun::device::uapi::UapiServer;
 use gotatun::device::{DefaultDeviceTransports, Device, DeviceBuilder};
+use gotatun::tun::tun_async_device::TunDevice;
 use std::fs::File;
 use std::os::unix::net::UnixDatagram;
 use std::process::exit;
@@ -153,14 +154,17 @@ async fn start(
 ) -> eyre::Result<Device<DefaultDeviceTransports>> {
     let (socket_uid, socket_gid) = drop_privileges::get_saved_ids()?;
 
-    let uapi = UapiServer::default_unix_socket(tun_name, Some(socket_uid), Some(socket_gid))
+    // We must create the tun device first because its name will change on macOS
+    // if "utun" is passed.
+    let tun = TunDevice::from_name(tun_name).context("Failed to create TUN device")?;
+
+    let uapi = UapiServer::default_unix_socket(&tun.name()?, Some(socket_uid), Some(socket_gid))
         .context("Failed to create UAPI unix socket")?;
 
     let device: Device<_> = DeviceBuilder::new()
         .with_uapi(uapi)
         .with_default_udp()
-        .create_tun(tun_name)
-        .context("Failed to create TUN device")?
+        .with_ip(tun)
         .build()
         .await
         .context("Failed to start WireGuard device")?;
@@ -177,14 +181,14 @@ fn check_tun_name(_v: &str) -> eyre::Result<()> {
     {
         use eyre::{ContextCompat, bail};
 
-        const ERROR_MSG: &str = "Tunnel name must have the format 'utun[0-9]+'";
+        const ERROR_MSG: &str =
+            "Tunnel name must have the format 'utun[0-9]+'. Use 'utun' for automatic assignment";
 
         let suffix = _v.strip_prefix("utun").context(ERROR_MSG)?;
 
         if suffix.is_empty() {
-            // TODO: "utun" alone should automatically assign a number
-            // but the tun crate does not handle this
-            bail!(ERROR_MSG);
+            // "utun" alone automatically assigns a number
+            return Ok(());
         }
 
         if suffix.chars().all(|c| c.is_ascii_digit()) {
@@ -207,7 +211,7 @@ mod test {
     #[test]
     #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
     fn test_check_tun_name() {
-        assert!(check_tun_name("utun").is_err());
+        assert!(check_tun_name("utun").is_ok());
         assert!(check_tun_name("utun0").is_ok());
         assert!(check_tun_name("utun123").is_ok());
         assert!(check_tun_name("mytun").is_err());
