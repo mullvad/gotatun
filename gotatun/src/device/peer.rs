@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 
 use ipnetwork::IpNetwork;
 use x25519_dalek::PublicKey;
+use zeroize::Zeroize;
 
 #[cfg(feature = "daita")]
 use crate::device::daita::DaitaSettings;
@@ -16,12 +17,17 @@ pub struct Peer {
     pub public_key: PublicKey,
     pub endpoint: Option<SocketAddr>,
     pub allowed_ips: Vec<IpNetwork>,
-    // TODO: zeroize
     pub preshared_key: Option<[u8; 32]>,
     pub keepalive: Option<u16>,
 
     #[cfg(feature = "daita")]
     pub daita_settings: Option<DaitaSettings>,
+}
+
+impl Drop for Peer {
+    fn drop(&mut self) {
+        self.preshared_key.zeroize();
+    }
 }
 
 impl Peer {

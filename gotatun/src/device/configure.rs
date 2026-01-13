@@ -234,7 +234,7 @@ impl<T: DeviceTransports> DeviceWrite<'_, T> {
     pub async fn update_peer(&mut self, peer: Peer) -> bool {
         self.modify_peer(&peer.public_key, |peer_mut| {
             peer_mut.clear_allowed_ips();
-            peer_mut.add_allowed_ips(peer.allowed_ips);
+            peer_mut.add_allowed_ips(peer.allowed_ips.clone());
             peer_mut.set_endpoint(peer.endpoint);
             peer_mut.set_keepalive(peer.keepalive);
             peer_mut.set_preshared_key(peer.preshared_key);
