@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Update daemonize to `0.5` in CLI to resolve deprecation warning.
+- Report correct last handshake in UAPI.
 
 ### Removed
 - Remove unused `device::Error` variants.
