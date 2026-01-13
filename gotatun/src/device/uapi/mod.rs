@@ -190,7 +190,7 @@ impl UapiServer {
 
         // Bind a new socket to the path
         let api_listener =
-            UnixListener::bind(&path).map_err(|e| eyre!("Failed to bidd unix socket: {e}"))?;
+            UnixListener::bind(&path).map_err(|e| eyre!("Failed to bind unix socket: {e}"))?;
 
         if uid.is_some() || gid.is_some() {
             if let Err(err) = nix::unistd::chown(std::path::Path::new(&path), uid, gid) {
