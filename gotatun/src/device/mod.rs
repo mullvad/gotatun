@@ -87,6 +87,9 @@ pub struct Device<T: DeviceTransports> {
     inner: Arc<RwLock<DeviceState<T>>>,
 }
 
+/// Entry point for building a [`Device`].
+///
+/// See [`DeviceBuilder`] for options.
 pub const fn build() -> DeviceBuilder<Nul, Nul, Nul> {
     DeviceBuilder::new()
 }
