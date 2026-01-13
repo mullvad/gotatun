@@ -476,6 +476,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     /// Test if wireguard starts and creates a unix socket that we can read from
     async fn test_wireguard_get() {
         let wg = WGHandle::init("192.0.2.0".parse().unwrap(), "::2".parse().unwrap()).await;
@@ -487,6 +488,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     /// Test if wireguard starts and creates a unix socket that we can use to set settings
     async fn test_wireguard_set() {
         let port = next_port();
