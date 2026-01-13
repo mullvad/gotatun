@@ -189,8 +189,8 @@ async fn start(
     // We must create the tun device first because its name will change on macOS
     // if "utun" is passed.
     let tun = TunDevice::from_name(tun_name).context("Failed to create TUN device")?;
-
-    let tun_name = tun.name()?;
+    let tun_name = tun.name()?; // get the actual tun name
+    log::info!("Tunnel interface: {tun_name}");
 
     // wg-quick uses this to find the interface
     #[cfg(target_os = "macos")]
