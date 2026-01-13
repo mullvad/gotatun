@@ -7,10 +7,11 @@ use std::{
     fmt::{self, Display},
     iter::Peekable,
     net::SocketAddr,
+    num::NonZero,
     str::FromStr,
 };
 
-use eyre::{bail, ensure, eyre};
+use eyre::{WrapErr, bail, ensure, eyre};
 use typed_builder::TypedBuilder;
 
 use crate::{device::peer_state::AllowedIP, serialization::KeyBytes};
@@ -110,7 +111,7 @@ pub struct Set {
     /// The fwmark of the interface. The value may 0, in which case it indicates that the fwmark
     /// should be removed.
     #[builder(default, setter(strip_option, into))]
-    pub fwmark: Option<u32>,
+    pub fwmark: Option<SetUnset<NonZero<u32>>>,
 
     /// This indicates that the subsequent peers (perhaps an empty list) should replace any
     /// existing peers, rather than append to the existing peer list.
@@ -400,7 +401,11 @@ macro_rules! parse_opt {
             "Key {:?} may not be specified twice",
             $key
         );
-        *$field = Some($value.parse().unwrap());
+        *$field = Some(
+            $value
+                .parse()
+                .map_err(|e| eyre!("Failed to parse {:?}: {e}", $key))?,
+        );
     }};
 }
 
@@ -457,12 +462,24 @@ impl FromStr for Set {
             match k {
                 "private_key" => parse_opt!(k, v, private_key),
                 "listen_port" => parse_opt!(k, v, listen_port),
-                "fwmark" => parse_opt!(k, v, fwmark),
                 "replace_peers" => parse_bool!(k, v, replace_peers),
                 "protocol_version" => parse_opt!(k, v, protocol_version),
                 "public_key" => {
                     let public_key = KeyBytes::from_str(v).map_err(|err| eyre!("{err}"))?;
                     peers.push(SetPeer::from_lines(public_key, &mut lines)?);
+                }
+
+                "fwmark" => {
+                    ensure!(fwmark.is_none(), "Key {k:?} may not be specified twice");
+                    *fwmark = Some(if v.is_empty() {
+                        SetUnset::Unset
+                    } else {
+                        let number: u32 = v.parse().wrap_err(r#"Failed to parse "fwmark""#)?;
+                        match NonZero::new(number) {
+                            Some(number) => SetUnset::Set(number),
+                            None => SetUnset::Unset,
+                        }
+                    })
                 }
 
                 _ => bail!("Key {k:?} in {line:?} is not allowed in command set"),
