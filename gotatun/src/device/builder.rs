@@ -88,7 +88,7 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
     /// feature for the `tun` crate. By default, `tun` will load `wintun.dll` using the
     /// [default search order], which includes the `PATH` environment variable.
     ///
-    /// The recommended way is to use [`Self::with_tun`] and pass an absolute path to `wintun.dll`
+    /// The recommended way is to use [`Self::with_ip`] and pass an absolute path to `wintun.dll`
     /// to the `tun` config.
     ///
     /// [default search order]: <https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order>
