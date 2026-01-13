@@ -114,9 +114,9 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
     /// Add separate channels for sending and receiving IP packets.
     pub fn with_ip_pair<IpTx: IpSend, IpRx: IpRecv>(
         self,
-        tun_tx: TunTx,
-        tun_rx: TunRx,
-    ) -> DeviceBuilder<X, TunTx, TunRx> {
+        ip_tx: IpTx,
+        ip_rx: IpRx,
+    ) -> DeviceBuilder<X, IpTx, IpRx> {
         DeviceBuilder {
             udp: self.udp,
             tun_tx,
