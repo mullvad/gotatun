@@ -12,7 +12,11 @@ use tracing::Level;
 
 mod drop_privileges;
 
-pub async fn main() {
+// Status messages sent between forked processes
+const CHILD_OK: &[u8] = &[1];
+const CHILD_ERR: &[u8] = &[0];
+
+pub fn main() {
     let matches = Command::new("gotatun")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Mullvad VPN <https://github.com/mullvad/gotatun>")
@@ -40,7 +44,7 @@ pub async fn main() {
                 .env("WG_LOG_LEVEL")
                 .possible_values(["error", "info", "debug", "trace"])
                 .help("Log verbosity")
-                .default_value("error"),
+                .default_value("info"),
             Arg::new("log")
                 .takes_value(true)
                 .long("log")
@@ -52,6 +56,12 @@ pub async fn main() {
                 .long("disable-drop-privileges")
                 .env("WG_SUDO")
                 .help("Do not drop sudo privileges. This has no effect if the UID is root"),
+            #[cfg(target_os = "macos")]
+            Arg::new("tun-name-file")
+                .long("tun-name-file")
+                .env("WG_TUN_NAME_FILE")
+                .takes_value(true)
+                .help("File that stores the TUN interface name"),
         ])
         .get_matches();
 
@@ -59,6 +69,8 @@ pub async fn main() {
     let tun_name = matches.value_of("INTERFACE_NAME").unwrap();
     let log_level: Level = matches.value_of_t("verbosity").unwrap_or_else(|e| e.exit());
     let do_drop_privileges = !matches.is_present("disable-drop-privileges");
+    #[cfg(target_os = "macos")]
+    let wg_tun_name_file = matches.value_of("tun-name-file");
 
     // Create a socketpair to communicate between forked processes
     let (sock1, sock2) = UnixDatagram::pair().unwrap();
@@ -67,10 +79,6 @@ pub async fn main() {
         sock1.send(result).unwrap();
         drop(sock1);
     };
-
-    // Status messages sent between forked processes
-    const CHILD_OK: &[u8] = &[1];
-    const CHILD_ERR: &[u8] = &[0];
 
     // tracing_appender worker guard
     let _guard;
@@ -123,7 +131,32 @@ pub async fn main() {
             .init();
     }
 
-    let device = match start(tun_name, do_drop_privileges).await {
+    // Note: We must spawn the tokio runtime after forking the process.
+    // Otherwise, we see issues with file descriptors being bad, etc.
+    tokio_main(
+        tun_name,
+        do_drop_privileges,
+        #[cfg(target_os = "macos")]
+        wg_tun_name_file,
+        send_child_result,
+    );
+}
+
+#[tokio::main]
+async fn tokio_main(
+    tun_name: &str,
+    do_drop_privileges: bool,
+    #[cfg(target_os = "macos")] wg_tun_name_file: Option<&str>,
+    send_child_result: impl FnOnce(&[u8]),
+) {
+    let device = match start(
+        tun_name,
+        do_drop_privileges,
+        #[cfg(target_os = "macos")]
+        wg_tun_name_file,
+    )
+    .await
+    {
         Ok(device) => device,
         Err(e) => {
             log::error!("{e:?}");
@@ -151,14 +184,25 @@ pub async fn main() {
 async fn start(
     tun_name: &str,
     do_drop_privileges: bool,
+    #[cfg(target_os = "macos")] wg_tun_name_file: Option<&str>,
 ) -> eyre::Result<Device<DefaultDeviceTransports>> {
     let (socket_uid, socket_gid) = drop_privileges::get_saved_ids()?;
 
     // We must create the tun device first because its name will change on macOS
     // if "utun" is passed.
     let tun = TunDevice::from_name(tun_name).context("Failed to create TUN device")?;
+    let tun_name = tun.name()?; // get the actual tun name
+    log::info!("Tunnel interface: {tun_name}");
 
-    let uapi = UapiServer::default_unix_socket(&tun.name()?, Some(socket_uid), Some(socket_gid))
+    // wg-quick uses this to find the interface
+    #[cfg(target_os = "macos")]
+    if let Some(wg_tun_name_file) = wg_tun_name_file {
+        tokio::fs::write(wg_tun_name_file, &tun_name)
+            .await
+            .context("Failed to write to wg_tun_name_file")?;
+    }
+
+    let uapi = UapiServer::default_unix_socket(&tun_name, Some(socket_uid), Some(socket_gid))
         .context("Failed to create UAPI unix socket")?;
 
     let device: Device<_> = DeviceBuilder::new()

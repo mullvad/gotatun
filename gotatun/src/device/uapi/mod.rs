@@ -48,6 +48,7 @@ use std::str::FromStr;
 use std::sync::Weak;
 #[cfg(feature = "daita")]
 use std::sync::atomic;
+use std::time::SystemTime;
 use tokio::sync::{RwLock, mpsc, oneshot};
 
 #[cfg(unix)]
@@ -344,6 +345,13 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
         #[cfg(feature = "daita")]
         let padding_overhead = peer.daita.as_ref().map(|daita| daita.padding_overhead());
 
+        let last_handshake_time = peer.time_since_last_handshake().and_then(|d| {
+            SystemTime::now()
+                .checked_sub(d)?
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .ok()
+        });
+
         peers.push(GetPeer {
             peer: Peer {
                 public_key: KeyBytes(*public_key.as_bytes()),
@@ -358,8 +366,8 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
                     })
                     .collect(),
             },
-            last_handshake_time_sec: peer.time_since_last_handshake().map(|d| d.as_secs()),
-            last_handshake_time_nsec: peer.time_since_last_handshake().map(|d| d.subsec_nanos()),
+            last_handshake_time_sec: last_handshake_time.map(|t| t.as_secs()),
+            last_handshake_time_nsec: last_handshake_time.map(|t| t.subsec_nanos()),
             rx_bytes: Some(rx_bytes as u64),
             tx_bytes: Some(tx_bytes as u64),
             #[cfg(feature = "daita")]
