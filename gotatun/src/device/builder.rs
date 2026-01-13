@@ -119,8 +119,8 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
     ) -> DeviceBuilder<X, IpTx, IpRx> {
         DeviceBuilder {
             udp: self.udp,
-            tun_tx,
-            tun_rx,
+            tun_tx: ip_tx,
+            tun_rx: ip_rx,
             uapi: self.uapi,
             port: self.port,
             peers: self.peers,
