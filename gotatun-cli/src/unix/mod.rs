@@ -131,6 +131,8 @@ pub fn main() {
             .init();
     }
 
+    // Note: We must spawn the tokio runtime after forking the process.
+    // Otherwise, we see issues with file descriptors being bad, etc.
     tokio_main(
         tun_name,
         do_drop_privileges,
