@@ -44,7 +44,7 @@ pub fn main() {
                 .env("WG_LOG_LEVEL")
                 .possible_values(["error", "info", "debug", "trace"])
                 .help("Log verbosity")
-                .default_value("error"),
+                .default_value("info"),
             Arg::new("log")
                 .takes_value(true)
                 .long("log")
