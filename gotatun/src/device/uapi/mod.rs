@@ -441,21 +441,23 @@ async fn on_api_set(
         reconfigure |= device.set_port(listen_port);
     }
 
-    if let Some(fwmark) = fwmark {
+    if let Some(new_fwmark) = fwmark {
         #[cfg(target_os = "linux")]
-        if device.set_fwmark(fwmark).is_err() {
-            // TODO: roll back changes and don't reconfigure
-            return (
-                SetResponse {
-                    errno: libc::EADDRINUSE,
-                },
-                reconfigure,
-            );
+        {
+            let new_fwmark = match new_fwmark {
+                command::SetUnset::Set(value) => Some(u32::from(value)),
+                command::SetUnset::Unset => None,
+            };
+            if new_fwmark != device.fwmark {
+                device.fwmark = new_fwmark;
+                reconfigure = Reconfigure::Yes;
+            }
         }
+
         // fwmark only applies on Linux
         // TODO: return error?
         #[cfg(not(target_os = "linux"))]
-        let _ = fwmark;
+        let _ = new_fwmark;
     }
 
     let mut pending_peer_updates = vec![];
