@@ -120,7 +120,6 @@ impl UapiClient {
                     bail!("Server hung up");
                 };
 
-                log::info!("{:?}", response.to_string());
                 if let Err(e) = writeln!(&rw, "{response}") {
                     log::error!("Failed to write API response: {e}");
                 }
@@ -355,7 +354,9 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
         peers.push(GetPeer {
             peer: Peer {
                 public_key: KeyBytes(*public_key.as_bytes()),
-                preshared_key: None, // TODO
+                preshared_key: peer
+                    .preshared_key
+                    .map(|key| command::SetUnset::Set(KeyBytes(key))),
                 endpoint,
                 persistent_keepalive_interval: peer.persistent_keepalive(),
                 allowed_ip: peer
@@ -441,21 +442,23 @@ async fn on_api_set(
         reconfigure |= device.set_port(listen_port);
     }
 
-    if let Some(fwmark) = fwmark {
+    if let Some(new_fwmark) = fwmark {
         #[cfg(target_os = "linux")]
-        if device.set_fwmark(fwmark).is_err() {
-            // TODO: roll back changes and don't reconfigure
-            return (
-                SetResponse {
-                    errno: libc::EADDRINUSE,
-                },
-                reconfigure,
-            );
+        {
+            let new_fwmark = match new_fwmark {
+                command::SetUnset::Set(value) => Some(u32::from(value)),
+                command::SetUnset::Unset => None,
+            };
+            if new_fwmark != device.fwmark {
+                device.fwmark = new_fwmark;
+                reconfigure = Reconfigure::Yes;
+            }
         }
+
         // fwmark only applies on Linux
         // TODO: return error?
         #[cfg(not(target_os = "linux"))]
-        let _ = fwmark;
+        let _ = new_fwmark;
     }
 
     let mut pending_peer_updates = vec![];
@@ -483,9 +486,9 @@ async fn on_api_set(
             continue;
         }
 
-        let preshared_key = preshared_key.map(|psk| match psk {
-            command::SetUnset::Set(psk) => psk.0,
-            command::SetUnset::Unset => todo!("not sure how to handle this"),
+        let preshared_key = preshared_key.and_then(|psk| match psk {
+            command::SetUnset::Set(psk) => Some(psk.0),
+            command::SetUnset::Unset => None,
         });
 
         #[cfg(feature = "daita")]

@@ -27,6 +27,8 @@ It is also possible to use with [wg-quick](https://git.zx2c4.com/WireGuard/about
 
 `sudo WG_QUICK_USERSPACE_IMPLEMENTATION=gotatun WG_SUDO=1 wg-quick up CONFIGURATION`
 
+*Please note that `wg-quick` will ignore `WG_QUICK_USERSPACE_IMPLEMENTATION` on Linux if you have the wireguard kernel module installed.*
+
 ### Testing
 
 Testing this project has a few requirements:

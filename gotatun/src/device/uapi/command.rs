@@ -7,10 +7,11 @@ use std::{
     fmt::{self, Display},
     iter::Peekable,
     net::SocketAddr,
+    num::NonZero,
     str::FromStr,
 };
 
-use eyre::{bail, ensure, eyre};
+use eyre::{WrapErr, bail, ensure, eyre};
 use typed_builder::TypedBuilder;
 
 use crate::{device::peer_state::AllowedIP, serialization::KeyBytes};
@@ -110,7 +111,7 @@ pub struct Set {
     /// The fwmark of the interface. The value may 0, in which case it indicates that the fwmark
     /// should be removed.
     #[builder(default, setter(strip_option, into))]
-    pub fwmark: Option<u32>,
+    pub fwmark: Option<SetUnset<NonZero<u32>>>,
 
     /// This indicates that the subsequent peers (perhaps an empty list) should replace any
     /// existing peers, rather than append to the existing peer list.
@@ -400,7 +401,11 @@ macro_rules! parse_opt {
             "Key {:?} may not be specified twice",
             $key
         );
-        *$field = Some($value.parse().unwrap());
+        *$field = Some(
+            $value
+                .parse()
+                .map_err(|e| eyre!("Failed to parse {:?}: {e}", $key))?,
+        );
     }};
 }
 
@@ -457,7 +462,6 @@ impl FromStr for Set {
             match k {
                 "private_key" => parse_opt!(k, v, private_key),
                 "listen_port" => parse_opt!(k, v, listen_port),
-                "fwmark" => parse_opt!(k, v, fwmark),
                 "replace_peers" => parse_bool!(k, v, replace_peers),
                 "protocol_version" => parse_opt!(k, v, protocol_version),
                 "public_key" => {
@@ -465,24 +469,24 @@ impl FromStr for Set {
                     peers.push(SetPeer::from_lines(public_key, &mut lines)?);
                 }
 
+                "fwmark" => {
+                    ensure!(fwmark.is_none(), "Key {k:?} may not be specified twice");
+                    *fwmark = Some(if v.is_empty() {
+                        SetUnset::Unset
+                    } else {
+                        let number: u32 = v.parse().wrap_err(r#"Failed to parse "fwmark""#)?;
+                        match NonZero::new(number) {
+                            Some(number) => SetUnset::Set(number),
+                            None => SetUnset::Unset,
+                        }
+                    })
+                }
+
                 _ => bail!("Key {k:?} in {line:?} is not allowed in command set"),
             }
         }
 
         Ok(set)
-    }
-}
-
-impl<T: FromStr> FromStr for SetUnset<T> {
-    type Err = T::Err;
-
-    /// Parse an empty str to [`SetUnset::Unset`], and a non-empty str `T`.
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(if s.is_empty() {
-            SetUnset::Unset
-        } else {
-            SetUnset::Set(T::from_str(s)?)
-        })
     }
 }
 
@@ -523,7 +527,23 @@ impl SetPeer {
                 // This key indicates the start of a new peer
                 "public_key" => break,
 
-                "preshared_key" => parse_opt!(k, v, preshared_key),
+                "preshared_key" => {
+                    ensure!(
+                        preshared_key.is_none(),
+                        "Key {k:?} may not be specified twice",
+                    );
+                    *preshared_key = Some(if v.is_empty() {
+                        SetUnset::Unset
+                    } else {
+                        let key_bytes: KeyBytes =
+                            v.parse().map_err(|e| eyre!("Failed to parse {k:?}: {e}"))?;
+                        if key_bytes.0.iter().all(|&b| b == 0) {
+                            SetUnset::Unset
+                        } else {
+                            SetUnset::Set(key_bytes)
+                        }
+                    });
+                }
                 "endpoint" => parse_opt!(k, v, endpoint),
                 "persistent_keepalive_interval" => parse_opt!(k, v, persistent_keepalive_interval),
                 "remove" => parse_bool!(k, v, remove),
