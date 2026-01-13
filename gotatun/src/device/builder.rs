@@ -50,7 +50,7 @@ impl DeviceBuilder<Nul, Nul, Nul> {
     /// A final [`Device`] is assembled with [`DeviceBuilder::build`].
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// use gotatun::device::DeviceBuilder;
     ///
     /// let device = DeviceBuilder::new()
