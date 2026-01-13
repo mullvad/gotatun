@@ -355,7 +355,9 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
         peers.push(GetPeer {
             peer: Peer {
                 public_key: KeyBytes(*public_key.as_bytes()),
-                preshared_key: None, // TODO
+                preshared_key: peer
+                    .preshared_key
+                    .map(|key| command::SetUnset::Set(KeyBytes(key))),
                 endpoint,
                 persistent_keepalive_interval: peer.persistent_keepalive(),
                 allowed_ip: peer
@@ -485,9 +487,9 @@ async fn on_api_set(
             continue;
         }
 
-        let preshared_key = preshared_key.map(|psk| match psk {
-            command::SetUnset::Set(psk) => psk.0,
-            command::SetUnset::Unset => todo!("not sure how to handle this"),
+        let preshared_key = preshared_key.and_then(|psk| match psk {
+            command::SetUnset::Set(psk) => Some(psk.0),
+            command::SetUnset::Unset => None,
         });
 
         #[cfg(feature = "daita")]
