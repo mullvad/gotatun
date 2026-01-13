@@ -545,42 +545,6 @@ mod tests {
         assert!(wg_get.contains("errno=0"));
     }
 
-    /// Test if wireguard can handle simple ipv4 connections, don't use a connected socket
-    #[tokio::test]
-    #[ignore]
-    async fn test_wg_start_ipv4_non_connected() {
-        let port = next_port();
-        let private_key = StaticSecret::random_from_rng(OsRng);
-        let public_key = PublicKey::from(&private_key);
-        let addr_v4 = next_ip();
-        let addr_v6 = next_ip_v6();
-
-        let mut wg = WGHandle::init(addr_v4, addr_v6).await;
-
-        assert_eq!(wg.wg_set_port(port).await, "errno=0\n\n");
-        assert_eq!(wg.wg_set_key(private_key).await, "errno=0\n\n");
-
-        // Create a new peer whose endpoint is on this machine
-        let mut peer = Peer::new(
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), next_port()),
-            vec![AllowedIp {
-                ip: next_ip(),
-                cidr: 32,
-            }],
-        );
-
-        peer.start_in_container(&public_key, &addr_v4, port);
-
-        let peer = Arc::new(peer);
-
-        wg.add_peer(Arc::clone(&peer)).await;
-        wg.start();
-
-        let response = peer.get_request();
-
-        assert_eq!(response, encode(PublicKey::from(&peer.key).as_bytes()));
-    }
-
     /// Test if wireguard can handle simple ipv4 connections
     #[tokio::test]
     #[ignore]
@@ -657,45 +621,6 @@ mod tests {
     #[ignore]
     #[cfg(target_os = "linux")] // Can't make docker work with ipv6 on macOS ATM
     async fn test_wg_start_ipv6_endpoint() {
-        let port = next_port();
-        let private_key = StaticSecret::random_from_rng(OsRng);
-        let public_key = PublicKey::from(&private_key);
-        let addr_v4 = next_ip();
-        let addr_v6 = next_ip_v6();
-
-        let mut wg = WGHandle::init(addr_v4, addr_v6).await;
-
-        assert_eq!(wg.wg_set_port(port).await, "errno=0\n\n");
-        assert_eq!(wg.wg_set_key(private_key).await, "errno=0\n\n");
-
-        let mut peer = Peer::new(
-            SocketAddr::new(
-                IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
-                next_port(),
-            ),
-            vec![AllowedIp {
-                ip: next_ip_v6(),
-                cidr: 128,
-            }],
-        );
-
-        peer.start_in_container(&public_key, &addr_v6, port);
-
-        let peer = Arc::new(peer);
-
-        wg.add_peer(Arc::clone(&peer)).await;
-        wg.start();
-
-        let response = peer.get_request();
-
-        assert_eq!(response, encode(PublicKey::from(&peer.key).as_bytes()));
-    }
-
-    /// Test if wireguard can handle connection with an ipv6 endpoint
-    #[tokio::test]
-    #[ignore]
-    #[cfg(target_os = "linux")] // Can't make docker work with ipv6 on macOS ATM
-    async fn test_wg_start_ipv6_endpoint_not_connected() {
         let port = next_port();
         let private_key = StaticSecret::random_from_rng(OsRng);
         let public_key = PublicKey::from(&private_key);
