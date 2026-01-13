@@ -111,7 +111,8 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
         self.with_ip_pair(tun.clone(), tun)
     }
 
-    pub fn with_tun_pair<TunTx: IpSend, TunRx: IpRecv>(
+    /// Add separate channels for sending and receiving IP packets.
+    pub fn with_ip_pair<TunTx: IpSend, TunRx: IpRecv>(
         self,
         tun_tx: TunTx,
         tun_rx: TunRx,
