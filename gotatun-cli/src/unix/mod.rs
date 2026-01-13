@@ -60,6 +60,7 @@ pub fn main() {
             Arg::new("tun-name-file")
                 .long("tun-name-file")
                 .env("WG_TUN_NAME_FILE")
+                .takes_value(true)
                 .help("File that stores the TUN interface name"),
         ])
         .get_matches();
