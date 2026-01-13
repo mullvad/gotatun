@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Fix issue where every handshake after 100 received handshake messages triggered a cookie reply.
 
+#### macOS
+- Fix dropping privileges not working when running the CLI with `sudo` on macOS. Only the setuid bit
+  worked as expected.
+
 
 ## [0.1.1] - 2025-12-23
 ### Added
