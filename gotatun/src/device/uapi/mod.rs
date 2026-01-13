@@ -5,38 +5,72 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! Userspace API.
+//!
+//! This is the implementation of the official WireGuard
+//! [configuration protocol].
+//!
+//! The most common use-case is probably to create a unix socket with
+//! [`UapiServer::default_unix_socket`] and pass it to [`DeviceBuilder::with_uapi`]:
+//!
+//! ```no_run,ignore-windows
+//! use gotatun::device::{self, uapi::UapiServer};
+//!
+//! let uapi = UapiServer::default_unix_socket("my-gotatun", None, None)
+//!     .expect("Failed to create unix socket");
+//!
+//! let device = device::build()
+//!     .with_uapi(uapi)
+//! #   .with_default_udp()
+//! #   .create_tun("tun").unwrap()
+//!     /* .with_xyz(..) */
+//!     .build();
+//! ```
+//!
+//! [configuration protocol]: https://www.wireguard.com/xplatform/#configuration-protocol
+//! [`DeviceBuilder::with_uapi`]: crate::device::builder::DeviceBuilder::with_uapi
+
 pub mod command;
 
-use super::peer::AllowedIP;
-use super::{Connection, Device, Reconfigure};
+use super::peer_state::AllowedIP;
+use super::{Connection, DeviceState, Reconfigure};
 use crate::device::{DeviceTransports, PeerUpdateRequest};
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
 use eyre::{Context, bail, eyre};
+use ipnetwork::IpNetwork;
 use libc::EINVAL;
+#[cfg(unix)]
+use nix::unistd::{Gid, Uid};
 use std::fmt::Debug;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::str::FromStr;
-use std::sync::{Weak, atomic};
+use std::sync::Weak;
+#[cfg(feature = "daita")]
+use std::sync::atomic;
 use tokio::sync::{RwLock, mpsc, oneshot};
 
 #[cfg(unix)]
 const SOCK_DIR: &str = "/var/run/wireguard/";
 
-/// A server that receives [`Request`]s. Should be passed a [`Device`] when created.
-pub struct ApiServer {
+/// A server that receives [`Request`]s. Should be passed to [`DeviceBuilder::with_uapi`].
+///
+/// [`DeviceBuilder::with_uapi`]: crate::device::builder::DeviceBuilder::with_uapi
+pub struct UapiServer {
     rx: mpsc::Receiver<(Request, oneshot::Sender<Response>)>,
 }
 
-/// An api client to a gotatun [`Device`].
+/// An API client to a gotatun [`Device`].
 ///
-/// Use [`ApiClient::send`] or [`ApiClient::send_sync`] to configure the [`Device`] by adding peers, etc.
+/// Use [`UapiClient::send`] or [`UapiClient::send_sync`] to configure the [`Device`] by adding peers, etc.
+///
+/// [`Device`]: crate::device::Device
 #[derive(Clone)]
-pub struct ApiClient {
+pub struct UapiClient {
     tx: mpsc::Sender<(Request, oneshot::Sender<Response>)>,
 }
 
-impl ApiClient {
+impl UapiClient {
     pub async fn send(&self, request: impl Into<Request>) -> eyre::Result<Response> {
         let request = request.into();
         log::trace!("Handling API request: {request:?}");
@@ -65,7 +99,7 @@ impl ApiClient {
     }
 }
 
-impl ApiClient {
+impl UapiClient {
     /// Wrap a [Read] + [Write] and spawn a thread to convert between the textual configuration
     /// protocol and [Request]/[Response].
     ///
@@ -129,30 +163,42 @@ impl ApiClient {
     }
 }
 
-impl ApiServer {
-    pub fn new() -> (ApiClient, ApiServer) {
+impl UapiServer {
+    pub fn new() -> (UapiClient, UapiServer) {
         let (tx, rx) = mpsc::channel(100);
 
-        (ApiClient { tx }, ApiServer { rx })
+        (UapiClient { tx }, UapiServer { rx })
     }
 
-    /// Spawn a unix socket in [`SOCK_DIR`] called `<name>.sock`. This socket speaks the official
+    /// Spawn a unix socket at `/var/run/wireguard/<name>.sock`. This socket speaks the official
     /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
+    ///
+    /// Optionally, set the owner of the socket using `uid` and `gid`.
     #[cfg(unix)]
-    pub fn default_unix_socket(name: &str) -> eyre::Result<Self> {
+    pub fn default_unix_socket(
+        name: &str,
+        uid: Option<Uid>,
+        gid: Option<Gid>,
+    ) -> eyre::Result<Self> {
         use std::os::unix::net::UnixListener;
 
         let path = format!("{SOCK_DIR}/{name}.sock");
 
-        create_sock_dir();
+        create_sock_dir()?;
 
         let _ = std::fs::remove_file(&path); // Attempt to remove the socket if already exists
 
         // Bind a new socket to the path
         let api_listener =
-            UnixListener::bind(&path).map_err(|e| eyre!("Failed to bidd unix socket: {e}"))?;
+            UnixListener::bind(&path).map_err(|e| eyre!("Failed to bind unix socket: {e}"))?;
 
-        let (tx, rx) = ApiServer::new();
+        if uid.is_some() || gid.is_some() {
+            if let Err(err) = nix::unistd::chown(std::path::Path::new(&path), uid, gid) {
+                log::warn!("Failed to change owner of UDS: {err}");
+            }
+        }
+
+        let (tx, rx) = UapiServer::new();
 
         std::thread::spawn(move || {
             loop {
@@ -171,7 +217,7 @@ impl ApiServer {
         //self.cleanup_paths.push(path.clone());
     }
 
-    /// Create an [`ApiServer`] from a reader+writer that speaks the official
+    /// Create an [`UapiServer`] from a reader+writer that speaks the official
     /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
     pub fn from_read_write<RW>(rw: RW) -> Self
     where
@@ -191,34 +237,30 @@ impl ApiServer {
     }
 }
 
-impl Debug for ApiServer {
+impl Debug for UapiServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ApiServer").finish()
+        f.debug_tuple("UapiServer").finish()
     }
 }
 
 #[cfg(unix)]
-fn create_sock_dir() {
-    use super::drop_privileges::get_saved_ids;
-
-    let _ = std::fs::create_dir(SOCK_DIR); // Create the directory if it does not exist
-
-    if let Ok((saved_uid, saved_gid)) = get_saved_ids() {
-        unsafe {
-            let c_path = std::ffi::CString::new(SOCK_DIR).unwrap();
-            // The directory is under the root user, but we want to be able to
-            // delete the files there when we exit, so we need to change the owner
-            libc::chown(
-                c_path.as_bytes_with_nul().as_ptr().cast(),
-                saved_uid,
-                saved_gid,
-            );
+fn create_sock_dir() -> eyre::Result<()> {
+    match std::fs::create_dir(SOCK_DIR) {
+        Ok(_) => {
+            log::info!("Created socket directory at {SOCK_DIR}");
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            // Directory already exists, which is fine
+        }
+        Err(e) => {
+            bail!("Failed to create socket directory {SOCK_DIR}: {e}");
         }
     }
+    Ok(())
 }
 
-impl<T: DeviceTransports> Device<T> {
-    pub(super) async fn handle_api(device: Weak<RwLock<Self>>, mut api: ApiServer) {
+impl<T: DeviceTransports> DeviceState<T> {
+    pub(super) async fn handle_api(device: Weak<RwLock<Self>>, mut api: UapiServer) {
         loop {
             let Some((request, respond)) = api.recv().await else {
                 // The remote side is closed
@@ -293,12 +335,13 @@ impl<T: DeviceTransports> Device<T> {
 }
 
 /// Handle a [Get] request.
-async fn on_api_get(_: Get, d: &Device<impl DeviceTransports>) -> GetResponse {
+async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetResponse {
     let mut peers = vec![];
     for (public_key, peer) in &d.peers {
         let peer = peer.lock().await;
         let (_, tx_bytes, rx_bytes, ..) = peer.tunnel.stats();
         let endpoint = peer.endpoint().addr;
+        #[cfg(feature = "daita")]
         let padding_overhead = peer.daita.as_ref().map(|daita| daita.padding_overhead());
 
         peers.push(GetPeer {
@@ -309,18 +352,33 @@ async fn on_api_get(_: Get, d: &Device<impl DeviceTransports>) -> GetResponse {
                 persistent_keepalive_interval: peer.persistent_keepalive(),
                 allowed_ip: peer
                     .allowed_ips()
-                    .map(|(addr, cidr)| AllowedIP { addr, cidr })
+                    .map(|ip_network| AllowedIP {
+                        addr: ip_network.network(),
+                        cidr: ip_network.prefix(),
+                    })
                     .collect(),
             },
             last_handshake_time_sec: peer.time_since_last_handshake().map(|d| d.as_secs()),
             last_handshake_time_nsec: peer.time_since_last_handshake().map(|d| d.subsec_nanos()),
             rx_bytes: Some(rx_bytes as u64),
             tx_bytes: Some(tx_bytes as u64),
+            #[cfg(feature = "daita")]
             tx_padding_bytes: padding_overhead.map(|p| p.tx_padding_bytes as u64),
+            #[cfg(not(feature = "daita"))]
+            tx_padding_bytes: None,
+            #[cfg(feature = "daita")]
             tx_padding_packet_bytes: padding_overhead
                 .map(|p| p.tx_padding_packet_bytes.load(atomic::Ordering::SeqCst) as u64),
+            #[cfg(not(feature = "daita"))]
+            tx_padding_packet_bytes: None,
+            #[cfg(feature = "daita")]
             rx_padding_bytes: padding_overhead.map(|p| p.rx_padding_bytes as u64),
+            #[cfg(not(feature = "daita"))]
+            rx_padding_bytes: None,
+            #[cfg(feature = "daita")]
             rx_padding_packet_bytes: padding_overhead.map(|p| p.rx_padding_packet_bytes as u64),
+            #[cfg(not(feature = "daita"))]
+            rx_padding_packet_bytes: None,
         });
     }
 
@@ -341,7 +399,7 @@ async fn on_api_get(_: Get, d: &Device<impl DeviceTransports>) -> GetResponse {
 /// Handle a [Set] request.
 async fn on_api_set(
     set: Set,
-    device: &mut Device<impl DeviceTransports>,
+    device: &mut DeviceState<impl DeviceTransports>,
 ) -> (SetResponse, Reconfigure) {
     let Set {
         private_key,
@@ -407,6 +465,7 @@ async fn on_api_set(
             remove,
             update_only,
             replace_allowed_ips,
+            #[cfg(feature = "daita")]
             daita_settings,
         } = peer;
 
@@ -421,6 +480,7 @@ async fn on_api_set(
             command::SetUnset::Unset => todo!("not sure how to handle this"),
         });
 
+        #[cfg(feature = "daita")]
         let daita_settings = match daita_settings {
             Some(daita_settings) => {
                 // TODO: Check if there are any changes
@@ -442,9 +502,13 @@ async fn on_api_set(
             remove,
             replace_allowed_ips,
             endpoint,
-            new_allowed_ips: allowed_ip,
+            new_allowed_ips: allowed_ip
+                .iter()
+                .map(|AllowedIP { addr, cidr }| IpNetwork::new(*addr, *cidr).unwrap())
+                .collect(),
             keepalive: persistent_keepalive_interval,
             preshared_key,
+            #[cfg(feature = "daita")]
             daita_settings,
         };
         pending_peer_updates.push(update_peer);

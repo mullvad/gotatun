@@ -1,16 +1,10 @@
 // Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! # NOTES
-//!
-//! This module is an implementation of DAITA version 3 for GotaTun.
+//! Implementation of DAITA for GotaTun.
 //!
 //! DAITA (Defense Against AI-guided Traffic Analysis) is MullvadVPN's implementation of
 //! an anti-fingerprinting protocol based on the [maybenot] crate.
-//!
-//! ## TODO
-//!
-//! - Support mocked time for tests (this is supported in other parts of GotaTun using `mock_instant` crate)
 
 mod actions;
 mod events;
@@ -20,7 +14,9 @@ mod types;
 use std::str::FromStr;
 
 pub use hooks::DaitaHooks;
-use maybenot::Machine;
+pub use maybenot;
+pub use maybenot::Error;
+pub use maybenot::Machine;
 
 pub mod api {
     #[derive(Debug, Clone)]

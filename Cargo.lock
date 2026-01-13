@@ -173,12 +173,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "boxfnonce"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5988cb1d626264ac94100be357308f29ff7cbdd3b36bda27f450a4ee3f713426"
-
-[[package]]
 name = "bumpalo"
 version = "3.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -509,11 +503,10 @@ dependencies = [
 
 [[package]]
 name = "daemonize"
-version = "0.4.1"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70c24513e34f53b640819f0ac9f705b673fcf4006d7aab8778bee72ebfc89815"
+checksum = "ab8bfdaacb3c887a54d41bdf48d3af8873b3f5566469f8ba21b92057509f116e"
 dependencies = [
- "boxfnonce",
  "libc",
 ]
 
@@ -807,6 +800,7 @@ dependencies = [
  "hmac",
  "ip_network",
  "ip_network_table",
+ "ipnetwork",
  "libc",
  "log",
  "maybenot",
@@ -835,8 +829,11 @@ version = "0.1.2"
 dependencies = [
  "clap 3.2.25",
  "daemonize",
+ "eyre",
  "gotatun",
+ "libc",
  "log",
+ "nix",
  "tokio",
  "tracing",
  "tracing-appender",
@@ -936,6 +933,12 @@ name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "469fb0b9cefa57e3ef31275ee7cacb78f2fdca44e4765491884a2b119d4eb130"
+
+[[package]]
+name = "ipnetwork"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf370abdafd54d13e54a620e8c3e1145f28e46cc9d704bc6d94414559df41763"
 
 [[package]]
 name = "itertools"

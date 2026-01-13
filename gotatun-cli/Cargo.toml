@@ -21,13 +21,23 @@ name = "gotatun"
 path = "src/main.rs"
 
 [target.'cfg(unix)'.dependencies]
-daemonize = "0.4.1"
+daemonize = "0.5.0"
 clap = { version = "3.1.6", features = ["env"] }
 tracing = "0.1.40"
 tracing-subscriber = "0.3.9"
 tracing-appender = "0.2.1"
 log = "0.4"
 tokio = { version = "1.43.0", features = ["full"] }
+eyre = "0.6.12"
+libc = "0.2"
+nix = { version = "0.30", default-features = false, features = [
+    "fs",
+    "time",
+    "user",
+    "socket",
+    "uio",
+    "net",
+] }
 
 [target.'cfg(unix)'.dependencies.gotatun]
 version = "0.1.0"

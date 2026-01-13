@@ -23,12 +23,14 @@ pcap = ["dep:pcap-file"]
 # UDP GRO appears to be broken on Windows.
 # In some cases it fails to return UDP_COALESCED_INFO
 windows-gro = []
+daita = []
 
 [dependencies]
 base64 = "0.13"
 hex = "0.4"
 libc = "0.2"
 parking_lot = "0.12"
+ipnetwork = "0.21"
 ip_network = "0.4.1"
 ip_network_table = "0.2.0"
 ring = "0.17"
@@ -74,6 +76,7 @@ windows-sys = { version = ">=0.59, <=0.61", features = [
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.30", default-features = false, features = [
+    "fs",
     "time",
     "user",
     "socket",

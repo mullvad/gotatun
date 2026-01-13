@@ -42,7 +42,7 @@ pub trait UdpTransportFactory: Send + Sync + 'static {
 }
 
 /// Arguments to [`UdpTransportFactory::bind`].
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UdpTransportFactoryParams {
     /// The [`Ipv4Addr`] to bind the UDP socket to.
     pub addr_v4: Ipv4Addr,
