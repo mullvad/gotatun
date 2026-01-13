@@ -301,10 +301,12 @@ impl Tunn {
         Some(packet)
     }
 
-    /// Pop the first queued packet if it exists and try to encapsulate it.
-    pub fn next_queued_packet(&mut self) -> Option<WgKind> {
-        self.dequeue_packet()
-            .and_then(|packet| self.handle_outgoing_packet(packet))
+    /// Encapsulate and return all queued packets.
+    pub fn get_queued_packets(&mut self) -> impl Iterator<Item = WgKind> {
+        std::iter::from_fn(|| {
+            self.dequeue_packet()
+                .and_then(|packet| self.handle_outgoing_packet(packet))
+        })
     }
 
     /// Push packet to the back of the queue.

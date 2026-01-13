@@ -674,22 +674,15 @@ impl<T: DeviceTransports> DeviceState<T> {
                 TunnResult::Err(_) => continue,
                 // Flush pending queue
                 TunnResult::WriteToNetwork(packet) => {
-                    #[cfg_attr(not(feature = "daita"), expect(clippy::unnecessary_filter_map))]
-                    let not_blocked_packets = std::iter::once(packet)
-                        .chain(std::iter::from_fn(|| tunnel.next_queued_packet()))
-                        .filter_map(|p| {
-                            #[cfg(feature = "daita")]
-                            {
-                                match daita {
-                                    Some(daita) => daita.after_data_encapsulate(p),
-                                    None => Some(p),
-                                }
-                            }
-                            #[cfg(not(feature = "daita"))]
-                            Some(p)
-                        });
+                    let packets = std::iter::once(packet).chain(tunnel.get_queued_packets());
 
-                    for packet in not_blocked_packets {
+                    #[cfg(feature = "daita")]
+                    let packets = packets.filter_map(|p| match daita {
+                        Some(daita) => daita.after_data_encapsulate(p),
+                        None => Some(p),
+                    });
+
+                    for packet in packets {
                         if let Err(_err) = udp_tx.send_to(packet.into(), addr).await {
                             log::trace!("udp.send_to failed");
                             break;
