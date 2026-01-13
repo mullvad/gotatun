@@ -78,7 +78,7 @@ pub async fn main() {
         let log = matches.value_of("log").unwrap();
 
         let log_file =
-            File::create(log).unwrap_or_else(|_| panic!("Could not create log file {log}"));
+            File::create(log).unwrap_or_else(|e| panic!("Could not create log file {log}: {e}"));
 
         let daemonize = Daemonize::new().working_directory("/tmp");
 
