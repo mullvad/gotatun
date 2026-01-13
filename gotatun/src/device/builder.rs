@@ -102,7 +102,7 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
         let tun = tun::create_as_async(&tun_config).map_err(Error::OpenTun)?;
         let tun = TunDevice::from_tun_device(tun)?;
 
-        Ok(self.with_tun(tun))
+        Ok(self.with_ip(tun))
     }
 
     pub fn with_tun<Tun: IpSend + IpRecv + Clone>(self, tun: Tun) -> DeviceBuilder<X, Tun, Tun> {
