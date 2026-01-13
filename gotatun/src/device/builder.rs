@@ -112,7 +112,7 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
     }
 
     /// Add separate channels for sending and receiving IP packets.
-    pub fn with_ip_pair<TunTx: IpSend, TunRx: IpRecv>(
+    pub fn with_ip_pair<IpTx: IpSend, IpRx: IpRecv>(
         self,
         tun_tx: TunTx,
         tun_rx: TunRx,
