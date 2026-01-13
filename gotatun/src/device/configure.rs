@@ -6,6 +6,8 @@ use x25519_dalek::{PublicKey, StaticSecret};
 use crate::device::Error;
 use crate::device::{Connection, Device, DeviceState, DeviceTransports, Peer, Reconfigure};
 
+use super::psk::Psk;
+
 pub struct DeviceRead<'a, T: DeviceTransports> {
     device: &'a DeviceState<T>,
 }
@@ -61,7 +63,7 @@ impl<T> From<Option<T>> for Update<T> {
 #[derive(Default)]
 #[non_exhaustive]
 pub struct PeerMut {
-    preshared_key: Update<[u8; 32]>,
+    preshared_key: Update<Psk>,
     endpoint: Update<SocketAddr>,
     keepalive: Update<u16>,
 
@@ -70,7 +72,7 @@ pub struct PeerMut {
 }
 
 impl PeerMut {
-    pub fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
+    pub fn set_preshared_key(&mut self, preshared_key: Option<Psk>) {
         self.preshared_key = preshared_key.into();
     }
 
@@ -147,7 +149,7 @@ impl<T: DeviceTransports> DeviceRead<'_, T> {
             peers.push(PeerStats {
                 peer: Peer {
                     public_key: *pubkey,
-                    preshared_key: p.preshared_key,
+                    preshared_key: p.preshared_key.clone(),
                     allowed_ips: p.allowed_ips.iter().map(|(_, net)| net).collect(),
                     endpoint: p.endpoint.addr,
                     keepalive: p.tunnel.persistent_keepalive(),
