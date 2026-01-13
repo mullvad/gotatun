@@ -73,9 +73,7 @@ impl DeviceBuilder<Nul, Nul, Nul> {
 }
 
 impl<X, Y> DeviceBuilder<Nul, X, Y> {
-    /// Create a WireGuard device that reads/writes incoming/outgoing packets using a UDP socket.
-    ///
-    /// This is the conventional device kind.
+    /// Create a WireGuard device that reads/writes incoming/outgoing packets using a UDP socket. This is the conventional device kind.
     pub fn with_default_udp(self) -> DeviceBuilder<UdpSocketFactory, X, Y> {
         self.with_udp(UdpSocketFactory)
     }
