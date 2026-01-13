@@ -458,7 +458,7 @@ async fn on_api_set(
         // fwmark only applies on Linux
         // TODO: return error?
         #[cfg(not(target_os = "linux"))]
-        let _ = fwmark;
+        let _ = new_fwmark;
     }
 
     let mut pending_peer_updates = vec![];
