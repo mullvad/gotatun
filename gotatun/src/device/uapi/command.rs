@@ -540,7 +540,23 @@ impl SetPeer {
                 // This key indicates the start of a new peer
                 "public_key" => break,
 
-                "preshared_key" => parse_opt!(k, v, preshared_key),
+                "preshared_key" => {
+                    ensure!(
+                        preshared_key.is_none(),
+                        "Key {k:?} may not be specified twice",
+                    );
+                    *preshared_key = Some(if v.is_empty() {
+                        SetUnset::Unset
+                    } else {
+                        let key_bytes: KeyBytes =
+                            v.parse().map_err(|e| eyre!("Failed to parse {k:?}: {e}"))?;
+                        if key_bytes.0.iter().all(|&b| b == 0) {
+                            SetUnset::Unset
+                        } else {
+                            SetUnset::Set(key_bytes)
+                        }
+                    });
+                }
                 "endpoint" => parse_opt!(k, v, endpoint),
                 "persistent_keepalive_interval" => parse_opt!(k, v, persistent_keepalive_interval),
                 "remove" => parse_bool!(k, v, remove),
