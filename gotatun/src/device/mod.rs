@@ -5,6 +5,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! Implementation of Device blah blah
+
 pub(crate) mod allowed_ips;
 mod builder;
 pub mod configure;
@@ -87,6 +89,9 @@ pub struct Device<T: DeviceTransports> {
     inner: Arc<RwLock<DeviceState<T>>>,
 }
 
+/// Entry point for building a [`Device`].
+///
+/// See [`DeviceBuilder`] for options.
 pub fn build() -> DeviceBuilder<Nul, Nul, Nul> {
     DeviceBuilder::new()
 }

@@ -46,6 +46,18 @@ impl Default for DeviceBuilder<Nul, Nul, Nul> {
 }
 
 impl DeviceBuilder<Nul, Nul, Nul> {
+    /// Create a new [`DeviceBuilder`].
+    /// A final [`Device`] is assembled with [`DeviceBuilder::build`].
+    ///
+    /// # Example
+    /// ```
+    /// use gotatun::device::DeviceBuilder;
+    ///
+    /// let device = DeviceBuilder::new()
+    ///     .with_default_udp()
+    ///     .create_tun("tun").unwrap()
+    ///     .build();
+    /// ```
     pub const fn new() -> Self {
         Self {
             udp: Nul,
@@ -61,6 +73,9 @@ impl DeviceBuilder<Nul, Nul, Nul> {
 }
 
 impl<X, Y> DeviceBuilder<Nul, X, Y> {
+    /// Create a WireGuard device that reads/writes incoming/outgoing packets using a UDP socket.
+    ///
+    /// This is the conventional device kind.
     pub fn with_default_udp(self) -> DeviceBuilder<UdpSocketFactory, X, Y> {
         self.with_udp(UdpSocketFactory)
     }
