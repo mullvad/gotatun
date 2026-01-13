@@ -120,7 +120,6 @@ impl UapiClient {
                     bail!("Server hung up");
                 };
 
-                log::info!("{:?}", response.to_string());
                 if let Err(e) = writeln!(&rw, "{response}") {
                     log::error!("Failed to write API response: {e}");
                 }
