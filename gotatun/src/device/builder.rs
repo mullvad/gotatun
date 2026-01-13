@@ -97,7 +97,8 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
         tun_config.platform_config(|p| {
             p.enable_routing(false);
         });
-        // FIXME: for wintun, must set path or enable signature check
+        // TODO: for wintun, must set path or enable signature check
+        // we should upstream to `tun`
         let tun = tun::create_as_async(&tun_config).map_err(Error::OpenTun)?;
         let tun = TunDevice::from_tun_device(tun)?;
 
