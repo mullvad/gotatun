@@ -56,6 +56,11 @@ pub fn main() {
                 .long("disable-drop-privileges")
                 .env("WG_SUDO")
                 .help("Do not drop sudo privileges. This has no effect if the UID is root"),
+            #[cfg(target_os = "macos")]
+            Arg::new("tun-name-file")
+                .long("tun-name-file")
+                .env("WG_TUN_NAME_FILE")
+                .help("File that stores the TUN interface name"),
         ])
         .get_matches();
 
@@ -63,6 +68,8 @@ pub fn main() {
     let tun_name = matches.value_of("INTERFACE_NAME").unwrap();
     let log_level: Level = matches.value_of_t("verbosity").unwrap_or_else(|e| e.exit());
     let do_drop_privileges = !matches.is_present("disable-drop-privileges");
+    #[cfg(target_os = "macos")]
+    let wg_tun_name_file = matches.value_of("tun-name-file");
 
     // Create a socketpair to communicate between forked processes
     let (sock1, sock2) = UnixDatagram::pair().unwrap();
@@ -123,16 +130,30 @@ pub fn main() {
             .init();
     }
 
-    tokio_main(tun_name, do_drop_privileges, send_child_result);
+    tokio_main(
+        tun_name,
+        do_drop_privileges,
+        #[cfg(target_os = "macos")]
+        wg_tun_name_file,
+        send_child_result,
+    );
 }
 
 #[tokio::main]
 async fn tokio_main(
     tun_name: &str,
     do_drop_privileges: bool,
+    #[cfg(target_os = "macos")] wg_tun_name_file: Option<&str>,
     send_child_result: impl FnOnce(&[u8]),
 ) {
-    let device = match start(tun_name, do_drop_privileges).await {
+    let device = match start(
+        tun_name,
+        do_drop_privileges,
+        #[cfg(target_os = "macos")]
+        wg_tun_name_file,
+    )
+    .await
+    {
         Ok(device) => device,
         Err(e) => {
             log::error!("{e:?}");
@@ -160,6 +181,7 @@ async fn tokio_main(
 async fn start(
     tun_name: &str,
     do_drop_privileges: bool,
+    #[cfg(target_os = "macos")] wg_tun_name_file: Option<&str>,
 ) -> eyre::Result<Device<DefaultDeviceTransports>> {
     let (socket_uid, socket_gid) = drop_privileges::get_saved_ids()?;
 
@@ -167,7 +189,17 @@ async fn start(
     // if "utun" is passed.
     let tun = TunDevice::from_name(tun_name).context("Failed to create TUN device")?;
 
-    let uapi = UapiServer::default_unix_socket(&tun.name()?, Some(socket_uid), Some(socket_gid))
+    let tun_name = tun.name()?;
+
+    // wg-quick uses this to find the interface
+    #[cfg(target_os = "macos")]
+    if let Some(wg_tun_name_file) = wg_tun_name_file {
+        tokio::fs::write(wg_tun_name_file, &tun_name)
+            .await
+            .context("Failed to write to wg_tun_name_file")?;
+    }
+
+    let uapi = UapiServer::default_unix_socket(&tun_name, Some(socket_uid), Some(socket_gid))
         .context("Failed to create UAPI unix socket")?;
 
     let device: Device<_> = DeviceBuilder::new()
