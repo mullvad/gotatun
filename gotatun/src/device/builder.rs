@@ -105,8 +105,10 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
         Ok(self.with_ip(tun))
     }
 
-    pub fn with_tun<Tun: IpSend + IpRecv + Clone>(self, tun: Tun) -> DeviceBuilder<X, Tun, Tun> {
-        self.with_tun_pair(tun.clone(), tun)
+    /// Add a channel where the device will read and write IP packets. This is normally a a [`TunDevice`],
+    /// but can be any type that implements both [`IpSend`] and [`IpRecv`].
+    pub fn with_ip<Tun: IpSend + IpRecv + Clone>(self, tun: Tun) -> DeviceBuilder<X, Tun, Tun> {
+        self.with_ip_pair(tun.clone(), tun)
     }
 
     pub fn with_tun_pair<TunTx: IpSend, TunRx: IpRecv>(
