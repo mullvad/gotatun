@@ -30,10 +30,6 @@ struct Args {
     #[clap(short, long)]
     foreground: bool,
 
-    /// Number of OS threads to use
-    #[clap(short, long, env = "WG_THREADS", default_value = "4")]
-    threads: String,
-
     /// Log verbosity
     #[clap(short, long, env = "WG_LOG_LEVEL", possible_values = ["error", "info", "debug", "trace"], default_value = "info")]
     verbosity: Level,
