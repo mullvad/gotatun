@@ -1,3 +1,10 @@
+// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+//
+// Modified by Mullvad VPN.
+// Copyright (c) 2026 Mullvad VPN.
+//
+// SPDX-License-Identifier: BSD-3-Clause
+
 use clap::Parser;
 use daemonize::Daemonize;
 use eyre::{Context, Result, bail};
