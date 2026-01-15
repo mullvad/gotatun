@@ -42,8 +42,8 @@ struct Args {
     #[clap(long, env = "WG_SUDO")]
     disable_drop_privileges: bool,
 
-    #[cfg(target_os = "macos")]
     /// File that stores the TUN interface name
+    #[cfg(target_os = "macos")]
     #[clap(long, env = "WG_TUN_NAME_FILE")]
     tun_name_file: Option<String>,
 }
