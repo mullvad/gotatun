@@ -34,7 +34,9 @@ pub mod command;
 
 use super::peer_state::AllowedIP;
 use super::{Connection, DeviceState, Reconfigure};
-use crate::device::{DeviceTransports, PeerUpdateRequest};
+use crate::device::DeviceTransports;
+#[cfg(feature = "daita-uapi")]
+use crate::device::uapi::command::SetUnset;
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
 use eyre::{Context, bail, eyre};
@@ -46,7 +48,7 @@ use std::fmt::Debug;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::str::FromStr;
 use std::sync::Weak;
-#[cfg(feature = "daita")]
+#[cfg(feature = "daita-uapi")]
 use std::sync::atomic;
 use std::time::SystemTime;
 use tokio::sync::{RwLock, mpsc, oneshot};
@@ -341,7 +343,7 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
         let peer = peer.lock().await;
         let (_, tx_bytes, rx_bytes, ..) = peer.tunnel.stats();
         let endpoint = peer.endpoint().addr;
-        #[cfg(feature = "daita")]
+        #[cfg(feature = "daita-uapi")]
         let padding_overhead = peer.daita.as_ref().map(|daita| daita.padding_overhead());
 
         let last_handshake_time = peer.time_since_last_handshake().and_then(|d| {
@@ -366,27 +368,33 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
                         cidr: ip_network.prefix(),
                     })
                     .collect(),
+                #[cfg(feature = "daita-uapi")]
+                daita_settings: peer
+                    .daita_settings()
+                    .cloned()
+                    .map(crate::device::daita::uapi::DaitaSettings::from)
+                    .map(SetUnset::Set),
             },
             last_handshake_time_sec: last_handshake_time.map(|t| t.as_secs()),
             last_handshake_time_nsec: last_handshake_time.map(|t| t.subsec_nanos()),
             rx_bytes: Some(rx_bytes as u64),
             tx_bytes: Some(tx_bytes as u64),
-            #[cfg(feature = "daita")]
+            #[cfg(feature = "daita-uapi")]
             tx_padding_bytes: padding_overhead.map(|p| p.tx_padding_bytes as u64),
-            #[cfg(not(feature = "daita"))]
+            #[cfg(not(feature = "daita-uapi"))]
             tx_padding_bytes: None,
-            #[cfg(feature = "daita")]
+            #[cfg(feature = "daita-uapi")]
             tx_padding_packet_bytes: padding_overhead
                 .map(|p| p.tx_padding_packet_bytes.load(atomic::Ordering::SeqCst) as u64),
-            #[cfg(not(feature = "daita"))]
+            #[cfg(not(feature = "daita-uapi"))]
             tx_padding_packet_bytes: None,
-            #[cfg(feature = "daita")]
+            #[cfg(feature = "daita-uapi")]
             rx_padding_bytes: padding_overhead.map(|p| p.rx_padding_bytes as u64),
-            #[cfg(not(feature = "daita"))]
+            #[cfg(not(feature = "daita-uapi"))]
             rx_padding_bytes: None,
-            #[cfg(feature = "daita")]
+            #[cfg(feature = "daita-uapi")]
             rx_padding_packet_bytes: padding_overhead.map(|p| p.rx_padding_packet_bytes as u64),
-            #[cfg(not(feature = "daita"))]
+            #[cfg(not(feature = "daita-uapi"))]
             rx_padding_packet_bytes: None,
         });
     }
@@ -461,72 +469,112 @@ async fn on_api_set(
         let _ = new_fwmark;
     }
 
-    let mut pending_peer_updates = vec![];
-
     for peer in peers {
         let SetPeer {
-            peer:
-                Peer {
-                    public_key,
-                    preshared_key,
-                    endpoint,
-                    persistent_keepalive_interval,
-                    allowed_ip,
-                },
+            peer: api_peer,
             remove,
             update_only,
             replace_allowed_ips,
-            #[cfg(feature = "daita")]
-            daita_settings,
         } = peer;
 
-        let public_key = x25519_dalek::PublicKey::from(public_key.0);
+        let public_key = x25519_dalek::PublicKey::from(api_peer.public_key.0);
+
+        if remove {
+            // Completely remove a peer
+            device.remove_peer(&public_key).await;
+            continue;
+        }
 
         if update_only && !device.peers.contains_key(&public_key) {
             continue;
         }
 
-        let preshared_key = preshared_key.and_then(|psk| match psk {
-            command::SetUnset::Set(psk) => Some(psk.0),
-            command::SetUnset::Unset => None,
-        });
-
-        #[cfg(feature = "daita")]
-        let daita_settings = match daita_settings {
-            Some(daita_settings) => {
-                // TODO: Check if there are any changes
-                reconfigure |= Reconfigure::Yes;
-
+        #[cfg(feature = "daita-uapi")]
+        let daita_settings = match api_peer.daita_settings {
+            Some(SetUnset::Set(daita_settings)) => {
                 // Parse from API repr to actual settings
+                // NOTE: Very annoying, but we have to do this before removing the peer
+                // to prevent it from being unexpectedly removed.
                 match crate::device::daita::DaitaSettings::try_from(daita_settings) {
-                    Ok(settings) => Some(settings),
+                    Ok(settings) => Some(SetUnset::Set(settings)),
                     Err(e) => {
                         log::error!("Invalid DAITA settings: {e}");
-                        return (SetResponse { errno: EINVAL }, Reconfigure::No);
+                        return (SetResponse { errno: EINVAL }, reconfigure);
                     }
                 }
             }
+            Some(SetUnset::Unset) => Some(SetUnset::Unset),
             None => None,
         };
-        let update_peer = PeerUpdateRequest {
-            public_key,
-            remove,
-            replace_allowed_ips,
-            endpoint,
-            new_allowed_ips: allowed_ip
-                .iter()
-                .map(|AllowedIP { addr, cidr }| IpNetwork::new(*addr, *cidr).unwrap())
-                .collect(),
-            keepalive: persistent_keepalive_interval,
-            preshared_key,
-            #[cfg(feature = "daita")]
-            daita_settings,
-        };
-        pending_peer_updates.push(update_peer);
-    }
 
-    for update_peer in pending_peer_updates {
-        device.update_peer(update_peer).await;
+        let (mut new_peer, index) = match device.remove_peer(&public_key).await {
+            None => {
+                // New peer
+                (crate::device::Peer::new(public_key), device.next_index())
+            }
+            Some(old_peer) => {
+                // Take existing peer
+                let peer = old_peer.lock().await;
+                let index = peer.index();
+
+                let new_peer = crate::device::Peer {
+                    public_key,
+                    preshared_key: peer.preshared_key,
+                    endpoint: peer.endpoint().addr,
+                    keepalive: peer.persistent_keepalive(),
+                    allowed_ips: if replace_allowed_ips {
+                        vec![]
+                    } else {
+                        // Keep old allowed IPs if requested
+                        peer.allowed_ips().collect()
+                    },
+                    #[cfg(feature = "daita")]
+                    daita_settings: peer.daita_settings().cloned(),
+                };
+
+                (new_peer, index)
+            }
+        };
+
+        if let Some(endpoint) = api_peer.endpoint {
+            new_peer.endpoint = Some(endpoint);
+        }
+
+        if let Some(keepalive) = api_peer.persistent_keepalive_interval {
+            new_peer.keepalive = Some(keepalive);
+        }
+
+        match api_peer.preshared_key {
+            Some(command::SetUnset::Set(psk)) => {
+                new_peer.preshared_key = Some(psk.0);
+            }
+            Some(command::SetUnset::Unset) => {
+                new_peer.preshared_key = None;
+            }
+            None => (),
+        }
+
+        #[cfg(feature = "daita-uapi")]
+        match daita_settings {
+            Some(SetUnset::Set(settings)) => {
+                new_peer.daita_settings = Some(settings);
+                reconfigure |= Reconfigure::Yes;
+            }
+            Some(SetUnset::Unset) => {
+                new_peer.daita_settings = None;
+                reconfigure |= Reconfigure::Yes;
+            }
+            None => (),
+        }
+
+        new_peer
+            .allowed_ips
+            .extend(api_peer.allowed_ip.iter().map(|allowed_ip| {
+                IpNetwork::new(allowed_ip.addr, allowed_ip.cidr)
+                    .expect("Invalid allowed IP from UAPI")
+            }));
+
+        device.add_peer(new_peer, index);
     }
 
     // If there is no key pair, we cannot reconfigure the connection
