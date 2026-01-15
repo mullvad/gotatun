@@ -1,4 +1,4 @@
-use clap::{Arg, Command};
+use clap::Parser;
 use daemonize::Daemonize;
 use eyre::Context;
 use gotatun::device::uapi::UapiServer;
@@ -16,61 +16,49 @@ mod drop_privileges;
 const CHILD_OK: &[u8] = &[1];
 const CHILD_ERR: &[u8] = &[0];
 
-pub fn main() {
-    let matches = Command::new("gotatun")
-        .version(env!("CARGO_PKG_VERSION"))
-        .author("Mullvad VPN <https://github.com/mullvad/gotatun>")
-        .args(&[
-            Arg::new("INTERFACE_NAME")
-                .required(true)
-                .takes_value(true)
-                .validator(check_tun_name)
-                .help("The name of the created interface"),
-            Arg::new("foreground")
-                .long("foreground")
-                .short('f')
-                .help("Run and log in the foreground"),
-            Arg::new("threads")
-                .takes_value(true)
-                .long("threads")
-                .short('t')
-                .env("WG_THREADS")
-                .help("Number of OS threads to use")
-                .default_value("4"),
-            Arg::new("verbosity")
-                .takes_value(true)
-                .long("verbosity")
-                .short('v')
-                .env("WG_LOG_LEVEL")
-                .possible_values(["error", "info", "debug", "trace"])
-                .help("Log verbosity")
-                .default_value("info"),
-            Arg::new("log")
-                .takes_value(true)
-                .long("log")
-                .short('l')
-                .env("WG_LOG_FILE")
-                .help("Log file")
-                .default_value("/tmp/gotatun.out"),
-            Arg::new("disable-drop-privileges")
-                .long("disable-drop-privileges")
-                .env("WG_SUDO")
-                .help("Do not drop sudo privileges. This has no effect if the UID is root"),
-            #[cfg(target_os = "macos")]
-            Arg::new("tun-name-file")
-                .long("tun-name-file")
-                .env("WG_TUN_NAME_FILE")
-                .takes_value(true)
-                .help("File that stores the TUN interface name"),
-        ])
-        .get_matches();
+/// GotaTun - A userspace WireGuard implementation
+#[derive(Parser)]
+#[clap(version, author = "Mullvad VPN <https://github.com/mullvad/gotatun>")]
+struct Args {
+    /// Interface name to use for the TUN interface
+    #[clap(validator = check_tun_name)]
+    interface_name: String,
 
-    let background = !matches.is_present("foreground");
-    let tun_name = matches.value_of("INTERFACE_NAME").unwrap();
-    let log_level: Level = matches.value_of_t("verbosity").unwrap_or_else(|e| e.exit());
-    let do_drop_privileges = !matches.is_present("disable-drop-privileges");
+    /// Run and log in the foreground
+    #[clap(short, long)]
+    foreground: bool,
+
+    /// Number of OS threads to use
+    #[clap(short, long, env = "WG_THREADS", default_value = "4")]
+    threads: String,
+
+    /// Log verbosity
+    #[clap(short, long, env = "WG_LOG_LEVEL", possible_values = ["error", "info", "debug", "trace"], default_value = "info")]
+    verbosity: Level,
+
+    /// Log file
+    #[clap(short, long, env = "WG_LOG_FILE", default_value = "/tmp/gotatun.out")]
+    log: String,
+
+    /// Do not drop sudo privileges. This has no effect if the UID is root
+    #[clap(long, env = "WG_SUDO")]
+    disable_drop_privileges: bool,
+
     #[cfg(target_os = "macos")]
-    let wg_tun_name_file = matches.value_of("tun-name-file");
+    /// File that stores the TUN interface name
+    #[clap(long, env = "WG_TUN_NAME_FILE")]
+    tun_name_file: Option<String>,
+}
+
+pub fn main() {
+    let args = Args::parse();
+
+    let background = !args.foreground;
+    let tun_name = &args.interface_name;
+    let log_level = args.verbosity;
+    let do_drop_privileges = !args.disable_drop_privileges;
+    #[cfg(target_os = "macos")]
+    let wg_tun_name_file = args.tun_name_file.as_deref();
 
     // Create a socketpair to communicate between forked processes
     let (sock1, sock2) = UnixDatagram::pair().unwrap();
@@ -84,7 +72,7 @@ pub fn main() {
     let _guard;
 
     if background {
-        let log = matches.value_of("log").unwrap();
+        let log = &args.log;
 
         let log_file =
             File::create(log).unwrap_or_else(|e| panic!("Could not create log file {log}: {e}"));
