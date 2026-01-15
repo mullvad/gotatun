@@ -16,8 +16,8 @@ use typed_builder::TypedBuilder;
 
 use crate::{device::peer_state::AllowedIP, serialization::KeyBytes};
 
-#[cfg(feature = "daita")]
-use crate::device::daita::uapi::DaitaSettings;
+#[cfg(feature = "daita-uapi")]
+use crate::device::daita::DaitaSettings;
 
 #[derive(Debug)]
 pub enum Request {
@@ -143,10 +143,6 @@ pub struct SetPeer {
     /// This key/value combo indicates that the allowed IPs (perhaps an empty list) should replace any existing ones of the previously added peer entry, rather than append to the existing allowed IPs list.
     #[builder(setter(strip_bool))]
     pub replace_allowed_ips: bool,
-
-    #[cfg(feature = "daita")]
-    #[builder(default, setter(strip_option, into))]
-    pub daita_settings: Option<DaitaSettings>,
 }
 
 #[derive(Debug)]
@@ -191,6 +187,10 @@ pub struct Peer {
     /// IP entry will be removed from that peer and added to this peer.
     #[builder(default)]
     pub allowed_ip: Vec<AllowedIP>,
+
+    #[cfg(feature = "daita-uapi")]
+    #[builder(default, setter(strip_option, into))]
+    pub daita_settings: Option<SetUnset<DaitaSettings>>,
 }
 
 impl From<Set> for Request {
@@ -221,6 +221,8 @@ impl Peer {
             endpoint: None,
             persistent_keepalive_interval: None,
             allowed_ip: vec![],
+            #[cfg(feature = "daita-uapi")]
+            daita_settings: None,
         }
     }
 
@@ -238,8 +240,6 @@ impl SetPeer {
             remove: false,
             update_only: false,
             replace_allowed_ips: false,
-            #[cfg(feature = "daita")]
-            daita_settings: None,
         }
     }
 
@@ -332,15 +332,17 @@ impl Display for GetPeer {
                     endpoint,
                     persistent_keepalive_interval,
                     allowed_ip,
+                    #[cfg(feature = "daita-uapi")]
+                    daita_settings,
                 },
             last_handshake_time_sec,
             last_handshake_time_nsec,
             rx_bytes,
             tx_bytes,
-            tx_padding_bytes: _,
-            tx_padding_packet_bytes: _,
-            rx_padding_bytes: _,
-            rx_padding_packet_bytes: _,
+            tx_padding_bytes: daita_tx_padding_bytes,
+            tx_padding_packet_bytes: daita_tx_padding_packet_bytes,
+            rx_padding_bytes: daita_rx_padding_bytes,
+            rx_padding_packet_bytes: daita_rx_padding_packet_bytes,
         } = self;
 
         let public_key = Some(&public_key);
@@ -360,6 +362,60 @@ impl Display for GetPeer {
 
         for (key, value) in fields {
             writeln!(f, "{key}={value}")?;
+        }
+
+        #[cfg(not(feature = "daita-uapi"))]
+        {
+            let _ = (
+                daita_tx_padding_bytes,
+                daita_tx_padding_packet_bytes,
+                daita_rx_padding_bytes,
+                daita_rx_padding_packet_bytes,
+            );
+        }
+
+        #[cfg(feature = "daita-uapi")]
+        if let Some(SetUnset::Set(daita)) = daita_settings {
+            let DaitaSettings {
+                maybenot_machines,
+                max_padding_frac: daita_max_padding_frac,
+                max_blocking_frac: daita_max_blocking_frac,
+                max_blocked_packets: daita_max_blocked_packets,
+                min_blocking_capacity: daita_min_blocking_capacity,
+            } = daita;
+
+            writeln!(f, "daita_enable=1")?;
+
+            for machine in maybenot_machines {
+                writeln!(f, "daita_machine={}", machine.serialize())?;
+            }
+
+            writeln!(f, "daita_max_blocked_packets={daita_max_blocked_packets}")?;
+            writeln!(
+                f,
+                "daita_min_blocking_capacity={daita_min_blocking_capacity}"
+            )?;
+            writeln!(f, "daita_max_padding_frac={daita_max_padding_frac}")?;
+            writeln!(f, "daita_max_blocking_frac={daita_max_blocking_frac}")?;
+
+            if let Some(daita_rx_padding_bytes) = daita_rx_padding_bytes {
+                writeln!(f, "daita_rx_padding_bytes={daita_rx_padding_bytes}")?;
+            }
+            if let Some(daita_tx_padding_bytes) = daita_tx_padding_bytes {
+                writeln!(f, "daita_tx_padding_bytes={daita_tx_padding_bytes}")?;
+            }
+            if let Some(daita_rx_padding_packet_bytes) = daita_rx_padding_packet_bytes {
+                writeln!(
+                    f,
+                    "daita_rx_padding_packet_bytes={daita_rx_padding_packet_bytes}"
+                )?;
+            }
+            if let Some(daita_tx_padding_packet_bytes) = daita_tx_padding_packet_bytes {
+                writeln!(
+                    f,
+                    "daita_tx_padding_packet_bytes={daita_tx_padding_packet_bytes}"
+                )?;
+            }
         }
 
         for AllowedIP { addr, cidr } in allowed_ip {
@@ -504,12 +560,12 @@ impl SetPeer {
                     endpoint,
                     persistent_keepalive_interval,
                     allowed_ip,
+                    #[cfg(feature = "daita-uapi")]
+                    daita_settings,
                 },
             remove,
             update_only,
             replace_allowed_ips,
-            #[cfg(feature = "daita")]
-                daita_settings: _, // NOTE: Non-standard feature
         } = &mut set_peer;
 
         loop {
@@ -551,6 +607,9 @@ impl SetPeer {
                 "replace_allowed_ips" => parse_bool!(k, v, replace_allowed_ips),
                 "allowed_ip" => allowed_ip.push(v.parse().map_err(|err| eyre!("{err}"))?),
 
+                #[cfg(feature = "daita-uapi")]
+                _ if matches!(try_process_daita_line(daita_settings, k, v), Ok(true)) => (),
+
                 _ => bail!("Key {k:?} in {line:?} is not allowed in command set/peer"),
             }
 
@@ -561,6 +620,73 @@ impl SetPeer {
 
         Ok(set_peer)
     }
+}
+
+/// Update `daita_settings` based on the key-value pair. If the key is not recognized,
+/// `Ok(false)` is returned. If anything was updated, `Ok(true)` is returned. If the key is
+/// recognized but anything at all fails, an error is returned.
+#[cfg(feature = "daita-uapi")]
+fn try_process_daita_line(
+    daita_settings: &mut Option<SetUnset<DaitaSettings>>,
+    k: &str,
+    v: &str,
+) -> eyre::Result<bool> {
+    fn daita_or_bail(
+        daita_settings: &mut Option<SetUnset<DaitaSettings>>,
+    ) -> eyre::Result<&mut DaitaSettings> {
+        let Some(SetUnset::Set(daita_settings)) = daita_settings else {
+            bail!("DAITA must be enabled with daita_enable=1");
+        };
+        Ok(daita_settings)
+    }
+    match k {
+        "daita_enable" => {
+            ensure!(
+                v == "1" || v == "0",
+                "The only valid value for key {:?} is \"1\" and \"0\"",
+                k
+            );
+
+            if v == "0" {
+                *daita_settings = Some(SetUnset::Unset);
+            } else {
+                *daita_settings = Some(SetUnset::Set(DaitaSettings::default()));
+            }
+        }
+        "daita_machine" => {
+            let daita_settings = daita_or_bail(daita_settings)?;
+            let machine = v
+                .parse()
+                .map_err(|err| eyre!("invalid daita machine {:?}: {err}", v))?;
+            daita_settings.maybenot_machines.push(machine);
+        }
+        "daita_max_padding_frac" => {
+            let daita_settings = daita_or_bail(daita_settings)?;
+            daita_settings.max_padding_frac = v
+                .parse()
+                .map_err(|err| eyre!("invalid padding frac: {err}"))?;
+        }
+        "daita_max_blocking_frac" => {
+            let daita_settings = daita_or_bail(daita_settings)?;
+            daita_settings.max_blocking_frac = v
+                .parse()
+                .map_err(|err| eyre!("invalid blocking frac: {err}"))?;
+        }
+        "daita_max_blocked_packets" => {
+            let daita_settings = daita_or_bail(daita_settings)?;
+            daita_settings.max_blocked_packets = v
+                .parse()
+                .map_err(|err| eyre!("invalid blocked packets: {err}"))?;
+        }
+        "daita_min_blocking_capacity" => {
+            let daita_settings = daita_or_bail(daita_settings)?;
+            daita_settings.min_blocking_capacity = v
+                .parse()
+                .map_err(|err| eyre!("invalid min blocking capacity: {err}"))?;
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
 }
 
 impl FromStr for Request {
