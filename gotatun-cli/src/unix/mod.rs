@@ -1,14 +1,16 @@
-use clap::{Arg, Command};
+use clap::Parser;
 use daemonize::Daemonize;
-use eyre::Context;
+use eyre::{Context, Result, bail};
 use gotatun::device::uapi::UapiServer;
 use gotatun::device::{DefaultDeviceTransports, Device, DeviceBuilder};
 use gotatun::tun::tun_async_device::TunDevice;
 use std::fs::File;
+use std::future::Future;
 use std::os::unix::net::UnixDatagram;
+use std::path::{Path, PathBuf};
 use std::process::exit;
 use tokio::signal::unix::{SignalKind, signal};
-use tracing::Level;
+use tracing::{Level, info};
 
 mod drop_privileges;
 
@@ -16,196 +18,182 @@ mod drop_privileges;
 const CHILD_OK: &[u8] = &[1];
 const CHILD_ERR: &[u8] = &[0];
 
-pub fn main() {
-    let matches = Command::new("gotatun")
-        .version(env!("CARGO_PKG_VERSION"))
-        .author("Mullvad VPN <https://github.com/mullvad/gotatun>")
-        .args(&[
-            Arg::new("INTERFACE_NAME")
-                .required(true)
-                .takes_value(true)
-                .validator(check_tun_name)
-                .help("The name of the created interface"),
-            Arg::new("foreground")
-                .long("foreground")
-                .short('f')
-                .help("Run and log in the foreground"),
-            Arg::new("threads")
-                .takes_value(true)
-                .long("threads")
-                .short('t')
-                .env("WG_THREADS")
-                .help("Number of OS threads to use")
-                .default_value("4"),
-            Arg::new("verbosity")
-                .takes_value(true)
-                .long("verbosity")
-                .short('v')
-                .env("WG_LOG_LEVEL")
-                .possible_values(["error", "info", "debug", "trace"])
-                .help("Log verbosity")
-                .default_value("info"),
-            Arg::new("log")
-                .takes_value(true)
-                .long("log")
-                .short('l')
-                .env("WG_LOG_FILE")
-                .help("Log file")
-                .default_value("/tmp/gotatun.out"),
-            Arg::new("disable-drop-privileges")
-                .long("disable-drop-privileges")
-                .env("WG_SUDO")
-                .help("Do not drop sudo privileges. This has no effect if the UID is root"),
-            #[cfg(target_os = "macos")]
-            Arg::new("tun-name-file")
-                .long("tun-name-file")
-                .env("WG_TUN_NAME_FILE")
-                .takes_value(true)
-                .help("File that stores the TUN interface name"),
-        ])
-        .get_matches();
+/// GotaTun - A userspace WireGuard implementation
+#[derive(Parser)]
+#[clap(version, author = "Mullvad VPN <https://github.com/mullvad/gotatun>")]
+struct Args {
+    /// Interface name to use for the TUN interface
+    #[clap(validator = check_tun_name)]
+    interface_name: String,
 
-    let background = !matches.is_present("foreground");
-    let tun_name = matches.value_of("INTERFACE_NAME").unwrap();
-    let log_level: Level = matches.value_of_t("verbosity").unwrap_or_else(|e| e.exit());
-    let do_drop_privileges = !matches.is_present("disable-drop-privileges");
+    /// Run and log in the foreground
+    #[clap(short, long)]
+    foreground: bool,
+
+    /// Log verbosity
+    #[clap(short, long, env = "WG_LOG_LEVEL", possible_values = ["error", "info", "debug", "trace"], default_value = "info")]
+    verbosity: Level,
+
+    /// Log file
+    #[clap(short, long, env = "WG_LOG_FILE", default_value = "/tmp/gotatun.out")]
+    log: PathBuf,
+
+    /// Do not drop sudo privileges. This has no effect if the UID is root
+    #[clap(long, env = "WG_SUDO")]
+    disable_drop_privileges: bool,
+
+    /// File that stores the TUN interface name
     #[cfg(target_os = "macos")]
-    let wg_tun_name_file = matches.value_of("tun-name-file");
-
-    // Create a socketpair to communicate between forked processes
-    let (sock1, sock2) = UnixDatagram::pair().unwrap();
-    let _ = sock1.set_nonblocking(true);
-    let send_child_result = |result: &[u8]| {
-        sock1.send(result).unwrap();
-        drop(sock1);
-    };
-
-    // tracing_appender worker guard
-    let _guard;
-
-    if background {
-        let log = matches.value_of("log").unwrap();
-
-        let log_file =
-            File::create(log).unwrap_or_else(|e| panic!("Could not create log file {log}: {e}"));
-
-        let daemonize = Daemonize::new().working_directory("/tmp");
-
-        let child_result = match daemonize.execute() {
-            daemonize::Outcome::Parent(Err(e)) => {
-                eprintln!("GotaTun failed to start");
-                eprintln!("{e:?}");
-                exit(1);
-            }
-            daemonize::Outcome::Parent(Ok(_parent)) => {
-                let mut b = [0u8; 1];
-                if sock2.recv(&mut b).is_ok() && b == CHILD_OK {
-                    println!("GotaTun started successfully");
-                    return;
-                } else {
-                    eprintln!("GotaTun failed to start");
-                    exit(1);
-                }
-            }
-            daemonize::Outcome::Child(child) => child,
-        };
-
-        let (non_blocking, guard) = tracing_appender::non_blocking(log_file);
-        _guard = guard;
-
-        tracing_subscriber::fmt()
-            .with_max_level(log_level)
-            .with_writer(non_blocking)
-            .with_ansi(false)
-            .init();
-
-        if let Err(e) = child_result {
-            log::error!("{e:?}");
-            send_child_result(CHILD_ERR);
-            exit(1);
-        }
-    } else {
-        tracing_subscriber::fmt()
-            .pretty()
-            .with_max_level(log_level)
-            .init();
-    }
-
-    // Note: We must spawn the tokio runtime after forking the process.
-    // Otherwise, we see issues with file descriptors being bad, etc.
-    tokio_main(
-        tun_name,
-        do_drop_privileges,
-        #[cfg(target_os = "macos")]
-        wg_tun_name_file,
-        send_child_result,
-    );
+    #[clap(long, env = "WG_TUN_NAME_FILE")]
+    tun_name_file: Option<String>,
 }
 
-#[tokio::main]
-async fn tokio_main(
-    tun_name: &str,
-    do_drop_privileges: bool,
-    #[cfg(target_os = "macos")] wg_tun_name_file: Option<&str>,
-    send_child_result: impl FnOnce(&[u8]),
-) {
-    let device = match start(
-        tun_name,
-        do_drop_privileges,
-        #[cfg(target_os = "macos")]
-        wg_tun_name_file,
-    )
-    .await
-    {
-        Ok(device) => device,
-        Err(e) => {
-            log::error!("{e:?}");
-            send_child_result(CHILD_ERR);
-            exit(1);
+pub fn main() {
+    if let Err(e) = run() {
+        eprintln!("GotaTun failed: {e:?}");
+        exit(1);
+    }
+}
+
+fn run() -> Result<()> {
+    let args = Args::parse();
+
+    if args.foreground {
+        run_foreground(args)
+    } else {
+        run_daemon(args)
+    }
+}
+
+fn run_foreground(args: Args) -> Result<()> {
+    setup_console_logging(args.verbosity);
+
+    with_tokio_runtime(async {
+        let device = setup_device(args).await.context("Failed to start tunnel")?;
+        info!("GotaTun started successfully");
+        wait_for_shutdown(device).await;
+        Ok(())
+    })
+}
+
+fn run_daemon(args: Args) -> Result<()> {
+    // Create IPC channel for parent and child
+    let (child_sock, parent_sock) = UnixDatagram::pair().context("Failed to create socket pair")?;
+    child_sock
+        .set_nonblocking(true)
+        .context("Failed to set socket non-blocking")?;
+
+    match Daemonize::new().working_directory("/tmp").execute() {
+        daemonize::Outcome::Parent(result) => {
+            result?;
+            wait_for_child(parent_sock)?;
+            println!("GotaTun started successfully");
+            Ok(())
         }
-    };
+        daemonize::Outcome::Child(result) => {
+            result?;
+            run_daemon_child(args, child_sock)
+        }
+    }
+}
 
-    // Notify parent that tunnel initialization succeeded
-    send_child_result(CHILD_OK);
+fn run_daemon_child(args: Args, child_sock: UnixDatagram) -> Result<()> {
+    let _guard = setup_file_logging(&args.log, args.verbosity)?;
 
-    log::info!("GotaTun started successfully");
+    with_tokio_runtime(async {
+        match setup_device(args).await {
+            Ok(device) => {
+                let _ = child_sock.send(CHILD_OK);
+                drop(child_sock);
+                info!("GotaTun started successfully");
+                wait_for_shutdown(device).await;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = child_sock.send(CHILD_ERR);
+                Err(e)
+            }
+        }
+    })
+}
 
-    let mut sigint = signal(SignalKind::interrupt()).expect("set up SIGINT handler");
-    let mut sigterm = signal(SignalKind::terminate()).expect("set up SIGTERM handler");
+fn wait_for_child(sock: UnixDatagram) -> Result<()> {
+    let mut buf = [0u8; 1];
+    if sock.recv(&mut buf).is_ok() && buf == CHILD_OK {
+        Ok(())
+    } else {
+        bail!("Child process failed to initialize")
+    }
+}
+
+fn setup_file_logging(
+    log_file: &Path,
+    level: Level,
+) -> Result<tracing_appender::non_blocking::WorkerGuard> {
+    let file = File::create(log_file)
+        .with_context(|| format!("Could not create log file {}", log_file.display()))?;
+
+    let (non_blocking, guard) = tracing_appender::non_blocking(file);
+
+    tracing_subscriber::fmt()
+        .with_max_level(level)
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .init();
+
+    Ok(guard)
+}
+
+fn setup_console_logging(level: Level) {
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_max_level(level)
+        .init();
+}
+
+/// Create a tokio runtime and run the given future on it
+fn with_tokio_runtime(f: impl Future<Output = Result<()>>) -> Result<()> {
+    // Note: We must spawn the tokio runtime after forking the process.
+    // Otherwise, we see issues with file descriptors being bad, etc.
+    let rt = tokio::runtime::Runtime::new().context("Failed to create tokio runtime")?;
+    rt.block_on(f)
+}
+
+async fn wait_for_shutdown(device: Device<DefaultDeviceTransports>) {
+    let mut sigint = signal(SignalKind::interrupt()).expect("Failed to set up SIGINT handler");
+    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler");
+
     tokio::select! {
-        _ = sigint.recv() => log::info!("SIGINT received"),
-        _ = sigterm.recv() => log::info!("SIGTERM received"),
+        _ = sigint.recv() => info!("SIGINT received"),
+        _ = sigterm.recv() => info!("SIGTERM received"),
     }
 
-    log::info!("GotaTun is shutting down");
+    info!("GotaTun is shutting down");
     device.stop().await;
 }
 
-async fn start(
-    tun_name: &str,
-    do_drop_privileges: bool,
-    #[cfg(target_os = "macos")] wg_tun_name_file: Option<&str>,
-) -> eyre::Result<Device<DefaultDeviceTransports>> {
+/// Create and configure wireguard tunnel
+async fn setup_device(args: Args) -> eyre::Result<Device<DefaultDeviceTransports>> {
     let (socket_uid, socket_gid) = drop_privileges::get_saved_ids()?;
 
     // We must create the tun device first because its name will change on macOS
     // if "utun" is passed.
-    let tun = TunDevice::from_name(tun_name).context("Failed to create TUN device")?;
+    let tun = TunDevice::from_name(&args.interface_name).context("Failed to create TUN device")?;
     let tun_name = tun.name()?; // get the actual tun name
-    log::info!("Tunnel interface: {tun_name}");
+    info!("Tunnel interface: {tun_name}");
 
     // wg-quick uses this to find the interface
     #[cfg(target_os = "macos")]
-    if let Some(wg_tun_name_file) = wg_tun_name_file {
-        tokio::fs::write(wg_tun_name_file, &tun_name)
+    if let Some(tun_name_file) = args.tun_name_file {
+        tokio::fs::write(tun_name_file, &tun_name)
             .await
-            .context("Failed to write to wg_tun_name_file")?;
+            .context("Failed to write to tun-name-file")?;
     }
 
     let uapi = UapiServer::default_unix_socket(&tun_name, Some(socket_uid), Some(socket_gid))
         .context("Failed to create UAPI unix socket")?;
 
-    let device: Device<_> = DeviceBuilder::new()
+    let dev = DeviceBuilder::new()
         .with_uapi(uapi)
         .with_default_udp()
         .with_ip(tun)
@@ -213,11 +201,11 @@ async fn start(
         .await
         .context("Failed to start WireGuard device")?;
 
-    if do_drop_privileges {
+    if !args.disable_drop_privileges {
         drop_privileges::drop_privileges().context("Failed to drop privileges")?;
     }
 
-    Ok(device)
+    Ok(dev)
 }
 
 fn check_tun_name(_v: &str) -> eyre::Result<()> {
