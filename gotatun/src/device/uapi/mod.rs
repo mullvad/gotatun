@@ -34,6 +34,8 @@ pub mod command;
 
 use super::peer_state::AllowedIP;
 use super::{Connection, DeviceState, Reconfigure};
+#[cfg(feature = "daita-uapi")]
+use crate::device::uapi::command::SetUnset;
 use crate::device::{DeviceTransports, PeerUpdateRequest};
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
@@ -341,7 +343,7 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
         let peer = peer.lock().await;
         let (_, tx_bytes, rx_bytes, ..) = peer.tunnel.stats();
         let endpoint = peer.endpoint().addr;
-        #[cfg(feature = "daita")]
+        #[cfg(feature = "daita-uapi")]
         let padding_overhead = peer.daita.as_ref().map(|daita| daita.padding_overhead());
 
         let last_handshake_time = peer.time_since_last_handshake().and_then(|d| {
@@ -366,27 +368,33 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
                         cidr: ip_network.prefix(),
                     })
                     .collect(),
+                #[cfg(feature = "daita-uapi")]
+                daita_settings: peer
+                    .daita_settings()
+                    .cloned()
+                    .map(crate::device::daita::uapi::DaitaSettings::from)
+                    .map(SetUnset::Set),
             },
             last_handshake_time_sec: last_handshake_time.map(|t| t.as_secs()),
             last_handshake_time_nsec: last_handshake_time.map(|t| t.subsec_nanos()),
             rx_bytes: Some(rx_bytes as u64),
             tx_bytes: Some(tx_bytes as u64),
-            #[cfg(feature = "daita")]
+            #[cfg(feature = "daita-uapi")]
             tx_padding_bytes: padding_overhead.map(|p| p.tx_padding_bytes as u64),
-            #[cfg(not(feature = "daita"))]
+            #[cfg(not(feature = "daita-uapi"))]
             tx_padding_bytes: None,
-            #[cfg(feature = "daita")]
+            #[cfg(feature = "daita-uapi")]
             tx_padding_packet_bytes: padding_overhead
                 .map(|p| p.tx_padding_packet_bytes.load(atomic::Ordering::SeqCst) as u64),
-            #[cfg(not(feature = "daita"))]
+            #[cfg(not(feature = "daita-uapi"))]
             tx_padding_packet_bytes: None,
-            #[cfg(feature = "daita")]
+            #[cfg(feature = "daita-uapi")]
             rx_padding_bytes: padding_overhead.map(|p| p.rx_padding_bytes as u64),
-            #[cfg(not(feature = "daita"))]
+            #[cfg(not(feature = "daita-uapi"))]
             rx_padding_bytes: None,
-            #[cfg(feature = "daita")]
+            #[cfg(feature = "daita-uapi")]
             rx_padding_packet_bytes: padding_overhead.map(|p| p.rx_padding_packet_bytes as u64),
-            #[cfg(not(feature = "daita"))]
+            #[cfg(not(feature = "daita-uapi"))]
             rx_padding_packet_bytes: None,
         });
     }
@@ -472,12 +480,12 @@ async fn on_api_set(
                     endpoint,
                     persistent_keepalive_interval,
                     allowed_ip,
+                    #[cfg(feature = "daita-uapi")]
+                    daita_settings,
                 },
             remove,
             update_only,
             replace_allowed_ips,
-            #[cfg(feature = "daita")]
-            daita_settings,
         } = peer;
 
         let public_key = x25519_dalek::PublicKey::from(public_key.0);
@@ -491,9 +499,9 @@ async fn on_api_set(
             command::SetUnset::Unset => None,
         });
 
-        #[cfg(feature = "daita")]
+        #[cfg(feature = "daita-uapi")]
         let daita_settings = match daita_settings {
-            Some(daita_settings) => {
+            Some(SetUnset::Set(daita_settings)) => {
                 // TODO: Check if there are any changes
                 reconfigure |= Reconfigure::Yes;
 
@@ -505,6 +513,11 @@ async fn on_api_set(
                         return (SetResponse { errno: EINVAL }, Reconfigure::No);
                     }
                 }
+            }
+            Some(SetUnset::Unset) => {
+                // FIXME: disabling DAITA is currently not possible
+                reconfigure |= Reconfigure::Yes;
+                None
             }
             None => None,
         };
@@ -519,7 +532,7 @@ async fn on_api_set(
                 .collect(),
             keepalive: persistent_keepalive_interval,
             preshared_key,
-            #[cfg(feature = "daita")]
+            #[cfg(feature = "daita-uapi")]
             daita_settings,
         };
         pending_peer_updates.push(update_peer);

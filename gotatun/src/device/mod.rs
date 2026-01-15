@@ -311,7 +311,7 @@ struct PeerUpdateRequest {
     new_allowed_ips: Vec<IpNetwork>,
     keepalive: Option<u16>,
     preshared_key: Option<[u8; 32]>,
-    #[cfg(feature = "daita")]
+    #[cfg(feature = "daita-uapi")]
     daita_settings: Option<daita::DaitaSettings>,
 }
 
@@ -348,7 +348,7 @@ impl<T: DeviceTransports> DeviceState<T> {
             new_allowed_ips,
             keepalive,
             preshared_key,
-            #[cfg(feature = "daita")]
+            #[cfg(feature = "daita-uapi")]
             daita_settings,
         } = update_peer;
         if remove {
@@ -411,8 +411,7 @@ impl<T: DeviceTransports> DeviceState<T> {
             keepalive,
             preshared_key,
 
-            // TODO: how to remove daita?
-            #[cfg(feature = "daita")]
+            #[cfg(feature = "daita-uapi")]
             daita_settings: daita_settings.or(_old_daita_settings),
         };
 
