@@ -20,7 +20,6 @@ pub mod uapi;
 
 use builder::Nul;
 use index_lfsr::IndexLfsr;
-use ipnetwork::IpNetwork;
 use std::collections::HashMap;
 use std::io::{self};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
@@ -303,18 +302,6 @@ impl BitOrAssign for Reconfigure {
     }
 }
 
-struct PeerUpdateRequest {
-    public_key: x25519::PublicKey,
-    remove: bool,
-    replace_allowed_ips: bool,
-    endpoint: Option<SocketAddr>,
-    new_allowed_ips: Vec<IpNetwork>,
-    keepalive: Option<u16>,
-    preshared_key: Option<[u8; 32]>,
-    #[cfg(feature = "daita")]
-    daita_settings: Option<daita::DaitaSettings>,
-}
-
 impl<T: DeviceTransports> DeviceState<T> {
     fn next_index(&mut self) -> u32 {
         self.next_index.next()
@@ -336,87 +323,6 @@ impl<T: DeviceTransports> DeviceState<T> {
         } else {
             None
         }
-    }
-
-    /// Update or add peer
-    async fn update_peer(&mut self, update_peer: PeerUpdateRequest) {
-        let PeerUpdateRequest {
-            public_key,
-            remove,
-            replace_allowed_ips,
-            endpoint,
-            new_allowed_ips,
-            keepalive,
-            preshared_key,
-            #[cfg(feature = "daita")]
-            daita_settings,
-        } = update_peer;
-        if remove {
-            // Completely remove a peer
-            self.remove_peer(&public_key).await;
-            return;
-        }
-
-        let (index, old_allowed_ips, _old_daita_settings) =
-            match self.remove_peer(&public_key).await {
-                None => {
-                    #[cfg(feature = "daita")]
-                    let old_daita_settings = None;
-                    #[cfg(not(feature = "daita"))]
-                    let old_daita_settings = ();
-
-                    (self.next_index(), vec![], old_daita_settings)
-                }
-                Some(old_peer) => {
-                    // TODO: Update existing peer?
-                    let peer = old_peer.lock().await;
-                    let index = peer.index();
-                    let old_allowed_ips: Vec<IpNetwork> = peer.allowed_ips().collect();
-                    #[cfg(feature = "daita")]
-                    let old_daita_settings = peer.daita_settings().cloned();
-                    #[cfg(not(feature = "daita"))]
-                    let old_daita_settings = ();
-
-                    drop(peer);
-
-                    // TODO: Match pubkey instead of index
-                    let mut remove_list = vec![];
-                    for (peer, ip_network) in self.peers_by_ip.iter() {
-                        if peer.lock().await.index() == index {
-                            remove_list.push(ip_network);
-                        }
-                    }
-                    for network in remove_list {
-                        self.peers_by_ip.remove_network(network);
-                    }
-
-                    (index, old_allowed_ips, old_daita_settings)
-                }
-            };
-
-        let allowed_ips: Vec<IpNetwork> = if replace_allowed_ips {
-            new_allowed_ips.to_vec()
-        } else {
-            // append old allowed IPs
-            old_allowed_ips
-                .into_iter()
-                .chain(new_allowed_ips.iter().copied())
-                .collect()
-        };
-
-        let peer_builder = Peer {
-            public_key,
-            endpoint,
-            allowed_ips,
-            keepalive,
-            preshared_key,
-
-            // TODO: how to remove daita?
-            #[cfg(feature = "daita")]
-            daita_settings: daita_settings.or(_old_daita_settings),
-        };
-
-        self.add_peer(peer_builder, index);
     }
 
     fn add_peer(&mut self, peer_builder: Peer, index: u32) {
