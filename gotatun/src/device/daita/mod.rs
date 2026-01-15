@@ -35,6 +35,18 @@ pub mod uapi {
         /// Minimum number of free slots in the blocking queue to continue blocking.
         pub min_blocking_capacity: usize,
     }
+
+    impl Default for DaitaSettings {
+        fn default() -> Self {
+            Self {
+                maybenot_machines: vec![],
+                max_padding_frac: 0.0,
+                max_blocking_frac: 0.0,
+                max_blocked_packets: NonZeroUsize::new(1024).unwrap(),
+                min_blocking_capacity: 50,
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -66,5 +78,21 @@ impl TryFrom<uapi::DaitaSettings> for DaitaSettings {
             max_blocked_packets: value.max_blocked_packets,
             min_blocking_capacity: value.min_blocking_capacity,
         })
+    }
+}
+
+impl From<DaitaSettings> for uapi::DaitaSettings {
+    fn from(value: DaitaSettings) -> Self {
+        uapi::DaitaSettings {
+            maybenot_machines: value
+                .maybenot_machines
+                .iter()
+                .map(|m| m.serialize())
+                .collect(),
+            max_padding_frac: value.max_padding_frac,
+            max_blocking_frac: value.max_blocking_frac,
+            max_blocked_packets: value.max_blocked_packets,
+            min_blocking_capacity: value.min_blocking_capacity,
+        }
     }
 }

@@ -24,6 +24,8 @@ pcap = ["dep:pcap-file"]
 # In some cases it fails to return UDP_COALESCED_INFO
 windows-gro = []
 daita = []
+# Add non-compliant UAPI support for DAITA
+daita-uapi = ["daita"]
 
 [dependencies]
 base64 = "0.13"
