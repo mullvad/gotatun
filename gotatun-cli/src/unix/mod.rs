@@ -77,7 +77,11 @@ fn run_foreground(args: Args) -> Result<()> {
 }
 
 fn run_daemon(args: Args) -> Result<()> {
-    let (child_sock, parent_sock) = create_daemon_channel()?;
+    // Create IPC channel for parent and child
+    let (child_sock, parent_sock) = UnixDatagram::pair().context("Failed to create socket pair")?;
+    child_sock
+        .set_nonblocking(true)
+        .context("Failed to set socket non-blocking")?;
 
     match Daemonize::new().working_directory("/tmp").execute() {
         daemonize::Outcome::Parent(result) => {
@@ -111,14 +115,6 @@ fn run_daemon_child(args: Args, child_sock: UnixDatagram) -> Result<()> {
             }
         }
     })
-}
-
-fn create_daemon_channel() -> Result<(UnixDatagram, UnixDatagram)> {
-    let (sock1, sock2) = UnixDatagram::pair().context("Failed to create socket pair")?;
-    sock1
-        .set_nonblocking(true)
-        .context("Failed to set socket non-blocking")?;
-    Ok((sock1, sock2))
 }
 
 fn wait_for_child(sock: UnixDatagram) -> Result<()> {
