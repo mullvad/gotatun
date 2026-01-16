@@ -411,7 +411,6 @@ impl<T: DeviceTransports> DeviceState<T> {
             keepalive,
             preshared_key,
 
-            // TODO: how to remove daita?
             #[cfg(feature = "daita")]
             daita_settings: daita_settings.or(_old_daita_settings),
         };
