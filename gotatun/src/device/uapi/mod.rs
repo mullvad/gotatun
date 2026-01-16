@@ -48,7 +48,7 @@ use std::fmt::Debug;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::str::FromStr;
 use std::sync::Weak;
-#[cfg(feature = "daita")]
+#[cfg(feature = "daita-uapi")]
 use std::sync::atomic;
 use std::time::SystemTime;
 use tokio::sync::{RwLock, mpsc, oneshot};
@@ -521,6 +521,9 @@ async fn on_api_set(
             }
             None => None,
         };
+        #[cfg(all(feature = "daita", not(feature = "daita-uapi")))]
+        let daita_settings = None;
+
         let update_peer = PeerUpdateRequest {
             public_key,
             remove,
@@ -532,7 +535,7 @@ async fn on_api_set(
                 .collect(),
             keepalive: persistent_keepalive_interval,
             preshared_key,
-            #[cfg(feature = "daita-uapi")]
+            #[cfg(feature = "daita")]
             daita_settings,
         };
         pending_peer_updates.push(update_peer);
