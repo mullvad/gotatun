@@ -3,3 +3,5 @@ target
 .vscode/
 .idea/
 result
+.helix/
+.zed/
