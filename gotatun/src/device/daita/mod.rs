@@ -19,7 +19,7 @@ pub use maybenot;
 pub use maybenot::Error;
 pub use maybenot::Machine;
 
-pub mod api {
+pub mod uapi {
     use super::*;
 
     #[derive(Debug, Clone)]
@@ -51,10 +51,10 @@ pub struct DaitaSettings {
     pub min_blocking_capacity: usize,
 }
 
-impl TryFrom<api::DaitaSettings> for DaitaSettings {
+impl TryFrom<uapi::DaitaSettings> for DaitaSettings {
     type Error = crate::device::Error;
 
-    fn try_from(value: api::DaitaSettings) -> Result<Self, Self::Error> {
+    fn try_from(value: uapi::DaitaSettings) -> Result<Self, Self::Error> {
         Ok(DaitaSettings {
             maybenot_machines: value
                 .maybenot_machines
