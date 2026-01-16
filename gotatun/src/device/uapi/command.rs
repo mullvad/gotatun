@@ -628,6 +628,14 @@ fn try_process_daita_line(
     k: &str,
     v: &str,
 ) -> eyre::Result<bool> {
+    fn daita_or_bail(
+        daita_settings: &mut Option<SetUnset<DaitaSettings>>,
+    ) -> eyre::Result<&mut DaitaSettings> {
+        let Some(SetUnset::Set(daita_settings)) = daita_settings else {
+            bail!("DAITA must be enabled with daita_enable=1");
+        };
+        Ok(daita_settings)
+    }
     match k {
         "daita_enable" => {
             ensure!(
@@ -643,44 +651,29 @@ fn try_process_daita_line(
             }
         }
         "daita_machine" => {
-            let Some(SetUnset::Set(daita_settings)) = daita_settings else {
-                bail!("Key {k:?} must be enabled with daita_enable=1");
-            };
-
+            let daita_settings = daita_or_bail(daita_settings)?;
             daita_settings.maybenot_machines.push(v.to_string());
         }
         "daita_max_padding_frac" => {
-            let Some(SetUnset::Set(daita_settings)) = daita_settings else {
-                bail!("Key {k:?} must be enabled with daita_enable=1");
-            };
-
+            let daita_settings = daita_or_bail(daita_settings)?;
             daita_settings.max_padding_frac = v
                 .parse()
                 .map_err(|err| eyre!("invalid padding frac: {err}"))?;
         }
         "daita_max_blocking_frac" => {
-            let Some(SetUnset::Set(daita_settings)) = daita_settings else {
-                bail!("Key {k:?} must be enabled with daita_enable=1");
-            };
-
+            let daita_settings = daita_or_bail(daita_settings)?;
             daita_settings.max_blocking_frac = v
                 .parse()
                 .map_err(|err| eyre!("invalid blocking frac: {err}"))?;
         }
         "daita_max_blocked_packets" => {
-            let Some(SetUnset::Set(daita_settings)) = daita_settings else {
-                bail!("Key {k:?} must be enabled with daita_enable=1");
-            };
-
+            let daita_settings = daita_or_bail(daita_settings)?;
             daita_settings.max_blocked_packets = v
                 .parse()
                 .map_err(|err| eyre!("invalid blocked packets: {err}"))?;
         }
         "daita_min_blocking_capacity" => {
-            let Some(SetUnset::Set(daita_settings)) = daita_settings else {
-                bail!("Key {k:?} must be enabled with daita_enable=1");
-            };
-
+            let daita_settings = daita_or_bail(daita_settings)?;
             daita_settings.min_blocking_capacity = v
                 .parse()
                 .map_err(|err| eyre!("invalid min blocking capacity: {err}"))?;
