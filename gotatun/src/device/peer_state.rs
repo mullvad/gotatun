@@ -13,6 +13,7 @@ use std::str::FromStr;
 use crate::device::AllowedIps;
 #[cfg(feature = "daita")]
 use crate::device::daita::{DaitaHooks, DaitaSettings};
+use crate::device::psk::Psk;
 use crate::noise::Tunn;
 use crate::noise::errors::WireGuardError;
 #[cfg(feature = "daita")]
@@ -35,7 +36,7 @@ pub struct PeerState {
     index: u32,
     pub(crate) endpoint: Endpoint,
     pub(crate) allowed_ips: AllowedIps<()>,
-    pub(crate) preshared_key: Option<[u8; 32]>,
+    pub(crate) preshared_key: Option<Psk>,
 
     #[cfg(feature = "daita")]
     daita_settings: Option<DaitaSettings>,
@@ -73,7 +74,7 @@ impl PeerState {
         index: u32,
         endpoint: Option<SocketAddr>,
         allowed_ips: &[IpNetwork],
-        preshared_key: Option<[u8; 32]>,
+        preshared_key: Option<Psk>,
         #[cfg(feature = "daita")] daita_settings: Option<DaitaSettings>,
     ) -> PeerState {
         Self {
