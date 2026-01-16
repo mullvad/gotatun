@@ -80,7 +80,7 @@ impl DaitaHooks {
         let packet_count = Arc::new(types::PacketCount::default());
         let padding_overhead = PaddingOverhead::default();
 
-        let (blocking_queue_tx, blocking_queue_rx) = mpsc::channel(max_blocked_packets);
+        let (blocking_queue_tx, blocking_queue_rx) = mpsc::channel(max_blocked_packets.into());
         let blocking_watcher = BlockingWatcher::new(blocking_queue_tx, min_blocking_capacity);
 
         let maybenot = maybenot::Framework::new(

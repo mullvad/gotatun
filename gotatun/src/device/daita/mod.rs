@@ -11,6 +11,7 @@ mod events;
 mod hooks;
 mod types;
 
+use std::num::NonZeroUsize;
 use std::str::FromStr;
 
 pub use hooks::DaitaHooks;
@@ -18,7 +19,9 @@ pub use maybenot;
 pub use maybenot::Error;
 pub use maybenot::Machine;
 
-pub mod api {
+pub mod uapi {
+    use super::*;
+
     #[derive(Debug, Clone)]
     pub struct DaitaSettings {
         /// The maybenot machines to use.
@@ -28,7 +31,7 @@ pub mod api {
         /// Maximum fraction of bandwidth that may be used for blocking packets.
         pub max_blocking_frac: f64,
         /// Maximum number of packets that may be blocked at any time.
-        pub max_blocked_packets: usize,
+        pub max_blocked_packets: NonZeroUsize,
         /// Minimum number of free slots in the blocking queue to continue blocking.
         pub min_blocking_capacity: usize,
     }
@@ -43,15 +46,15 @@ pub struct DaitaSettings {
     /// Maximum fraction of bandwidth that may be used for blocking packets.
     pub max_blocking_frac: f64,
     /// Maximum number of packets that may be blocked at any time.
-    pub max_blocked_packets: usize,
+    pub max_blocked_packets: NonZeroUsize,
     /// Minimum number of free slots in the blocking queue to continue blocking.
     pub min_blocking_capacity: usize,
 }
 
-impl TryFrom<api::DaitaSettings> for DaitaSettings {
+impl TryFrom<uapi::DaitaSettings> for DaitaSettings {
     type Error = crate::device::Error;
 
-    fn try_from(value: api::DaitaSettings) -> Result<Self, Self::Error> {
+    fn try_from(value: uapi::DaitaSettings) -> Result<Self, Self::Error> {
         Ok(DaitaSettings {
             maybenot_machines: value
                 .maybenot_machines

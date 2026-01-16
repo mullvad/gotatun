@@ -17,7 +17,7 @@ use typed_builder::TypedBuilder;
 use crate::{device::peer_state::AllowedIP, serialization::KeyBytes};
 
 #[cfg(feature = "daita")]
-use crate::device::daita::api::DaitaSettings;
+use crate::device::daita::uapi::DaitaSettings;
 
 #[derive(Debug)]
 pub enum Request {
