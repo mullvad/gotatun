@@ -489,6 +489,24 @@ async fn on_api_set(
             continue;
         }
 
+        #[cfg(feature = "daita-uapi")]
+        let daita_settings = match api_peer.daita_settings {
+            Some(SetUnset::Set(daita_settings)) => {
+                // Parse from API repr to actual settings
+                // NOTE: Very annoying, but we have to do this before removing the peer
+                // to prevent it from being unexpectedly removed.
+                match crate::device::daita::DaitaSettings::try_from(daita_settings) {
+                    Ok(settings) => Some(SetUnset::Set(settings)),
+                    Err(e) => {
+                        log::error!("Invalid DAITA settings: {e}");
+                        return (SetResponse { errno: EINVAL }, reconfigure);
+                    }
+                }
+            }
+            Some(SetUnset::Unset) => Some(SetUnset::Unset),
+            None => None,
+        };
+
         let (mut new_peer, index) = match device.remove_peer(&public_key).await {
             None => {
                 // New peer
@@ -537,23 +555,14 @@ async fn on_api_set(
         }
 
         #[cfg(feature = "daita-uapi")]
-        match api_peer.daita_settings {
-            Some(SetUnset::Set(daita_settings)) => {
-                // Parse from API repr to actual settings
-                match crate::device::daita::DaitaSettings::try_from(daita_settings) {
-                    Ok(settings) => {
-                        new_peer.daita_settings = Some(settings);
-                        reconfigure |= Reconfigure::Yes;
-                    }
-                    Err(e) => {
-                        log::error!("Invalid DAITA settings: {e}");
-                        return (SetResponse { errno: EINVAL }, Reconfigure::No);
-                    }
-                }
+        match daita_settings {
+            Some(SetUnset::Set(settings)) => {
+                new_peer.daita_settings = Some(settings);
+                reconfigure |= Reconfigure::Yes;
             }
             Some(SetUnset::Unset) => {
-                reconfigure |= Reconfigure::Yes;
                 new_peer.daita_settings = None;
+                reconfigure |= Reconfigure::Yes;
             }
             None => (),
         }
