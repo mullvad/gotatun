@@ -386,7 +386,7 @@ impl Display for GetPeer {
 
             let mut daita_fields = vec![];
 
-            daita_fields.push(("daita_enable", &"true" as _).into());
+            daita_fields.push(("daita_enable", &"1" as _).into());
 
             for daita_machine in maybenot_machines {
                 daita_fields.push(("daita_machine", daita_machine as _).into());
