@@ -42,7 +42,7 @@ pub mod uapi {
                 maybenot_machines: vec![],
                 max_padding_frac: 0.0,
                 max_blocking_frac: 0.0,
-                max_blocked_packets: NonZeroUsize::new(1024).unwrap(),
+                max_blocked_packets: const { NonZeroUsize::new(1024).unwrap() },
                 min_blocking_capacity: 50,
             }
         }
