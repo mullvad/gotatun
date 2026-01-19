@@ -528,8 +528,8 @@ async fn on_api_set(
                         // Keep old allowed IPs if requested
                         peer.allowed_ips().collect()
                     },
-                    #[cfg(feature = "daita-uapi")]
-                    daita_settings: None,
+                    #[cfg(feature = "daita")]
+                    daita_settings: peer.daita_settings().cloned(),
                 };
 
                 (new_peer, index)
