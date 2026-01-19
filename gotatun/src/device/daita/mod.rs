@@ -12,7 +12,6 @@ mod hooks;
 mod types;
 
 use std::num::NonZeroUsize;
-use std::str::FromStr;
 
 pub use hooks::DaitaHooks;
 pub use maybenot;
@@ -22,6 +21,7 @@ pub use maybenot::Machine;
 #[cfg(feature = "daita-uapi")]
 pub mod uapi {
     use super::*;
+    use std::str::FromStr;
 
     #[derive(Debug, Clone)]
     pub struct DaitaSettings {
