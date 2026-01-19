@@ -19,6 +19,7 @@ pub use maybenot;
 pub use maybenot::Error;
 pub use maybenot::Machine;
 
+#[cfg(feature = "daita-uapi")]
 pub mod uapi {
     use super::*;
 
@@ -47,6 +48,40 @@ pub mod uapi {
             }
         }
     }
+
+    impl TryFrom<DaitaSettings> for super::DaitaSettings {
+        type Error = crate::device::Error;
+
+        fn try_from(value: uapi::DaitaSettings) -> Result<Self, Self::Error> {
+            Ok(super::DaitaSettings {
+                maybenot_machines: value
+                    .maybenot_machines
+                    .iter()
+                    .map(|s| Machine::from_str(s))
+                    .collect::<Result<Vec<_>, _>>()?,
+                max_padding_frac: value.max_padding_frac,
+                max_blocking_frac: value.max_blocking_frac,
+                max_blocked_packets: value.max_blocked_packets,
+                min_blocking_capacity: value.min_blocking_capacity,
+            })
+        }
+    }
+
+    impl From<super::DaitaSettings> for DaitaSettings {
+        fn from(value: super::DaitaSettings) -> Self {
+            DaitaSettings {
+                maybenot_machines: value
+                    .maybenot_machines
+                    .iter()
+                    .map(|m| m.serialize())
+                    .collect(),
+                max_padding_frac: value.max_padding_frac,
+                max_blocking_frac: value.max_blocking_frac,
+                max_blocked_packets: value.max_blocked_packets,
+                min_blocking_capacity: value.min_blocking_capacity,
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -61,38 +96,4 @@ pub struct DaitaSettings {
     pub max_blocked_packets: NonZeroUsize,
     /// Minimum number of free slots in the blocking queue to continue blocking.
     pub min_blocking_capacity: usize,
-}
-
-impl TryFrom<uapi::DaitaSettings> for DaitaSettings {
-    type Error = crate::device::Error;
-
-    fn try_from(value: uapi::DaitaSettings) -> Result<Self, Self::Error> {
-        Ok(DaitaSettings {
-            maybenot_machines: value
-                .maybenot_machines
-                .iter()
-                .map(|s| Machine::from_str(s))
-                .collect::<Result<Vec<_>, _>>()?,
-            max_padding_frac: value.max_padding_frac,
-            max_blocking_frac: value.max_blocking_frac,
-            max_blocked_packets: value.max_blocked_packets,
-            min_blocking_capacity: value.min_blocking_capacity,
-        })
-    }
-}
-
-impl From<DaitaSettings> for uapi::DaitaSettings {
-    fn from(value: DaitaSettings) -> Self {
-        uapi::DaitaSettings {
-            maybenot_machines: value
-                .maybenot_machines
-                .iter()
-                .map(|m| m.serialize())
-                .collect(),
-            max_padding_frac: value.max_padding_frac,
-            max_blocking_frac: value.max_blocking_frac,
-            max_blocked_packets: value.max_blocked_packets,
-            min_blocking_capacity: value.min_blocking_capacity,
-        }
-    }
 }
