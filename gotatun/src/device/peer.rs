@@ -8,6 +8,7 @@ use x25519_dalek::PublicKey;
 
 #[cfg(feature = "daita")]
 use crate::device::daita::DaitaSettings;
+use crate::device::psk::Psk;
 
 /// Peer data. Used to construct and update peers in a [`Device`](crate::device::Device).
 #[derive(Clone, Debug)]
@@ -16,8 +17,7 @@ pub struct Peer {
     pub public_key: PublicKey,
     pub endpoint: Option<SocketAddr>,
     pub allowed_ips: Vec<IpNetwork>,
-    // TODO: zeroize
-    pub preshared_key: Option<[u8; 32]>,
+    pub preshared_key: Option<Psk>,
     pub keepalive: Option<u16>,
 
     #[cfg(feature = "daita")]
@@ -52,7 +52,7 @@ impl Peer {
         self
     }
 
-    pub const fn with_preshared_key(mut self, preshared_key: [u8; 32]) -> Self {
+    pub fn with_preshared_key(mut self, preshared_key: Psk) -> Self {
         self.preshared_key = Some(preshared_key);
         self
     }

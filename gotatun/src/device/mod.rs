@@ -15,12 +15,14 @@ mod index_lfsr;
 mod integration_tests;
 mod peer;
 mod peer_state;
+mod psk;
 mod transports;
 pub mod uapi;
 
 use builder::Nul;
 use index_lfsr::IndexLfsr;
 use ipnetwork::IpNetwork;
+use psk::Psk;
 use std::collections::HashMap;
 use std::io::{self};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
@@ -404,13 +406,13 @@ impl<T: DeviceTransports> DeviceState<T> {
                 .collect()
         };
 
+        let preshared_key = preshared_key.map(Psk::new);
         let peer_builder = Peer {
             public_key,
             endpoint,
             allowed_ips,
             keepalive,
             preshared_key,
-
             // TODO: how to remove daita?
             #[cfg(feature = "daita")]
             daita_settings: daita_settings.or(_old_daita_settings),
@@ -465,7 +467,7 @@ impl<T: DeviceTransports> DeviceState<T> {
             peer_builder.allowed_ips.as_slice(),
             peer_builder.preshared_key,
             #[cfg(feature = "daita")]
-            peer_builder.daita_settings,
+            peer_builder.daita_settings.clone(),
         )
     }
 
