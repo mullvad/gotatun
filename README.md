@@ -65,6 +65,10 @@ You will need to give the executable the `CAP_NET_ADMIN` capability using: `sudo
 
 The behaviour is similar to that of [wireguard-go](https://git.zx2c4.com/wireguard-go/about/). Specifically the interface name must be `utun[0-9]+` for an explicit interface name or `utun` to have the kernel select the lowest available. If you choose `utun` as the interface name, and the environment variable `WG_TUN_NAME_FILE` is defined, then the actual name of the interface chosen by the kernel is written to the file specified by that variable.
 
+## UAPI extensions
+
+See [UAPI](./UAPI.md) for extensions to the `wg` configuration protocol.
+
 ---
 
 ## License
