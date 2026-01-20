@@ -467,13 +467,22 @@ async fn on_api_set(
 
     for peer in peers {
         let SetPeer {
-            peer: api_peer,
+            peer:
+                Peer {
+                    public_key,
+                    preshared_key,
+                    endpoint,
+                    persistent_keepalive_interval,
+                    allowed_ip,
+                    #[cfg(feature = "daita-uapi")]
+                    daita_settings,
+                },
             remove,
             update_only,
             replace_allowed_ips,
         } = peer;
 
-        let public_key = x25519_dalek::PublicKey::from(api_peer.public_key.0);
+        let public_key = x25519_dalek::PublicKey::from(public_key.0);
 
         if remove {
             // Completely remove a peer
@@ -514,15 +523,15 @@ async fn on_api_set(
             }
         };
 
-        if let Some(endpoint) = api_peer.endpoint {
+        if let Some(endpoint) = endpoint {
             new_peer.endpoint = Some(endpoint);
         }
 
-        if let Some(keepalive) = api_peer.persistent_keepalive_interval {
+        if let Some(keepalive) = persistent_keepalive_interval {
             new_peer.keepalive = Some(keepalive);
         }
 
-        match api_peer.preshared_key {
+        match preshared_key {
             Some(command::SetUnset::Set(psk)) => {
                 new_peer.preshared_key = Some(psk.0);
             }
@@ -533,7 +542,7 @@ async fn on_api_set(
         }
 
         #[cfg(feature = "daita-uapi")]
-        match api_peer.daita_settings {
+        match daita_settings {
             Some(SetUnset::Set(settings)) => {
                 new_peer.daita_settings = Some(settings);
                 reconfigure |= Reconfigure::Yes;
@@ -547,7 +556,7 @@ async fn on_api_set(
 
         new_peer
             .allowed_ips
-            .extend(api_peer.allowed_ip.iter().map(|allowed_ip| {
+            .extend(allowed_ip.iter().map(|allowed_ip| {
                 IpNetwork::new(allowed_ip.addr, allowed_ip.cidr)
                     .expect("Invalid allowed IP from UAPI")
             }));
