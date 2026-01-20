@@ -17,7 +17,7 @@ use typed_builder::TypedBuilder;
 use crate::{device::peer_state::AllowedIP, serialization::KeyBytes};
 
 #[cfg(feature = "daita-uapi")]
-use crate::device::daita::uapi::DaitaSettings;
+use crate::device::daita::DaitaSettings;
 
 #[derive(Debug)]
 pub enum Request {
@@ -388,8 +388,12 @@ impl Display for GetPeer {
 
             daita_fields.push(("daita_enable", &"1" as _).into());
 
-            for daita_machine in maybenot_machines {
-                daita_fields.push(("daita_machine", daita_machine as _).into());
+            let serialized_machines = maybenot_machines
+                .iter()
+                .map(|m| m.serialize())
+                .collect::<Vec<_>>();
+            for machine in &serialized_machines {
+                daita_fields.push(("daita_machine", machine as _).into());
             }
 
             daita_fields.push(("daita_max_blocked_packets", daita_max_blocked_packets as _).into());
@@ -652,7 +656,10 @@ fn try_process_daita_line(
         }
         "daita_machine" => {
             let daita_settings = daita_or_bail(daita_settings)?;
-            daita_settings.maybenot_machines.push(v.to_string());
+            let machine = v
+                .parse()
+                .map_err(|err| eyre!("invalid daita machine {:?}: {err}", v))?;
+            daita_settings.maybenot_machines.push(machine);
         }
         "daita_max_padding_frac" => {
             let daita_settings = daita_or_bail(daita_settings)?;
