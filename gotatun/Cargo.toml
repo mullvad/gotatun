@@ -25,7 +25,7 @@ pcap = ["dep:pcap-file"]
 windows-gro = []
 daita = []
 # Add non-compliant UAPI support for DAITA.
-# See [`uapi`] for details.
+# See `UAPI.md` for details.
 daita-uapi = ["daita"]
 
 [dependencies]
