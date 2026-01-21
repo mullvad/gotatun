@@ -1,8 +1,9 @@
 [package]
-name = "gotatun"
-description = "an implementation of the WireGuard® protocol designed for portability and speed"
+name = "ana-gotatun"
+description = "an implementation of the WireGuard® protocol designed for portability and speed with integrated STUN"
 version = "0.2.0"
 authors = [
+    "Anapaya & contributors",
     "Noah Kennedy <nkennedy@cloudflare.com>",
     "Andy Grover <agrover@cloudflare.com>",
     "Jeff Hiner <jhiner@cloudflare.com>",
