@@ -7,7 +7,9 @@
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::session::Session;
-use crate::packet::{Packet, WgCookieReply, WgHandshakeBase, WgHandshakeInit, WgHandshakeResp};
+use crate::packet::{
+    IpSocketAddr, Packet, WgCookieReply, WgHandshakeBase, WgHandshakeInit, WgHandshakeResp,
+};
 #[cfg(not(feature = "mock_instant"))]
 use crate::sleepyinstant::Instant;
 use crate::x25519;
@@ -20,7 +22,7 @@ use rand_core::OsRng;
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use std::convert::TryInto;
 use std::time::{Duration, SystemTime};
-use zerocopy::IntoBytes;
+use zerocopy::{FromZeros, IntoBytes};
 
 #[cfg(feature = "mock_instant")]
 use mock_instant::Instant;
@@ -314,6 +316,12 @@ pub struct Handshake {
     // TODO: make TimeStamper a singleton
     stamper: TimeStamper,
     pub(super) last_rtt: Option<u32>,
+    /// The remote socket address belonging to the initiator of the handshake;
+    /// this SHOULD be set to the socket address of this tunnel's peer.
+    initiator_remote_sockaddr: IpSocketAddr,
+    /// The local socket address (as returned by the responder during the
+    /// handshake).
+    local_initiator_remote_sockaddr: Option<IpSocketAddr>,
 }
 
 #[derive(Default)]
@@ -420,6 +428,7 @@ impl Handshake {
         peer_static_public: x25519::PublicKey,
         global_idx: u32,
         preshared_key: Option<[u8; 32]>,
+        remote_sockaddr: IpSocketAddr,
     ) -> Handshake {
         let params = NoiseParams::new(
             static_private,
@@ -437,6 +446,8 @@ impl Handshake {
             stamper: TimeStamper::new(),
             cookies: Default::default(),
             last_rtt: None,
+            initiator_remote_sockaddr: remote_sockaddr,
+            local_initiator_remote_sockaddr: None,
         }
     }
 
@@ -625,8 +636,24 @@ impl Handshake {
         let key = b2s_hmac2(&temp, &temp2, &[0x03]);
         // responder.hash = HASH(responder.hash || temp2)
         hash = b2s_hash(&hash, &temp2);
-        // msg.encrypted_nothing = AEAD(key, 0, [empty], responder.hash)
-        aead_chacha20_open(&mut [], &key, 0, packet.encrypted_nothing.as_bytes(), &hash)?;
+
+        // BEGIN mullvad/gottatun:
+        // // msg.encrypted_nothing = AEAD(key, 0, [empty], responder.hash)
+        // aead_chacha20_open(&mut [], &key, 0, packet.encrypted_nothing.as_bytes(), &hash)?;
+        // END
+
+        // BEGIN ours:
+        // msg.socketaddr = AEAD(key, 0, socket_addr, responder.hash)
+        let mut sockaddr = IpSocketAddr::new_zeroed();
+        aead_chacha20_open(
+            sockaddr.as_mut_bytes(),
+            &key,
+            0,
+            packet.socketaddr.as_bytes(),
+            &hash,
+        )?;
+        self.local_initiator_remote_sockaddr = Some(sockaddr);
+        // END
 
         // responder.hash = HASH(responder.hash || msg.encrypted_nothing)
         // hash = b2s_hash(hash, buf[ENC_NOTHING_OFF..ENC_NOTHING_OFF + ENC_NOTHING_SZ]);
@@ -847,8 +874,22 @@ impl Handshake {
         let key = b2s_hmac2(&temp, &temp2, &[0x03]);
         // responder.hash = HASH(responder.hash || temp2)
         hash = b2s_hash(&hash, &temp2);
+
+        // BEGIN mullvad/gotatun:
+        // msg.encrypted_nothing = AEAD(key, 0, [empty], responder.hash))
+        // aead_chacha20_seal(resp.encrypted_nothing.as_mut_bytes(), &key, 0, &[], &hash);
+        // END
+
+        // BEGIN ours:
         // msg.encrypted_nothing = AEAD(key, 0, [empty], responder.hash)
-        aead_chacha20_seal(resp.encrypted_nothing.as_mut_bytes(), &key, 0, &[], &hash);
+        aead_chacha20_seal(
+            resp.socketaddr.as_mut_bytes(),
+            &key,
+            0,
+            self.initiator_remote_sockaddr.as_bytes(),
+            &hash,
+        );
+        // END
 
         // Derive keys
         // temp1 = HMAC(initiator.chaining_key, [empty])

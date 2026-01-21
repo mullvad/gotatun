@@ -192,10 +192,10 @@ impl UapiServer {
         let api_listener =
             UnixListener::bind(&path).map_err(|e| eyre!("Failed to bind unix socket: {e}"))?;
 
-        if uid.is_some() || gid.is_some() {
-            if let Err(err) = nix::unistd::chown(std::path::Path::new(&path), uid, gid) {
-                log::warn!("Failed to change owner of UDS: {err}");
-            }
+        if (uid.is_some() || gid.is_some())
+            && let Err(err) = nix::unistd::chown(std::path::Path::new(&path), uid, gid)
+        {
+            log::warn!("Failed to change owner of UDS: {err}");
         }
 
         let (tx, rx) = UapiServer::new();

@@ -12,6 +12,8 @@ use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, Unaligne
 use crate::packet::util::size_must_be;
 use crate::packet::{CheckedPayload, Packet};
 
+use super::IpSocketAddr;
+
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
 struct Wg {
@@ -366,7 +368,6 @@ pub struct WgHandshakeResp {
     // INVARIANT: Must be WgPacketType::HandshakeResp
     packet_type: WgPacketType,
     _reserved_zeros: [u8; 4 - size_of::<WgPacketType>()],
-
     /// An integer that identifies the WireGuard session for the responding peer.
     pub sender_idx: little_endian::U32,
 
@@ -377,7 +378,7 @@ pub struct WgHandshakeResp {
     pub unencrypted_ephemeral: [u8; 32],
 
     /// A Poly1305 authentication tag generated from an empty message.
-    pub encrypted_nothing: EncryptedWithTag<()>,
+    pub socketaddr: EncryptedWithTag<IpSocketAddr>,
 
     /// Message authentication code 1.
     pub mac1: [u8; 16],
@@ -388,7 +389,7 @@ pub struct WgHandshakeResp {
 
 impl WgHandshakeResp {
     /// Length of the packet, in bytes.
-    pub const LEN: usize = size_must_be::<Self>(92);
+    pub const LEN: usize = size_must_be::<Self>(112);
 
     /// Construct a [`WgHandshakeResp`].
     pub fn new(sender_idx: u32, receiver_idx: u32, unencrypted_ephemeral: [u8; 32]) -> Self {
@@ -398,7 +399,7 @@ impl WgHandshakeResp {
             sender_idx: sender_idx.into(),
             receiver_idx: receiver_idx.into(),
             unencrypted_ephemeral,
-            encrypted_nothing: EncryptedWithTag::new_zeroed(),
+            socketaddr: EncryptedWithTag::new_zeroed(),
             mac1: [0u8; 16],
             mac2: [0u8; 16],
         }

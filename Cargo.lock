@@ -827,13 +827,14 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rand_core 0.6.4",
+ "rand_xorshift",
  "ring",
  "socket2",
  "thiserror 1.0.69",
  "tokio",
  "tun",
  "typed-builder",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
  "x25519-dalek",
  "zerocopy",
 ]
@@ -1409,6 +1410,15 @@ checksum = "6a8615d50dcf34fa31f7ab52692afec947c4dd0ab803cc87cb3b0b4570ff7463"
 dependencies = [
  "num-traits",
  "rand",
+]
+
+[[package]]
+name = "rand_xorshift"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
+dependencies = [
+ "rand_core 0.9.3",
 ]
 
 [[package]]

@@ -18,7 +18,7 @@ readme = "../README.md"
 
 [features]
 default = []
-device = ["thiserror"]
+device = []
 pcap = ["dep:pcap-file"]
 # UDP GRO appears to be broken on Windows.
 # In some cases it fails to return UDP_COALESCED_INFO
@@ -45,7 +45,7 @@ blake2 = "0.10"
 hmac = "0.12"
 mock_instant = { version = "0.3", optional = true }
 socket2 = { version = "0.6.0", features = ["all"] }
-thiserror = { version = "1", optional = true }
+thiserror = { version = "1" }
 tokio = { version = "1.43.0", features = ["full"] }
 eyre = "0.6.12"
 log = "0.4"
@@ -87,6 +87,7 @@ nix = { version = "0.30", default-features = false, features = [
 [dev-dependencies]
 etherparse = "0.13"
 criterion = { version = "0.7.0", features = ["html_reports"] }
+rand_xorshift = "0.4"
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]

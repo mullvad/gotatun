@@ -456,6 +456,8 @@ impl<T: DeviceTransports> DeviceState<T> {
             peer_builder.keepalive,
             index,
             rate_limiter,
+            // XXX(dsd): this is unused in standard WireGuard and set here only to make tests work.
+            "127.0.0.1:0".parse().unwrap(),
         );
 
         PeerState::new(

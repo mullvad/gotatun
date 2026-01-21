@@ -22,6 +22,7 @@ use crate::packet::{Packet, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeR
 use crate::x25519;
 
 use std::collections::VecDeque;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -74,6 +75,7 @@ impl Tunn {
         persistent_keepalive: Option<u16>,
         index: u32,
         rate_limiter: Arc<RateLimiter>,
+        peer_sockaddr: SocketAddr,
     ) -> Self {
         let static_public = x25519::PublicKey::from(&static_private);
 
@@ -84,6 +86,7 @@ impl Tunn {
                 peer_static_public,
                 index << 8,
                 preshared_key,
+                peer_sockaddr.into(),
             ),
             sessions: Default::default(),
             current: Default::default(),
@@ -382,6 +385,14 @@ mod tests {
     use mock_instant::MockClock;
     use rand_core::{OsRng, RngCore};
 
+    fn my_sockaddr() -> SocketAddr {
+        "192.168.0.1:1234".parse().unwrap()
+    }
+
+    fn their_sockaddr() -> SocketAddr {
+        "192.168.0.1:1234".parse().unwrap()
+    }
+
     fn create_two_tuns() -> (Tunn, Tunn) {
         let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
         let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
@@ -399,6 +410,7 @@ mod tests {
             None,
             my_idx,
             rate_limiter,
+            my_sockaddr(),
         );
 
         let rate_limiter = Arc::new(RateLimiter::new(&their_public_key, HANDSHAKE_RATE_LIMIT));
@@ -409,6 +421,7 @@ mod tests {
             None,
             their_idx,
             rate_limiter,
+            their_sockaddr(),
         );
 
         (my_tun, their_tun)
