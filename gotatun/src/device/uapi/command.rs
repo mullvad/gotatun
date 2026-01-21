@@ -365,14 +365,12 @@ impl Display for GetPeer {
         }
 
         #[cfg(not(feature = "daita-uapi"))]
-        {
-            let _ = (
-                daita_tx_padding_bytes,
-                daita_tx_padding_packet_bytes,
-                daita_rx_padding_bytes,
-                daita_rx_padding_packet_bytes,
-            );
-        }
+        let _ = (
+            daita_tx_padding_bytes,
+            daita_tx_padding_packet_bytes,
+            daita_rx_padding_bytes,
+            daita_rx_padding_packet_bytes,
+        );
 
         #[cfg(feature = "daita-uapi")]
         if let Some(SetUnset::Set(daita)) = daita_settings {
