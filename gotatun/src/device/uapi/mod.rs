@@ -30,7 +30,6 @@
 
 pub mod command;
 
-use super::peer_state::AllowedIP;
 use super::{Connection, DeviceState, Reconfigure};
 use crate::device::DeviceTransports;
 #[cfg(feature = "daita-uapi")]
@@ -38,7 +37,6 @@ use crate::device::uapi::command::SetUnset;
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
 use eyre::{Context, bail, eyre};
-use ipnetwork::IpNetwork;
 use libc::EINVAL;
 #[cfg(unix)]
 use nix::unistd::{Gid, Uid};
@@ -359,13 +357,7 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
                     .map(|key| command::SetUnset::Set(KeyBytes(key))),
                 endpoint,
                 persistent_keepalive_interval: peer.persistent_keepalive(),
-                allowed_ip: peer
-                    .allowed_ips()
-                    .map(|ip_network| AllowedIP {
-                        addr: ip_network.network(),
-                        cidr: ip_network.prefix(),
-                    })
-                    .collect(),
+                allowed_ip: peer.allowed_ips().collect(),
                 #[cfg(feature = "daita-uapi")]
                 daita_settings: peer.daita_settings().cloned().map(SetUnset::Set),
             },
@@ -552,12 +544,7 @@ async fn on_api_set(
             None => (),
         }
 
-        new_peer
-            .allowed_ips
-            .extend(allowed_ip.iter().map(|allowed_ip| {
-                IpNetwork::new(allowed_ip.addr, allowed_ip.cidr)
-                    .expect("Invalid allowed IP from UAPI")
-            }));
+        new_peer.allowed_ips.extend(allowed_ip);
 
         device.add_peer(new_peer, index);
     }

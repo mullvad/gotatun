@@ -12,9 +12,10 @@ use std::{
 };
 
 use eyre::{WrapErr, bail, ensure, eyre};
+use ipnetwork::IpNetwork;
 use typed_builder::TypedBuilder;
 
-use crate::{device::peer_state::AllowedIP, serialization::KeyBytes};
+use crate::serialization::KeyBytes;
 
 #[cfg(feature = "daita-uapi")]
 use crate::device::daita::DaitaSettings;
@@ -186,7 +187,7 @@ pub struct Peer {
     /// added peer entry. If an identical value already exists as part of a prior peer, the allowed
     /// IP entry will be removed from that peer and added to this peer.
     #[builder(default)]
-    pub allowed_ip: Vec<AllowedIP>,
+    pub allowed_ip: Vec<IpNetwork>,
 
     #[cfg(feature = "daita-uapi")]
     #[builder(default, setter(strip_option, into))]
@@ -416,8 +417,8 @@ impl Display for GetPeer {
             }
         }
 
-        for AllowedIP { addr, cidr } in allowed_ip {
-            writeln!(f, "allowed_ip={addr}/{cidr}")?;
+        for allowed_ip in allowed_ip {
+            writeln!(f, "allowed_ip={}/{}", allowed_ip.ip(), allowed_ip.prefix())?;
         }
 
         Ok(())
