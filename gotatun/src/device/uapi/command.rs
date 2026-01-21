@@ -384,38 +384,41 @@ impl Display for GetPeer {
                 min_blocking_capacity: daita_min_blocking_capacity,
             } = daita;
 
-            let mut daita_fields = vec![];
+            writeln!(f, "daita_enable=1")?;
 
-            daita_fields.push(("daita_enable", &"1" as _).into());
-
-            let serialized_machines = maybenot_machines
-                .iter()
-                .map(|m| m.serialize())
-                .collect::<Vec<_>>();
-            for machine in &serialized_machines {
-                daita_fields.push(("daita_machine", machine as _).into());
+            for machine in maybenot_machines {
+                writeln!(f, "daita_machine={}", machine.serialize())?;
             }
 
-            daita_fields.push(("daita_max_blocked_packets", daita_max_blocked_packets as _).into());
-            daita_fields.push(
-                (
-                    "daita_min_blocking_capacity",
-                    daita_min_blocking_capacity as _,
-                )
-                    .into(),
-            );
-            daita_fields.push(("daita_max_padding_frac", daita_max_padding_frac as _).into());
-            daita_fields.push(("daita_max_blocking_frac", daita_max_blocking_frac as _).into());
+            writeln!(f, "daita_max_blocked_packets={daita_max_blocked_packets}")?;
+            writeln!(
+                f,
+                "daita_min_blocking_capacity={daita_min_blocking_capacity}"
+            )?;
+            writeln!(
+                f,
+                "daita_min_blocking_capacity={daita_min_blocking_capacity}"
+            )?;
+            writeln!(f, "daita_max_padding_frac={daita_max_padding_frac}")?;
+            writeln!(f, "daita_max_blocking_frac={daita_max_blocking_frac}")?;
 
-            daita_fields.extend([
-                opt_to_key_and_display!(daita_rx_padding_bytes),
-                opt_to_key_and_display!(daita_tx_padding_bytes),
-                opt_to_key_and_display!(daita_rx_padding_packet_bytes),
-                opt_to_key_and_display!(daita_tx_padding_packet_bytes),
-            ]);
-
-            for (key, value) in daita_fields.into_iter().flatten() {
-                writeln!(f, "{key}={value}")?;
+            if let Some(daita_rx_padding_bytes) = daita_rx_padding_bytes {
+                writeln!(f, "daita_rx_padding_bytes={daita_rx_padding_bytes}")?;
+            }
+            if let Some(daita_tx_padding_bytes) = daita_tx_padding_bytes {
+                writeln!(f, "daita_tx_padding_bytes={daita_tx_padding_bytes}")?;
+            }
+            if let Some(daita_rx_padding_packet_bytes) = daita_rx_padding_packet_bytes {
+                writeln!(
+                    f,
+                    "daita_rx_padding_packet_bytes={daita_rx_padding_packet_bytes}"
+                )?;
+            }
+            if let Some(daita_tx_padding_packet_bytes) = daita_tx_padding_packet_bytes {
+                writeln!(
+                    f,
+                    "daita_tx_padding_packet_bytes={daita_tx_padding_packet_bytes}"
+                )?;
             }
         }
 
