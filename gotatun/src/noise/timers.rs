@@ -64,8 +64,8 @@ pub struct Timers {
     pub(super) session_timers: [Duration; super::N_SESSIONS],
     /// Did we receive data without sending anything back?
     want_keepalive: bool,
-    /// Did we send data without hearing back?
-    want_handshake: bool,
+    /// First data packet sent without hearing back
+    want_handshake: Option<Duration>,
     persistent_keepalive: usize,
 }
 
@@ -93,7 +93,7 @@ impl Timers {
         for t in &mut self.timers[..] {
             *t = now;
         }
-        self.want_handshake = false;
+        self.want_handshake = None;
         self.want_keepalive = false;
     }
 }
@@ -113,19 +113,22 @@ impl IndexMut<TimerName> for Timers {
 
 impl Tunn {
     pub(super) fn timer_tick(&mut self, timer_name: TimerName) {
+        let time = self.timers[TimeCurrent];
+
         match timer_name {
             TimeLastPacketReceived => {
                 self.timers.want_keepalive = true;
-                self.timers.want_handshake = false;
+                self.timers.want_handshake = None;
             }
             TimeLastPacketSent => {
-                self.timers.want_handshake = true;
                 self.timers.want_keepalive = false;
+            }
+            TimeLastDataPacketSent => {
+                self.timers.want_handshake.get_or_insert(time);
             }
             _ => {}
         }
 
-        let time = self.timers[TimeCurrent];
         self.timers[timer_name] = time;
     }
 
@@ -190,7 +193,6 @@ impl Tunn {
         // Load timers only once:
         let session_established = self.timers[TimeSessionEstablished];
         let handshake_started = self.timers[TimeLastHandshakeStarted];
-        let aut_packet_received = self.timers[TimeLastPacketReceived];
         let aut_packet_sent = self.timers[TimeLastPacketSent];
         let data_packet_received = self.timers[TimeLastDataPacketReceived];
         let data_packet_sent = self.timers[TimeLastDataPacketSent];
@@ -270,15 +272,15 @@ impl Tunn {
                     }
                 }
 
-                // If we have sent a packet to a given peer but have not received a
-                // packet after from that peer for (KEEPALIVE + REKEY_TIMEOUT) ms,
+                // If we have sent a data packet to a given peer but have not received a
+                // packet after from that peer for `(KEEPALIVE + REKEY_TIMEOUT)`,
                 // we initiate a new handshake.
-                if data_packet_sent > aut_packet_received
-                    && now - aut_packet_received >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
-                    && mem::replace(&mut self.timers.want_handshake, false)
+                if let Some(since) = self.timers.want_handshake
+                    && now.saturating_sub(since) >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
                 {
                     log::warn!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
+                    self.timers.want_handshake = None;
                 }
 
                 if !handshake_initiation_required {
