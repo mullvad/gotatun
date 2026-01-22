@@ -165,7 +165,9 @@ impl Tunn {
     ) -> Result<TunnResult, WireGuardError> {
         log::debug!("Received handshake_initiation: {}", p.sender_idx);
 
+        let n_bytes = p.as_bytes().len();
         let (packet, session) = self.handshake.receive_handshake_initialization(p)?;
+        self.rx_bytes += n_bytes;
 
         // Store new session in ring buffer
         let index = session.local_index();
@@ -176,6 +178,7 @@ impl Tunn {
         self.timer_tick_session_established(false, index); // New session established, we are not the initiator
 
         log::debug!("Sending handshake_response: {index}");
+        self.tx_bytes += packet.as_bytes().len();
 
         Ok(TunnResult::WriteToNetwork(packet.into()))
     }
@@ -191,6 +194,7 @@ impl Tunn {
         );
 
         let session = self.handshake.receive_handshake_response(&p)?;
+        self.rx_bytes += p.as_bytes().len();
 
         let mut p = p.into_bytes();
         p.truncate(0);
@@ -206,6 +210,7 @@ impl Tunn {
         self.set_current_session(l_idx);
 
         log::debug!("Sending keepalive");
+        self.tx_bytes += keepalive_packet.as_bytes().len();
 
         Ok(TunnResult::WriteToNetwork(keepalive_packet.into())) // Send a keepalive as a response
     }
@@ -243,7 +248,6 @@ impl Tunn {
         let decapsulated_packet = self.decapsulate_with_session(packet)?;
 
         self.timer_tick(TimerName::TimeLastDataPacketReceived);
-        self.rx_bytes += decapsulated_packet.as_bytes().len();
 
         Ok(TunnResult::WriteToTunnel(decapsulated_packet))
     }
@@ -269,6 +273,7 @@ impl Tunn {
         self.set_current_session(r_idx);
 
         self.timer_tick(TimerName::TimeLastPacketReceived);
+        self.rx_bytes += decapsulated_packet.as_bytes().len();
 
         Ok(decapsulated_packet)
     }
@@ -298,6 +303,9 @@ impl Tunn {
             self.timer_tick(TimerName::TimeLastHandshakeStarted);
         }
         self.timer_tick(TimerName::TimeLastPacketSent);
+
+        self.tx_bytes += packet.as_bytes().len();
+
         Some(packet)
     }
 
