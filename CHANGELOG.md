@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ring` can opt in by building with `--no-default-features --features ring`.
 - Make the `ring` dependency optional, gated behind the new `ring` feature.
 
+### Fixed
+- Make tunnel stats counters more consistent with other WG implementations.
+
 ### Security
 - Include source port in cookie MAC input. The WireGuard whitepaper states that the cookie
   should be computed using the remote endpoint's address, being both the IP and port.
