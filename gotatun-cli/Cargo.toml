@@ -2,35 +2,30 @@
 name = "gotatun-cli"
 description = "an implementation of the WireGuard® protocol designed for portability and speed"
 version = "0.2.0"
-authors = [
-    "Noah Kennedy <nkennedy@cloudflare.com>",
-    "Andy Grover <agrover@cloudflare.com>",
-    "Jeff Hiner <jhiner@cloudflare.com>",
-    "Mullvad VPN",
-]
+authors.workspace = true
 rust-version.workspace = true
 edition.workspace = true
 repository.workspace = true
 license.workspace = true
 categories = ["network-programming", "command-line-utilities"]
 keywords = ["wireguard", "vpn"]
-readme = "../README.md"
+readme.workspace = true
 
 [[bin]]
 name = "gotatun"
 path = "src/main.rs"
 
 [target.'cfg(unix)'.dependencies]
-daemonize = "0.5.0"
-clap = { version = "3.1.6", features = ["derive", "env"] }
-tracing = "0.1.40"
-tracing-subscriber = "0.3.9"
-tracing-appender = "0.2.1"
-log = "0.4"
-tokio = { version = "1.43.0", features = ["full"] }
-eyre = "0.6.12"
-libc = "0.2"
-nix = { version = "0.30", default-features = false, features = [
+daemonize = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+eyre = { workspace = true }
+libc = { workspace = true }
+nix = { workspace = true, features = [
     "fs",
     "time",
     "user",
@@ -38,8 +33,4 @@ nix = { version = "0.30", default-features = false, features = [
     "uio",
     "net",
 ] }
-
-[target.'cfg(unix)'.dependencies.gotatun]
-version = "0.2.0"
-path = "../gotatun"
-features = ["device", "tun"]
+gotatun = { workspace = true, features = ["device", "tun"] }
