@@ -2,110 +2,108 @@
 name = "gotatun"
 description = "an implementation of the WireGuard® protocol designed for portability and speed"
 version = "0.4.1"
-authors = [
-    "Noah Kennedy <nkennedy@cloudflare.com>",
-    "Andy Grover <agrover@cloudflare.com>",
-    "Jeff Hiner <jhiner@cloudflare.com>",
-    "Mullvad VPN",
-]
+authors.workspace = true
 rust-version.workspace = true
 edition.workspace = true
 repository.workspace = true
 license.workspace = true
-categories = ["network-programming", "asynchronous"]
-keywords = ["wireguard", "vpn"]
-readme = "../README.md"
+categories = ["asynchronous", "network-programming"]
+keywords = ["vpn", "wireguard"]
+readme.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true
 default-target = "x86_64-unknown-linux-gnu"
-targets = ["aarch64-apple-darwin", "x86_64-pc-windows-msvc", "aarch64-linux-android"]
-
-[features]
-default = []
-device = ["thiserror"]
-tun = ["dep:tun", "thiserror"]
-pcap = ["dep:pcap-file"]
-# UDP GRO appears to be broken on Windows.
-# In some cases it fails to return UDP_COALESCED_INFO
-windows-gro = []
-daita = ["device"]
-# Add non-compliant UAPI support for DAITA.
-# See `UAPI.md` for details.
-daita-uapi = ["daita"]
-
-[dependencies]
-base64 = "0.22.1"
-hex = "0.4.3"
-libc = "0.2.180"
-parking_lot = "0.12.5"
-ipnetwork = "0.21.1"
-ip_network = "0.4.1"
-ip_network_table = "0.2.0"
-ring = "0.17.14"
-x25519-dalek = { version = "2.0.1", features = [
-    "reusable_secrets",
-    "static_secrets",
-] }
-rand_core = { version = "0.6.4", features = ["getrandom"] }
-chacha20poly1305 = "0.10.1"
-aead = "0.5.2"
-blake2 = "0.10.6"
-hmac = "0.12.1"
-mock_instant = { version = "0.6", optional = true }
-socket2 = { version = "0.6.0", features = ["all"] }
-thiserror = { version = "1", optional = true }
-tokio = { version = "1.43.0", features = ["full"] }
-eyre = "0.6.12"
-log = "0.4.29"
-typed-builder = "0.21.0"
-tun = { version = "0.8.6", default-features = false, features = ["async"], optional = true }
-zerocopy = { version = "0.8.27", features = ["std", "derive"] }
-bytes = "1.11.1"
-either = "1.15.0"
-bitfield-struct = "0.12.1"
-rand = "0.9.2"
-
-pcap-file = { version = "2.0.0", optional = true }
-duplicate = { version = "2.0.0", default-features = false }
-constant_time_eq = "0.4.2"
-futures = "0.3.31"
-maybenot = "2.2.2"
-rand_chacha = "0.9.0"
-
-[target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = ">=0.60, <=0.61", features = [
-    "Win32",
-    "Win32_Foundation",
-    "Win32_Networking",
-    "Win32_Networking_WinSock",
-    "Win32_System_IO",
-] }
-
-[target.'cfg(unix)'.dependencies]
-nix = { version = "0.31", default-features = false, features = [
-    "fs",
-    "time",
-    "user",
-    "socket",
-    "uio",
-    "net",
-] }
-
-[dev-dependencies]
-etherparse = "0.13"
-criterion = { version = "0.7.0", features = ["html_reports"] }
-x25519-dalek = { version = "2.0.1", features = ["getrandom"] }
-test-log = "0.2.19"
-tokio-stream = { version = "0.1.18", features = ["sync"] }
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+  "aarch64-linux-android"
+]
 
 [lib]
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["cdylib", "rlib", "staticlib"]
 
 [[bench]]
-name = "crypto_benches"
 harness = false
+name = "crypto_benches"
 
 [[bench]]
 name = "throughput_benches"
 harness = false
+
+[dependencies]
+aead = { workspace = true }
+base64 = { workspace = true }
+bitfield-struct = { workspace = true }
+blake2 = { workspace = true }
+bytes = { workspace = true }
+chacha20poly1305 = { workspace = true }
+constant_time_eq = "0.4.2"
+duplicate = { version = "2.0.0", default-features = false }
+either = { workspace = true }
+eyre = { workspace = true }
+futures = "0.3.31"
+hex = { workspace = true }
+hmac = { workspace = true }
+ip_network = { workspace = true }
+ip_network_table = { workspace = true }
+ipnetwork = { workspace = true }
+libc = { workspace = true }
+log = { workspace = true }
+maybenot = "2.2.2"
+mock_instant = { workspace = true, optional = true }
+parking_lot = { workspace = true }
+pcap-file = { version = "2.0.0", optional = true }
+rand = { workspace = true }
+rand_chacha = "0.9.0"
+rand_core = { workspace = true, features = ["getrandom"] }
+ring = { workspace = true }
+socket2 = { workspace = true, features = ["all"] }
+thiserror = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["full"] }
+tun = { workspace = true, default-features = false, features = ["async"], optional = true }
+typed-builder = { workspace = true }
+x25519-dalek = { workspace = true, features = [
+  "reusable_secrets",
+  "static_secrets",
+] }
+zerocopy = { version = "0.8.27", features = ["derive", "std"] }
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["html_reports"] }
+etherparse = { workspace = true }
+test-log = { workspace = true }
+tokio-stream = { workspace = true, features = ["sync"] }
+x25519-dalek = { workspace = true, features = ["getrandom"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { workspace = true, features = [
+  "Win32",
+  "Win32_Foundation",
+  "Win32_Networking",
+  "Win32_Networking_WinSock",
+  "Win32_System_IO",
+] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, default-features = false, features = [
+  "fs",
+  "net",
+  "socket",
+  "time",
+  "uio",
+  "user",
+] }
+
+[features]
+default = []
+daita = ["device"]
+# Add non-compliant UAPI support for DAITA.
+# See `UAPI.md` for details.
+daita-uapi = ["daita"]
+device = ["thiserror"]
+pcap = ["dep:pcap-file"]
+tun = ["dep:tun", "thiserror"]
+# UDP GRO appears to be broken on Windows.
+# In some cases it fails to return UDP_COALESCED_INFO
+windows-gro = []
