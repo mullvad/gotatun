@@ -847,7 +847,6 @@ dependencies = [
  "eyre",
  "gotatun",
  "libc",
- "log",
  "nix",
  "tokio",
  "tracing",
