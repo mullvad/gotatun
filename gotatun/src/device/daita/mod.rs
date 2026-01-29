@@ -14,9 +14,8 @@ mod types;
 use std::str::FromStr;
 
 pub use hooks::DaitaHooks;
-pub use maybenot;
 pub use maybenot::Error;
-pub use maybenot::Machine;
+use maybenot::Machine;
 
 pub mod api {
     #[derive(Debug, Clone)]

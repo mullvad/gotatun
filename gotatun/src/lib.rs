@@ -29,3 +29,7 @@ pub mod x25519 {
         EphemeralSecret, PublicKey, ReusableSecret, SharedSecret, StaticSecret,
     };
 }
+
+// Re-export of the maybenot types
+#[cfg(feature = "maybenot")]
+pub use maybenot;

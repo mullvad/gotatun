@@ -23,7 +23,7 @@ pcap = ["dep:pcap-file"]
 # UDP GRO appears to be broken on Windows.
 # In some cases it fails to return UDP_COALESCED_INFO
 windows-gro = []
-daita = []
+daita = ["device", "maybenot"]
 
 [dependencies]
 base64 = "0.13"
@@ -62,7 +62,7 @@ pcap-file = { version = "2.0.0", optional = true }
 duplicate = { version = "2.0.0", default-features = false }
 constant_time_eq = "0.4.2"
 futures = "0.3.31"
-maybenot = "2.2.2"
+maybenot = { version = "2.2.2", optional = true }
 rand_chacha = "0.9.0"
 
 [target.'cfg(target_os = "windows")'.dependencies]
