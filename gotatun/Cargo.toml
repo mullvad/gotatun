@@ -23,7 +23,7 @@ pcap = ["dep:pcap-file"]
 # UDP GRO appears to be broken on Windows.
 # In some cases it fails to return UDP_COALESCED_INFO
 windows-gro = []
-daita = []
+daita = ["device"]
 # Add non-compliant UAPI support for DAITA.
 # See `UAPI.md` for details.
 daita-uapi = ["daita"]
