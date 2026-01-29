@@ -1,0 +1,23 @@
+---
+name: Unused dependencies
+on:
+  pull_request:
+    paths:
+      - .github/workflows/cargo-shear.yml
+      - "**/*.rs"
+      - "**/Cargo.toml"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  cargo-shear:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-shear
+        uses: taiki-e/install-action@cargo-shear
+
+      - name: Run cargo shear
+        run: cargo shear
