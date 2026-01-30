@@ -22,11 +22,9 @@ impl<const N: usize> PacketBufPool<N> {
     pub fn new(capacity: usize) -> Self {
         let mut queue = VecDeque::with_capacity(capacity);
 
-        // pre-allocate contiguous backing buffer
-        let mut backing_buffer = BytesMut::zeroed(N * capacity);
+        // pre-allocate buffers
         for _ in 0..capacity {
-            let buf = backing_buffer.split_to(N).split_to(0);
-            queue.push_back(buf);
+            queue.push_back(BytesMut::zeroed(N).split_to(0));
         }
 
         PacketBufPool {
@@ -39,10 +37,8 @@ impl<const N: usize> PacketBufPool<N> {
         self.capacity
     }
 
-    /// Get a new [`Packet`] from the pool.
-    ///
-    /// This will try to re-use an already allocated packet if possible, or allocate one otherwise.
-    pub fn get(&self) -> Packet<[u8]> {
+    /// Try to re-use a [`Packet`] from the pool.
+    fn re_use(&self) -> Option<Packet<[u8]>> {
         while let Some(mut pointer_to_start_of_allocation) =
             { self.queue.lock().unwrap().pop_front() }
         {
@@ -64,11 +60,22 @@ impl<const N: usize> PacketBufPool<N> {
                     queue: self.queue.clone(),
                 };
 
-                return Packet::new_from_pool(return_to_pool, buf);
+                return Some(Packet::new_from_pool(return_to_pool, buf));
             } else {
                 // Backing buffer is still in use. Someone probably called split_* on it.
                 continue;
             }
+        }
+
+        None
+    }
+
+    /// Get a new [`Packet`] from the pool.
+    ///
+    /// This will try to re-use an already allocated packet if possible, or allocate one otherwise.
+    pub fn get(&self) -> Packet<[u8]> {
+        if let Some(packet) = self.re_use() {
+            return packet;
         }
 
         let mut buf = BytesMut::zeroed(N);
@@ -114,6 +121,27 @@ mod tests {
     use std::{hint::black_box, thread};
 
     use super::PacketBufPool;
+
+    /// Test pre-allocation semantics of [PacketBufPool].
+    #[test]
+    fn pool_prealloc() {
+        const N: usize = 1024;
+        let buffer_count = 10;
+        let pool = PacketBufPool::<N>::new(10);
+
+        let mut packets = vec![];
+
+        for _ in 0..buffer_count {
+            let packet = pool.re_use().expect("10 buffers was pre-allocated");
+            assert_eq!(packet.buf().len(), N);
+            packets.push(packet); // save packets so they don't get re-used
+        }
+
+        assert!(
+            pool.re_use().is_none(),
+            "pool is empty and a new packet must be allocated"
+        );
+    }
 
     /// Test buffer recycle semantics of [PacketBufPool].
     #[test]
