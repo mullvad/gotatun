@@ -9,6 +9,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::{future::ready, time::Duration};
 
 use futures::{StreamExt, future::pending};
@@ -16,6 +17,19 @@ use mock::MockEavesdropper;
 use rand::{SeedableRng, rngs::StdRng};
 use tokio::{join, select, time::sleep};
 use zerocopy::IntoBytes;
+
+use ipnetwork::{IpNetwork, Ipv4Network};
+use tokio::sync::mpsc;
+use x25519_dalek::{PublicKey, StaticSecret};
+
+use crate::device::{DeviceBuilder, Peer};
+use crate::packet::PacketBufPool;
+use crate::tun::{
+    IpRecv,
+    nat::{NatIpRecv, NatIpSend},
+    router::TunRxRouter,
+};
+use crate::udp::channel::{UdpChannelFactory, UdpChannelV4, UdpChannelV6};
 
 use crate::noise::index_table::IndexTable;
 
@@ -177,6 +191,151 @@ async fn test_endpoint_roaming() {
     ping_pong("1.2.3.4".parse().unwrap()).await;
     ping_pong("1.3.3.7".parse().unwrap()).await;
     ping_pong("1.2.3.4".parse().unwrap()).await;
+}
+
+/// Test that [`TunRxRouter`] routes packets to alt or default receiver
+/// based on whether their destination IP matches the configured network.
+#[tokio::test]
+#[test_log::test]
+async fn test_tun_router() {
+    let (source, app_tx, _app_rx) = mock::mock_tun();
+    let inner_allowed_ip: IpNetwork = "10.100.0.0/24".parse().unwrap();
+
+    let mut router = TunRxRouter::new(source);
+    let mut default_recv = router.add_default_route(10);
+    let mut alt_recv = router.add_route(inner_allowed_ip, 10);
+
+    let mut pool = PacketBufPool::new(10);
+
+    tokio::spawn(router.run(pool.clone()));
+
+    let src: Ipv4Addr = "10.64.0.2".parse().unwrap();
+    let inner_dst: Ipv4Addr = "10.100.0.1".parse().unwrap();
+    let other_dst: Ipv4Addr = "8.8.8.8".parse().unwrap();
+
+    // Packet destined for inner allowed IP -> alt_recv
+    app_tx
+        .send(mock::packet_with_addrs(src, inner_dst, b"hello inner"))
+        .await;
+    let received = alt_recv.recv(&mut pool).await.unwrap().next().unwrap();
+    assert_eq!(received.destination(), Some(inner_dst.into()));
+    assert_eq!(received.payload(), Some(b"hello inner".as_slice()));
+
+    // Packet destined for other IP -> default_recv
+    app_tx
+        .send(mock::packet_with_addrs(src, other_dst, b"hello default"))
+        .await;
+    let received = default_recv.recv(&mut pool).await.unwrap().next().unwrap();
+    assert_eq!(received.destination(), Some(other_dst.into()));
+    assert_eq!(received.payload(), Some(b"hello default".as_slice()));
+}
+
+/// Test [`NatIpRecv`] and [`NatIpSend`]
+///
+/// - Outgoing: app sends src=outer_tun_ip -> Bob receives src=inner_tun_ip
+/// - Incoming: Bob sends dst=inner_tun_ip -> app receives dst=outer_tun_ip
+#[tokio::test]
+#[test_log::test]
+async fn test_tunnel_nat() {
+    let outer_tun_ip: Ipv4Addr = "10.64.0.2".parse().unwrap();
+    let inner_tun_ip: Ipv4Addr = "172.16.0.1".parse().unwrap();
+    let some_addr: Ipv4Addr = "10.100.0.5".parse().unwrap();
+
+    async fn forward<T>(mut eve_rx: mpsc::Receiver<T>, eve_tx: mpsc::Sender<T>) {
+        loop {
+            let Some(packet) = eve_rx.recv().await else {
+                break;
+            };
+            if eve_tx.send(packet).await.is_err() {
+                break;
+            }
+        }
+    }
+
+    let (alice_mock_tun, alice_app_tx, mut alice_app_rx) = mock::mock_tun();
+    let (bob_mock_tun, bob_app_tx, mut bob_app_rx) = mock::mock_tun();
+
+    let port = 51820u16;
+    let endpoint_alice = Ipv4Addr::new(10, 0, 0, 1);
+    let endpoint_bob = Ipv4Addr::new(10, 0, 0, 2);
+
+    const CHANNEL_CAPACITY: usize = 10;
+    let (alice_v4, alice_eve_v4) = UdpChannelV4::new_pair(CHANNEL_CAPACITY);
+    let (bob_v4, bob_eve_v4) = UdpChannelV4::new_pair(CHANNEL_CAPACITY);
+    let (alice_v6, alice_eve_v6) = UdpChannelV6::new_pair(CHANNEL_CAPACITY);
+    let (bob_v6, bob_eve_v6) = UdpChannelV6::new_pair(CHANNEL_CAPACITY);
+
+    // Relay alice <-> bob (IPv4)
+    tokio::spawn(forward(alice_eve_v4.rx, bob_eve_v4.tx));
+    tokio::spawn(forward(bob_eve_v4.rx, alice_eve_v4.tx));
+
+    // Relay alice <-> bob (IPv6)
+    tokio::spawn(forward(alice_eve_v6.rx, bob_eve_v6.tx));
+    tokio::spawn(forward(bob_eve_v6.rx, alice_eve_v6.tx));
+
+    let udp_alice =
+        UdpChannelFactory::new(endpoint_alice, alice_v4, Ipv6Addr::UNSPECIFIED, alice_v6);
+    let udp_bob = UdpChannelFactory::new(endpoint_bob, bob_v4, Ipv6Addr::UNSPECIFIED, bob_v6);
+
+    let privkey_alice = StaticSecret::random();
+    let privkey_bob = StaticSecret::random();
+    let pubkey_alice = PublicKey::from(&privkey_alice);
+    let pubkey_bob = PublicKey::from(&privkey_bob);
+
+    let allow_all: IpNetwork = Ipv4Network::new(Ipv4Addr::UNSPECIFIED, 0).unwrap().into();
+
+    let peer_alice = Peer::new(pubkey_alice)
+        .with_endpoint((endpoint_alice, port).into())
+        .with_allowed_ip(allow_all);
+    let peer_bob = Peer::new(pubkey_bob)
+        .with_endpoint((endpoint_bob, port).into())
+        .with_allowed_ip(allow_all);
+
+    // Alice uses NAT adapters:
+    //   NatIpRecv: rewrites outgoing src  outer_tun_ip -> inner_tun_ip
+    //   NatIpSend: rewrites incoming dst  inner_tun_ip -> outer_tun_ip
+    let alice_rx = NatIpRecv::new(alice_mock_tun.clone(), outer_tun_ip, inner_tun_ip);
+    let alice_tx = NatIpSend::new(alice_mock_tun, inner_tun_ip, outer_tun_ip);
+
+    let _alice = DeviceBuilder::new()
+        .with_private_key(privkey_alice)
+        .with_ip_pair(alice_tx, alice_rx)
+        .with_udp(udp_alice)
+        .with_listen_port(port)
+        .with_peer(peer_bob)
+        .build()
+        .await
+        .expect("create alice device");
+
+    let _bob = DeviceBuilder::new()
+        .with_private_key(privkey_bob)
+        .with_ip(bob_mock_tun)
+        .with_udp(udp_bob)
+        .with_listen_port(port)
+        .with_peer(peer_alice)
+        .build()
+        .await
+        .expect("create bob device");
+
+    // Outgoing: Alice app sends src=outer_tun_ip;
+    // NatIpRecv rewrites src -> inner_tun_ip before encrypting.
+    // Bob should receive src=inner_tun_ip.
+    alice_app_tx
+        .send(mock::packet_with_addrs(outer_tun_ip, some_addr, b"hello"))
+        .await;
+    let received = bob_app_rx.recv().await;
+    assert_eq!(received.source(), Some(inner_tun_ip.into()));
+    assert_eq!(received.payload(), Some(b"hello".as_slice()));
+
+    // Incoming: Bob app sends dst=inner_tun_ip;
+    // NatIpSend rewrites dst -> outer_tun_ip before writing to TUN.
+    // Alice should receive dst=outer_tun_ip.
+    bob_app_tx
+        .send(mock::packet_with_addrs(some_addr, inner_tun_ip, b"reply"))
+        .await;
+    let received = alice_app_rx.recv().await;
+    assert_eq!(received.destination(), Some(outer_tun_ip.into()));
+    assert_eq!(received.payload(), Some(b"reply".as_slice()));
 }
 
 /// The number of packets we send through the tunnel
