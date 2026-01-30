@@ -15,7 +15,7 @@ use bitfield_struct::bitfield;
 use either::Either;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
-use crate::packet::{Ipv4, Ipv6};
+use crate::packet::{IpNextProtocol, Ipv4, Ipv6};
 
 /// A packet bitfield-struct containing the `version`-field that is shared between IPv4 and IPv6.
 #[bitfield(u8)]
@@ -70,6 +70,28 @@ impl Ip {
         Some(match self.as_v4_or_v6()? {
             Either::Left(ipv4) => ipv4.header.destination().into(),
             Either::Right(ipv6) => ipv6.header.destination().into(),
+        })
+    }
+
+    /// Try to extract the transport-layer protocol.
+    ///
+    /// Returns `None` if the version field is not `4` or `6`, or if the packet is too small.
+    /// Other than that, no checks are done to ensure this is a valid ip packet.
+    pub fn next_protocol(&self) -> Option<IpNextProtocol> {
+        Some(match self.as_v4_or_v6()? {
+            Either::Left(ipv4) => ipv4.header.next_protocol(),
+            Either::Right(ipv6) => ipv6.header.next_protocol(),
+        })
+    }
+
+    /// Try to extract the payload.
+    ///
+    /// Returns `None` if the version field is not `4` or `6`, or if the packet is too small.
+    /// Other than that, no checks are done to ensure this is a valid ip packet.
+    pub fn payload(&self) -> Option<&[u8]> {
+        Some(match self.as_v4_or_v6()? {
+            Either::Left(ipv4) => &ipv4.payload,
+            Either::Right(ipv6) => &ipv6.payload,
         })
     }
 }
