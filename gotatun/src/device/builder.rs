@@ -13,6 +13,7 @@ use crate::{
     task::Task,
     tun::{IpRecv, IpSend},
     udp::{UdpTransportFactory, socket::UdpSocketFactory},
+    x25519,
 };
 
 use super::Connection;
@@ -34,6 +35,8 @@ pub struct DeviceBuilder<Udp, TunTx, TunRx> {
 
     // TODO: consider turning this into a typestate, and adding a special case for single peer
     peers: Vec<Peer>,
+
+    private_key: Option<x25519::StaticSecret>,
 
     #[cfg(target_os = "linux")]
     fwmark: Option<u32>,
@@ -66,6 +69,7 @@ impl DeviceBuilder<Nul, Nul, Nul> {
             uapi: None,
             port: 0,
             peers: Vec::new(),
+            private_key: None,
             #[cfg(target_os = "linux")]
             fwmark: None,
         }
@@ -86,6 +90,7 @@ impl<X, Y> DeviceBuilder<Nul, X, Y> {
             uapi: self.uapi,
             port: self.port,
             peers: self.peers,
+            private_key: self.private_key,
             #[cfg(target_os = "linux")]
             fwmark: self.fwmark,
         }
@@ -133,6 +138,7 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
             uapi: self.uapi,
             port: self.port,
             peers: self.peers,
+            private_key: self.private_key,
             #[cfg(target_os = "linux")]
             fwmark: self.fwmark,
         }
@@ -140,6 +146,15 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
 }
 
 impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
+    /// Set the WireGuard private key for this device.
+    ///
+    /// If set, [`DeviceBuilder::build`] will call `set_key` on the device state
+    /// before adding peers, allowing peers to be created with the correct key pair.
+    pub fn with_private_key(mut self, key: x25519::StaticSecret) -> Self {
+        self.private_key = Some(key);
+        self
+    }
+
     pub fn with_uapi(mut self, uapi: UapiServer) -> Self {
         self.uapi = Some(uapi);
         self
@@ -190,6 +205,11 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             port: self.port,
             connection: None,
         };
+
+        if let Some(key) = self.private_key {
+            // TODO
+            let _ = state.set_key(key).await;
+        }
 
         let has_peers = !self.peers.is_empty();
         for peer in self.peers {
