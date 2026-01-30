@@ -209,6 +209,15 @@ pub fn packet(payload: impl AsRef<[u8]>) -> Packet<Ip> {
     packet.try_into_ip().unwrap()
 }
 
+/// Create a mocked IPv4 packet with custom src/dst addresses containing `payload`.
+pub fn packet_with_addrs(src: Ipv4Addr, dst: Ipv4Addr, payload: impl AsRef<[u8]>) -> Packet<Ip> {
+    let payload = payload.as_ref();
+    let header = Ipv4Header::new(src, dst, IpNextProtocol::Pup, payload);
+    let mut packet = Packet::copy_from(header.as_bytes());
+    packet.buf_mut().extend_from_slice(payload);
+    packet.try_into_ip().unwrap()
+}
+
 /// Create an `Iterator` that returns one packet for every possible payload size (with respect to [`TUN_MTU`]).
 pub fn packets_of_every_size() -> impl ExactSizeIterator<Item = Packet<Ip>> + Clone {
     let tun_mtu = usize::from(TUN_MTU);
