@@ -201,6 +201,12 @@ impl Ipv4Header {
     pub const fn fragment_offset(&self) -> u16 {
         self.flags_and_fragment_offset.fragment_offset()
     }
+
+    /// Update the checksum for this IP header.
+    pub fn recompute_checksum(&mut self) {
+        self.header_checksum = 0u16.into();
+        self.header_checksum = super::util::checksum(&[self.as_bytes()]).into();
+    }
 }
 
 impl Ipv4 {
