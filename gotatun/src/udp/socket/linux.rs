@@ -102,6 +102,7 @@ mod gro {
     use crate::packet::{Packet, PacketBufPool};
     use crate::udp::{UdpRecv, socket::UdpSocket};
     use bytes::BytesMut;
+    use ipnetwork::IpNetwork;
     use nix::cmsg_space;
     use nix::sys::socket::{ControlMessageOwned, MsgFlags, MultiHeaders, SockaddrIn};
     use std::io::{self, IoSliceMut};
