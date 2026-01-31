@@ -88,11 +88,17 @@ nix = { version = "0.30", default-features = false, features = [
 ] }
 
 [dev-dependencies]
+clap = { version = "4", features = ["derive"] }
 etherparse = "0.13"
 criterion = { version = "0.7.0", features = ["html_reports"] }
+tracing = "0.1.40"
+tracing-subscriber = "0.3.9"
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[example]]
+name = "multihop-router"
 
 [[bench]]
 name = "crypto_benches"
