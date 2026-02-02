@@ -181,7 +181,10 @@ async fn wait_for_shutdown(device: Device<DefaultDeviceTransports>) {
 
 /// Create and configure wireguard tunnel
 async fn setup_device(args: Args) -> eyre::Result<Device<DefaultDeviceTransports>> {
-    let (socket_uid, socket_gid) = drop_privileges::get_saved_ids()?;
+    let (socket_uid, socket_gid) = (!args.disable_drop_privileges)
+        .then(|| drop_privileges::get_saved_ids())
+        .transpose()?
+        .unzip();
 
     // We must create the tun device first because its name will change on macOS
     // if "utun" is passed.
@@ -197,7 +200,7 @@ async fn setup_device(args: Args) -> eyre::Result<Device<DefaultDeviceTransports
             .context("Failed to write to tun-name-file")?;
     }
 
-    let uapi = UapiServer::default_unix_socket(&tun_name, Some(socket_uid), Some(socket_gid))
+    let uapi = UapiServer::default_unix_socket(&tun_name, socket_uid, socket_gid)
         .context("Failed to create UAPI unix socket")?;
 
     let dev = DeviceBuilder::new()
