@@ -34,11 +34,6 @@ impl std::fmt::Debug for Session {
     }
 }
 
-/// Where encrypted data resides in a data packet
-const DATA_OFFSET: usize = 16;
-/// The overhead of the AEAD
-const AEAD_SIZE: usize = 16;
-
 // Receiving buffer constants
 const WORD_SIZE: u64 = 64;
 const N_WORDS: u64 = 16; // Suffice to reorder 64*16 = 1024 packets; can be increased at will
@@ -202,13 +197,14 @@ impl Session {
     pub(super) fn format_packet_data(&self, packet: Packet) -> Packet<WgData> {
         let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
 
-        let len = DATA_OFFSET + AEAD_SIZE + packet.len();
+        let len = WgData::OVERHEAD + packet.len();
 
         // TODO: we can remove this allocation by pre-allocating some extra
         // space at the beginning of `packet`s allocation, and using that.
         let mut buf = Packet::from_bytes(BytesMut::zeroed(len));
 
-        let data = WgData::mut_from_bytes(buf.buf_mut()).unwrap();
+        let data = WgData::mut_from_bytes(buf.buf_mut())
+            .expect("buffer size is at least WgData::OVERHEAD");
 
         data.header = WgDataHeader::new()
             .with_receiver_idx(self.sending_index)
@@ -227,7 +223,7 @@ impl Session {
             )
             .map(|tag| {
                 data.tag_mut().copy_from_slice(tag.as_ref());
-                packet.len() + AEAD_SIZE
+                packet.len() + WgData::TAG_LEN
             })
             .expect("encryption must succeed");
 
