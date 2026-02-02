@@ -162,7 +162,7 @@ pub struct EncryptedWithTag<T: Sized> {
 }
 
 impl WgData {
-    /// Data packet overhead: header and tag (16 bytes)
+    /// Data packet overhead: header and tag, `16+16` bytes.
     pub const OVERHEAD: usize = WgDataHeader::LEN + WgData::TAG_LEN;
 
     /// Length of the trailing `tag` field, in bytes.
