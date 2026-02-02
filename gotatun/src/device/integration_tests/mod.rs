@@ -12,7 +12,8 @@ mod tests {
     use crate::device::{DefaultDeviceTransports, Device, DeviceBuilder};
     use crate::udp::socket::UdpSocketFactory;
     use crate::x25519::{PublicKey, StaticSecret};
-    use base64::encode as base64encode;
+    use base64::Engine as _;
+    use base64::prelude::BASE64_STANDARD;
     use hex::encode;
     use rand_core::OsRng;
     use ring::rand::{SecureRandom, SystemRandom};
@@ -116,11 +117,19 @@ mod tests {
             // The local endpoint port is the remote listen port
             let _ = writeln!(conf, "ListenPort = {}", self.endpoint.port());
             // HACK: this should consume the key so it can't be reused instead of cloning and serializing
-            let _ = writeln!(conf, "PrivateKey = {}", base64encode(self.key.to_bytes()));
+            let _ = writeln!(
+                conf,
+                "PrivateKey = {}",
+                BASE64_STANDARD.encode(self.key.to_bytes())
+            );
 
             // We are the peer
             let _ = writeln!(conf, "[Peer]");
-            let _ = writeln!(conf, "PublicKey = {}", base64encode(local_key.as_bytes()));
+            let _ = writeln!(
+                conf,
+                "PublicKey = {}",
+                BASE64_STANDARD.encode(local_key.as_bytes())
+            );
             let _ = writeln!(conf, "AllowedIPs = {local_addr}");
             let _ = write!(conf, "Endpoint = 127.0.0.1:{local_port}");
 
