@@ -50,7 +50,7 @@ impl BufferedUdpSend {
                     0 => break,
                     1 => {
                         let (packet, addr) =
-                            buf.pop().expect("recv_meny received 1 packet into buf");
+                            buf.pop().expect("recv_many received 1 packet into buf");
                         let _ = udp_tx
                             .send_to(packet, addr)
                             .await
