@@ -199,6 +199,7 @@ impl Session {
 
         let len = WgData::OVERHEAD + packet.len();
 
+        // Prepare a buffer to hold our the WgData packet and our encapsulated payload.
         // TODO: we can remove this allocation by pre-allocating some extra
         // space at the beginning of `packet`s allocation, and using that.
         let mut buf = Packet::from_bytes(BytesMut::zeroed(len));
@@ -206,26 +207,30 @@ impl Session {
         let data = WgData::mut_from_bytes(buf.buf_mut())
             .expect("buffer size is at least WgData::OVERHEAD");
 
+        // Initialize wireguard header.
         data.header = WgDataHeader::new()
             .with_receiver_idx(self.sending_index)
             .with_counter(sending_key_counter);
 
-        // TODO: spec requires padding to 16 bytes, but actually works fine without it
-        let mut nonce = [0u8; 12];
-        nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
+        // Copy inner packet into place.
+        debug_assert_eq!(packet.len(), data.encrypted_encapsulated_packet_mut().len());
         data.encrypted_encapsulated_packet_mut()
             .copy_from_slice(&packet);
-        self.sender
+
+        let mut nonce = [0u8; 12];
+        nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
+
+        // Encrypt the inner packet+padding in-place.
+        let tag = self
+            .sender
             .seal_in_place_separate_tag(
                 Nonce::assume_unique_for_key(nonce),
                 Aad::from(&[]),
                 data.encrypted_encapsulated_packet_mut(),
             )
-            .map(|tag| {
-                data.tag_mut().copy_from_slice(tag.as_ref());
-                packet.len() + WgData::TAG_LEN
-            })
             .expect("encryption must succeed");
+
+        data.tag_mut().copy_from_slice(tag.as_ref());
 
         // this won't panic since we've correctly initialized a WgData packet
         let packet = buf.try_into_wg().expect("is a wireguard packet");
