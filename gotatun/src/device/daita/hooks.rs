@@ -5,7 +5,7 @@ use super::types::{PacketCount, PaddingPacket};
 use crate::device::daita::DaitaSettings;
 use crate::device::daita::actions::ActionHandler;
 use crate::device::daita::events::handle_events;
-use crate::device::daita::types::{self, BlockingWatcher, PaddingMarker};
+use crate::device::daita::types::{self, DelayWatcher, PaddingMarker};
 use crate::device::peer_state::PeerState;
 use crate::packet::{self, Ip, WgData, WgKind};
 use crate::task::Task;
@@ -36,7 +36,7 @@ pub struct PaddingOverhead {
 pub struct DaitaHooks {
     event_tx: mpsc::UnboundedSender<TriggerEvent>,
     packet_count: Arc<PacketCount>,
-    blocking_watcher: BlockingWatcher,
+    delay_watcher: DelayWatcher,
     mtu: MtuWatcher,
     padding_overhead: PaddingOverhead,
     _actions_task: Task,
@@ -68,9 +68,9 @@ impl DaitaHooks {
         let DaitaSettings {
             maybenot_machines,
             max_padding_frac,
-            max_blocking_frac,
-            max_blocked_packets,
-            min_blocking_capacity,
+            max_delay_frac,
+            max_delayed_packets,
+            min_delay_capacity,
         } = daita_settings;
         log::info!("Initializing DAITA");
         log::debug!("Using maybenot machines: {maybenot_machines:?}");
@@ -80,21 +80,21 @@ impl DaitaHooks {
         let packet_count = Arc::new(types::PacketCount::default());
         let padding_overhead = PaddingOverhead::default();
 
-        let (blocking_queue_tx, blocking_queue_rx) = mpsc::channel(max_blocked_packets.into());
-        let blocking_watcher = BlockingWatcher::new(blocking_queue_tx, min_blocking_capacity);
+        let (delay_queue_tx, delay_queue_rx) = mpsc::channel(max_delayed_packets.into());
+        let delay_watcher = DelayWatcher::new(delay_queue_tx, min_delay_capacity);
 
         let maybenot = maybenot::Framework::new(
             maybenot_machines,
             max_padding_frac,
-            max_blocking_frac,
+            max_delay_frac,
             std::time::Instant::now(),
             Rng::new(RNG_RESEED_THRESHOLD, OsRng).unwrap(),
         )?;
 
         let action_handler = ActionHandler::builder()
             .packet_count(packet_count.clone())
-            .blocking_queue_rx(blocking_queue_rx)
-            .blocking_watcher(blocking_watcher.clone())
+            .delay_queue_rx(delay_queue_rx)
+            .delay_watcher(delay_watcher.clone())
             .peer(peer)
             .packet_pool(packet_pool)
             .udp_send_v4(udp_send_v4)
@@ -116,7 +116,7 @@ impl DaitaHooks {
         Ok(DaitaHooks {
             event_tx,
             packet_count,
-            blocking_watcher,
+            delay_watcher,
             mtu,
             padding_overhead,
             _actions_task: actions_task,
@@ -144,7 +144,7 @@ impl DaitaHooks {
 
     /// Map an encapsulated packet, before it is sent to the network.
     ///
-    /// Returns `None` to drop/ignore the packet, e.g. when it was queued for blocking.
+    /// Returns `None` to drop/ignore the packet, e.g. when it was queued for delay.
     /// Returns `Some(packet)` to send the packet.
     pub fn after_data_encapsulate(&self, packet: WgKind) -> Option<WgKind> {
         // DAITA only cares about data packets.
@@ -156,8 +156,8 @@ impl DaitaHooks {
             other => return Some(other),
         };
 
-        self.blocking_watcher
-            .maybe_block_packet(data_packet)
+        self.delay_watcher
+            .maybe_delay_packet(data_packet)
             .map(|packet| {
                 let _ = self.event_tx.send(TriggerEvent::TunnelSent);
                 self.packet_count.dec(1);

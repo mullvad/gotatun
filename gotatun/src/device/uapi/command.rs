@@ -378,9 +378,9 @@ impl Display for GetPeer {
             let DaitaSettings {
                 maybenot_machines,
                 max_padding_frac: daita_max_padding_frac,
-                max_blocking_frac: daita_max_blocking_frac,
-                max_blocked_packets: daita_max_blocked_packets,
-                min_blocking_capacity: daita_min_blocking_capacity,
+                max_delay_frac: daita_max_delay_frac,
+                max_delayed_packets: daita_max_delayed_packets,
+                min_delay_capacity: daita_min_delay_capacity,
             } = daita;
 
             writeln!(f, "daita_enable=1")?;
@@ -389,13 +389,10 @@ impl Display for GetPeer {
                 writeln!(f, "daita_machine={}", machine.serialize())?;
             }
 
-            writeln!(f, "daita_max_blocked_packets={daita_max_blocked_packets}")?;
-            writeln!(
-                f,
-                "daita_min_blocking_capacity={daita_min_blocking_capacity}"
-            )?;
+            writeln!(f, "daita_max_delayed_packets={daita_max_delayed_packets}")?;
+            writeln!(f, "daita_min_delay_capacity={daita_min_delay_capacity}")?;
             writeln!(f, "daita_max_padding_frac={daita_max_padding_frac}")?;
-            writeln!(f, "daita_max_blocking_frac={daita_max_blocking_frac}")?;
+            writeln!(f, "daita_max_delay_frac={daita_max_delay_frac}")?;
 
             if let Some(daita_rx_padding_bytes) = daita_rx_padding_bytes {
                 writeln!(f, "daita_rx_padding_bytes={daita_rx_padding_bytes}")?;
@@ -665,23 +662,23 @@ fn try_process_daita_line(
                 .parse()
                 .map_err(|err| eyre!("invalid padding frac: {err}"))?;
         }
-        "daita_max_blocking_frac" => {
+        "daita_max_delay_frac" => {
             let daita_settings = daita_or_bail(daita_settings)?;
-            daita_settings.max_blocking_frac = v
+            daita_settings.max_delay_frac = v
                 .parse()
-                .map_err(|err| eyre!("invalid blocking frac: {err}"))?;
+                .map_err(|err| eyre!("invalid delay frac: {err}"))?;
         }
-        "daita_max_blocked_packets" => {
+        "daita_max_delayed_packets" => {
             let daita_settings = daita_or_bail(daita_settings)?;
-            daita_settings.max_blocked_packets = v
+            daita_settings.max_delayed_packets = v
                 .parse()
-                .map_err(|err| eyre!("invalid blocked packets: {err}"))?;
+                .map_err(|err| eyre!("invalid delayed packets: {err}"))?;
         }
-        "daita_min_blocking_capacity" => {
+        "daita_min_delay_capacity" => {
             let daita_settings = daita_or_bail(daita_settings)?;
-            daita_settings.min_blocking_capacity = v
+            daita_settings.min_delay_capacity = v
                 .parse()
-                .map_err(|err| eyre!("invalid min blocking capacity: {err}"))?;
+                .map_err(|err| eyre!("invalid min delay capacity: {err}"))?;
         }
         _ => return Ok(false),
     }

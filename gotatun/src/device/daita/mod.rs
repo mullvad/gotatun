@@ -24,12 +24,12 @@ pub struct DaitaSettings {
     pub maybenot_machines: Vec<Machine>,
     /// Maximum fraction of bandwidth that may be used for padding packets.
     pub max_padding_frac: f64,
-    /// Maximum fraction of bandwidth that may be used for blocking packets.
-    pub max_blocking_frac: f64,
-    /// Maximum number of packets that may be blocked at any time.
-    pub max_blocked_packets: NonZeroUsize,
-    /// Minimum number of free slots in the blocking queue to continue blocking.
-    pub min_blocking_capacity: usize,
+    /// Maximum fraction of bandwidth that may be used for delayed packets.
+    pub max_delay_frac: f64,
+    /// Maximum number of packets that may be delayed at any time.
+    pub max_delayed_packets: NonZeroUsize,
+    /// Minimum number of free slots in the delay queue before the delay state is aborted.
+    pub min_delay_capacity: usize,
 }
 
 impl Default for DaitaSettings {
@@ -37,9 +37,9 @@ impl Default for DaitaSettings {
         Self {
             maybenot_machines: vec![],
             max_padding_frac: 0.0,
-            max_blocking_frac: 0.0,
-            max_blocked_packets: const { NonZeroUsize::new(1024).unwrap() },
-            min_blocking_capacity: 50,
+            max_delay_frac: 0.0,
+            max_delayed_packets: const { NonZeroUsize::new(1024).unwrap() },
+            min_delay_capacity: 50,
         }
     }
 }
