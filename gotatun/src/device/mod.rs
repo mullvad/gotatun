@@ -112,7 +112,6 @@ pub(crate) struct DeviceState<T: DeviceTransports> {
     /// stopped.
     tun_rx: Arc<Mutex<T::IpRecv>>,
 
-    #[cfg_attr(not(feature = "daita"), expect(dead_code))]
     /// MTU watcher of the TUN device.
     tun_rx_mtu: MtuWatcher,
 
@@ -519,7 +518,7 @@ impl<T: DeviceTransports> DeviceState<T> {
         mut udp_rx: impl UdpRecv,
         mut packet_pool: PacketBufPool,
     ) -> Result<(), Error> {
-        let (private_key, public_key, rate_limiter) = {
+        let (private_key, public_key, rate_limiter, mut tun_mtu) = {
             let Some(device) = device.upgrade() else {
                 return Ok(());
             };
@@ -527,7 +526,8 @@ impl<T: DeviceTransports> DeviceState<T> {
 
             let (private_key, public_key) = device.key_pair.clone().expect("Key not set");
             let rate_limiter = device.rate_limiter.clone().unwrap();
-            (private_key, public_key, rate_limiter)
+            let tun_mtu = device.tun_rx_mtu.clone();
+            (private_key, public_key, rate_limiter, tun_mtu)
         };
 
         while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
@@ -587,7 +587,8 @@ impl<T: DeviceTransports> DeviceState<T> {
                 TunnResult::Err(_) => continue,
                 // Flush pending queue
                 TunnResult::WriteToNetwork(packet) => {
-                    let packets = std::iter::once(packet).chain(tunnel.get_queued_packets());
+                    let packets =
+                        std::iter::once(packet).chain(tunnel.get_queued_packets(&mut tun_mtu));
 
                     #[cfg(feature = "daita")]
                     let packets = packets.filter_map(|p| match daita {
@@ -655,6 +656,14 @@ impl<T: DeviceTransports> DeviceState<T> {
         udp6: impl UdpSend,
         mut packet_pool: PacketBufPool,
     ) {
+        let mut tun_mtu = {
+            let Some(device) = device.upgrade() else {
+                return;
+            };
+            let device = device.read().await;
+            device.tun_rx_mtu.clone()
+        };
+
         loop {
             let packets = match tun_rx.recv(&mut packet_pool).await {
                 Ok(packets) => packets,
@@ -702,7 +711,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                 #[cfg(not(feature = "daita"))]
                 let packet = packet.into();
 
-                let Some(packet) = tunnel.handle_outgoing_packet(packet) else {
+                let Some(packet) = tunnel.handle_outgoing_packet(packet, Some(&mut tun_mtu)) else {
                     continue;
                 };
 

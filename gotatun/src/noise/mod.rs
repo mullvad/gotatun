@@ -19,6 +19,7 @@ use crate::noise::handshake::Handshake;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
 use crate::packet::{Packet, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind};
+use crate::tun::MtuWatcher;
 use crate::x25519;
 
 use std::collections::VecDeque;
@@ -117,8 +118,12 @@ impl Tunn {
     /// If there's an active session, return the encapsulated packet. Otherwise, if needed, return
     /// a handshake initiation. `None` is returned if a handshake is already in progress. In that
     /// case, the packet is added to a queue.
-    pub fn handle_outgoing_packet(&mut self, packet: Packet) -> Option<WgKind> {
-        match self.encapsulate_with_session(packet) {
+    pub fn handle_outgoing_packet(
+        &mut self,
+        packet: Packet,
+        tun_mtu: Option<&mut MtuWatcher>,
+    ) -> Option<WgKind> {
+        match self.encapsulate_with_session(packet, tun_mtu) {
             Ok(encapsulated_packet) => Some(encapsulated_packet.into()),
             Err(packet) => {
                 // If there is no session, queue the packet for future retry
@@ -132,11 +137,15 @@ impl Tunn {
     /// Encapsulate a single packet into a [`WgData`].
     ///
     /// Returns `Err(original_packet)` if there is no active session.
-    pub fn encapsulate_with_session(&mut self, packet: Packet) -> Result<Packet<WgData>, Packet> {
+    pub fn encapsulate_with_session(
+        &mut self,
+        packet: Packet,
+        tun_mtu: Option<&mut MtuWatcher>,
+    ) -> Result<Packet<WgData>, Packet> {
         let current = self.current;
         if let Some(ref session) = self.sessions[current % N_SESSIONS] {
             // Send the packet using an established session
-            let packet = session.format_packet_data(packet);
+            let packet = session.format_packet_data(packet, tun_mtu);
             self.timer_tick(TimerName::TimeLastPacketSent);
             // Exclude Keepalive packets from timer update.
             if !packet.as_bytes().is_empty() {
@@ -195,7 +204,7 @@ impl Tunn {
         let mut p = p.into_bytes();
         p.truncate(0);
 
-        let keepalive_packet = session.format_packet_data(p);
+        let keepalive_packet = session.format_packet_data(p, None);
         // Store new session in ring buffer
         let l_idx = session.local_index();
         let index = l_idx % N_SESSIONS;
@@ -302,10 +311,10 @@ impl Tunn {
     }
 
     /// Encapsulate and return all queued packets.
-    pub fn get_queued_packets(&mut self) -> impl Iterator<Item = WgKind> {
+    pub fn get_queued_packets(&mut self, tun_mtu: &mut MtuWatcher) -> impl Iterator<Item = WgKind> {
         std::iter::from_fn(|| {
             self.dequeue_packet()
-                .and_then(|packet| self.handle_outgoing_packet(packet))
+                .and_then(|packet| self.handle_outgoing_packet(packet, Some(tun_mtu)))
         })
     }
 
@@ -652,7 +661,7 @@ mod tests {
         let sent_packet_buf = create_ipv4_udp_packet();
 
         let data = my_tun
-            .handle_outgoing_packet(sent_packet_buf.clone().into_bytes())
+            .handle_outgoing_packet(sent_packet_buf.clone().into_bytes(), None)
             .unwrap();
 
         assert!(matches!(data, WgKind::Data(..)));
