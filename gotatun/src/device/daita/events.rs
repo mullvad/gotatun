@@ -65,7 +65,7 @@ where
                     replace,
                     machine,
                 } => {
-                    machine_timers.schedule_block(*machine, *timeout, *duration, *replace, *bypass);
+                    machine_timers.schedule_delay(*machine, *timeout, *duration, *replace, *bypass);
                 }
                 TriggerAction::UpdateTimer {
                     duration,

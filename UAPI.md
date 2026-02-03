@@ -10,11 +10,11 @@ modifying a peer:
 
 * `daita_enable`: Set to `1` to enable or replace existing settings, or `0` to disable DAITA.
 * `daita_machine`: A base64-encoded [Maybenot] machine.
-* `daita_max_blocked_packets`: Maximum number of packets that may be blocked at any time.
-* `daita_min_blocking_capacity`: Minimum number of free slots in the blocking queue to continue
-  blocking.
+* `daita_max_delayed_packets`: Maximum number of packets that may be delayed at any time.
+* `daita_min_delay_capacity`: Minimum number of free slots in the delay queue to continue
+  delaying packets.
 * `daita_max_padding_frac`: Maximum fraction of padding packets in `[0, 1]`.
-* `daita_max_blocking_frac`: Maximum fraction of blocking in `[0, 1]`.
+* `daita_max_delay_frac`: Maximum fraction of delayed packets in `[0, 1]`.
 
 In addition to the keys above, the following ones are available when retrieving a peer (`get=1`):
 

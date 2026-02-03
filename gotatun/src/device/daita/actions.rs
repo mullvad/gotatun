@@ -1,10 +1,10 @@
 // Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use super::types::{Action, BlockingState, ErrorAction, PacketCount, PaddingHeader, Result};
+use super::types::{Action, DelayState, ErrorAction, PacketCount, PaddingHeader, Result};
 use crate::{
     device::{
-        daita::types::{BlockingWatcher, IgnoreReason},
+        daita::types::{DelayWatcher, IgnoreReason},
         peer_state::PeerState,
     },
     packet::{self, Packet, WgData},
@@ -37,8 +37,8 @@ where
     US: UdpSend + Clone + 'static,
 {
     packet_count: Arc<PacketCount>,
-    blocking_queue_rx: mpsc::Receiver<Packet<WgData>>,
-    blocking_watcher: BlockingWatcher,
+    delay_queue_rx: mpsc::Receiver<Packet<WgData>>,
+    delay_watcher: DelayWatcher,
     peer: Weak<Mutex<PeerState>>,
     packet_pool: packet::PacketBufPool,
     udp_send_v4: US,
@@ -56,26 +56,26 @@ where
         mut self,
         mut actions: mpsc::UnboundedReceiver<(Action, MachineId)>,
     ) {
-        let mut blocked_packets_buf = Vec::new();
+        let mut delayed_packets_buf = Vec::new();
 
         loop {
             let res = futures::select! {
-                () = self.blocking_watcher.wait_blocking_ended().fuse() => {
-                    // Flush blocked packets
-                    self.end_blocking(&mut blocked_packets_buf).await
+                () = self.delay_watcher.wait_delay_ended().fuse() => {
+                    // Flush delayed packets
+                    self.end_delay(&mut delayed_packets_buf).await
                 }
                 res = actions.recv().fuse() => {
                     let Some((action, machine)) = res else {
                         log::trace!("DAITA: actions channel closed, exiting handle_actions");
-                        let _ = self.end_blocking(&mut blocked_packets_buf).await;
+                        let _ = self.end_delay(&mut delayed_packets_buf).await;
                         break;
                     };
                     match action {
                         Action::Padding { replace, bypass } => {
                             self.handle_padding(machine, replace, bypass).await
                         }
-                        Action::Block { replace, bypass, duration } => {
-                            self.handle_blocking(machine, replace, bypass, duration).await
+                        Action::Delay { replace, bypass, duration } => {
+                            self.handle_delay(machine, replace, bypass, duration).await
                         }
                     }
                 }
@@ -90,8 +90,10 @@ where
         }
     }
 
-    /// Start or extend blocking according to [`maybenot::TriggerAction::BlockOutgoing`].
-    async fn handle_blocking(
+    /// Start or extend packet delay according to [`maybenot::TriggerAction::BlockOutgoing`].
+    ///
+    /// Note that we use the term "delay" to refer to what `maybenot` calls "blocking".
+    async fn handle_delay(
         &mut self,
         machine: MachineId,
         replace: bool,
@@ -99,12 +101,12 @@ where
         duration: Duration,
     ) -> Result<()> {
         self.send_event(TriggerEvent::BlockingBegin { machine })?;
-        let mut blocking = self.blocking_watcher.blocking_state.write().await;
+        let mut delay = self.delay_watcher.delay_state.write().await;
         let new_expiry = Instant::now() + duration;
-        match *blocking {
-            BlockingState::Active { expires_at, .. } if !replace && new_expiry <= expires_at => {}
+        match *delay {
+            DelayState::Active { expires_at, .. } if !replace && new_expiry <= expires_at => {}
             _ => {
-                *blocking = BlockingState::Active {
+                *delay = DelayState::Active {
                     bypass,
                     expires_at: new_expiry,
                 };
@@ -122,49 +124,46 @@ where
     ) -> Result<()> {
         self.send_event(TriggerEvent::PaddingSent { machine })?;
 
-        let blocking_state = { *self.blocking_watcher.blocking_state.read().await };
-        match blocking_state {
-            BlockingState::Active { bypass: true, .. } if replace && padding_bypass => {
-                if let Ok(packet) = self.blocking_queue_rx.try_recv() {
-                    // Replace padding with a blocked packet
+        let delay_state = { *self.delay_watcher.delay_state.read().await };
+        match delay_state {
+            DelayState::Active { bypass: true, .. } if replace && padding_bypass => {
+                if let Ok(packet) = self.delay_queue_rx.try_recv() {
+                    // Replace padding with a delayed packet
                     let peer = self.get_peer().await?;
                     self.send(packet, peer).await
                 } else {
-                    // No blocked packet to replace, just send padding
+                    // No delayed packet to replace, just send padding
                     self.send_padding().await
                 }
             }
-            // Allow padding to bypass block
-            BlockingState::Active { bypass: true, .. } if !replace && padding_bypass => {
+            // Allow padding to bypass delay
+            DelayState::Active { bypass: true, .. } if !replace && padding_bypass => {
                 self.send_padding().await
             }
-            BlockingState::Active { .. }
+            DelayState::Active { .. }
                 if replace
-                    && (self.packet_count.outbound() > 0 || !self.blocking_queue_rx.is_empty()) =>
+                    && (self.packet_count.outbound() > 0 || !self.delay_queue_rx.is_empty()) =>
             {
                 // Replace padding with any queued packet
                 Ok(())
             }
-            // Add packet to blocking queue if it shouldn't or cannot be replaced
-            BlockingState::Active { .. } => {
+            // Add packet to delay queue if it shouldn't or cannot be replaced
+            DelayState::Active { .. } => {
                 let mut peer = self.get_peer().await?;
                 let mtu = self.mtu.get();
                 let padding_packet = self.encapsulate_padding(&mut peer, mtu)?;
-                //  Drop the padding packet if the blocking queue is full
-                let _ = self
-                    .blocking_watcher
-                    .blocking_queue_tx
-                    .try_send(padding_packet);
+                //  Drop the padding packet if the delay queue is full
+                let _ = self.delay_watcher.delay_queue_tx.try_send(padding_packet);
                 Ok(())
             }
             // Replace padding packet with in-flight packet
-            BlockingState::Inactive if replace && self.packet_count.outbound() > 0 => Ok(()),
-            BlockingState::Inactive => self.send_padding().await,
+            DelayState::Inactive if replace && self.packet_count.outbound() > 0 => Ok(()),
+            DelayState::Inactive => self.send_padding().await,
         }
     }
 
-    /// Flush all blocked packets and end blocking.
-    pub(crate) async fn end_blocking(
+    /// Flush all packets from the delay queue and end the delay state.
+    pub(crate) async fn end_delay(
         &mut self,
         packets: &mut Vec<(Packet, SocketAddr)>,
     ) -> Result<()> {
@@ -179,21 +178,20 @@ where
         };
 
         let mut send_many_bufs = US::SendManyBuf::default();
-        let mut blocking = true;
+        let mut delay = true;
         let limit = udp_send.max_number_of_packets_to_send();
         loop {
             while packets.len() <= limit {
-                match self.blocking_queue_rx.try_recv() {
+                match self.delay_queue_rx.try_recv() {
                     Ok(packet) => packets.push((packet.into(), addr)),
                     Err(TryRecvError::Empty) => {
-                        // When the packet queue is empty, we can end blocking.
+                        // When the packet queue is empty, we can end the delay state.
                         // To prevent new packets from sneaking into the queue before we set the state to Inactive,
                         // we loop once more and flush any new packets that might have arrived.
-                        if blocking {
-                            *self.blocking_watcher.blocking_state.write().await =
-                                BlockingState::Inactive;
+                        if delay {
+                            *self.delay_watcher.delay_state.write().await = DelayState::Inactive;
                             self.send_event(TriggerEvent::BlockingEnd)?;
-                            blocking = false;
+                            delay = false;
                         } else {
                             return Ok(());
                         }
