@@ -59,26 +59,33 @@ const MAX_PACKET_BUFS: usize = 4000;
 /// Error of [`Device`]-related operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// I/O error
     #[error("i/o error: {0}")]
     IoError(#[from] io::Error),
 
+    /// Failed to bind UDP sockets
     #[error("Failed to bind UDP sockets (params={1:?}): {0}")]
     Bind(#[source] io::Error, UdpTransportFactoryParams),
 
+    /// Invalid tunnel name
     #[error("Invalid tunnel name")]
     InvalidTunnelName,
 
+    /// Failed to drop privileges
     #[error("Failed to drop privileges: {0}")]
     DropPrivileges(String),
 
+    /// Failed to open TUN device
     #[cfg(feature = "tun")]
     #[error("Failed to open TUN device: {0}")]
     OpenTun(#[source] tun::Error),
 
+    /// Failed to get TUN device name
     #[cfg(feature = "tun")]
     #[error("Failed to get TUN device name: {0}")]
     GetTunName(#[source] tun::Error),
 
+    /// Failed to initialize DAITA hooks
     #[error("Failed to initialize DAITA hooks")]
     #[cfg(feature = "daita")]
     DaitaHooks(#[from] daita::Error),
@@ -247,6 +254,7 @@ impl<T: DeviceTransports> Connection<T> {
 }
 
 impl<T: DeviceTransports> Device<T> {
+    /// Stop tunneling traffic and shut down the [`Device`].
     pub async fn stop(self) {
         Self::stop_inner(self.inner.clone()).await
     }
