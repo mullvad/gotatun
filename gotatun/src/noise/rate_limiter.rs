@@ -62,6 +62,12 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
+    /// Create a new rate limiter for handshake packets.
+    ///
+    /// # Arguments
+    ///
+    /// * `public_key` - The device's public key, used for cookie generation
+    /// * `limit` - Maximum number of packets allowed per rate limiting period
     pub fn new(public_key: &crate::x25519::PublicKey, limit: u64) -> Self {
         let mut secret_key = [0u8; 16];
         OsRng.fill_bytes(&mut secret_key);
