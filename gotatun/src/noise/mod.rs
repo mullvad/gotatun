@@ -664,7 +664,7 @@ mod tests {
         assert!(matches!(my_tun.update_timers(), Ok(None)));
         let sent_packet_buf = create_ipv4_udp_packet();
         let _data = my_tun
-            .handle_outgoing_packet(sent_packet_buf.into_bytes())
+            .handle_outgoing_packet(sent_packet_buf.into_bytes(), None)
             .expect("expected encapsulated packet");
 
         //Advance to timeout
