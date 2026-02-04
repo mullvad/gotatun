@@ -120,10 +120,14 @@ impl Tunn {
     /// case, the packet is added to a queue.
     pub fn handle_outgoing_packet(
         &mut self,
-        packet: Packet,
+        mut packet: Packet,
         tun_mtu: Option<&mut MtuWatcher>,
     ) -> Option<WgKind> {
-        match self.encapsulate_with_session(packet, tun_mtu) {
+        if let Some(tun_mtu) = tun_mtu {
+            packet = pad_to_x16(packet, tun_mtu);
+        }
+
+        match self.encapsulate_with_session(packet) {
             Ok(encapsulated_packet) => Some(encapsulated_packet.into()),
             Err(packet) => {
                 // If there is no session, queue the packet for future retry
@@ -137,15 +141,11 @@ impl Tunn {
     /// Encapsulate a single packet into a [`WgData`].
     ///
     /// Returns `Err(original_packet)` if there is no active session.
-    pub fn encapsulate_with_session(
-        &mut self,
-        packet: Packet,
-        tun_mtu: Option<&mut MtuWatcher>,
-    ) -> Result<Packet<WgData>, Packet> {
+    pub fn encapsulate_with_session(&mut self, packet: Packet) -> Result<Packet<WgData>, Packet> {
         let current = self.current;
         if let Some(ref session) = self.sessions[current % N_SESSIONS] {
             // Send the packet using an established session
-            let packet = session.format_packet_data(packet, tun_mtu);
+            let packet = session.format_packet_data(packet);
             self.timer_tick(TimerName::TimeLastPacketSent);
             // Exclude Keepalive packets from timer update.
             if !packet.as_bytes().is_empty() {
@@ -204,7 +204,7 @@ impl Tunn {
         let mut p = p.into_bytes();
         p.truncate(0);
 
-        let keepalive_packet = session.format_packet_data(p, None);
+        let keepalive_packet = session.format_packet_data(p);
         // Store new session in ring buffer
         let l_idx = session.local_index();
         let index = l_idx % N_SESSIONS;
@@ -373,6 +373,33 @@ impl Tunn {
 
         (time, tx_bytes, rx_bytes, loss, rtt)
     }
+}
+
+/// Try to pad `packet` with `0`s such that `packet.len().is_multiple_of(16)`.
+///
+/// The padding is clamped to not exceed `tun_mtu`.
+fn pad_to_x16(mut packet: Packet, tun_mtu: &mut MtuWatcher) -> Packet {
+    if packet.len().is_multiple_of(16) {
+        return packet;
+    }
+
+    let padded_packet_len = {
+        // Getting the MTU involves atomics. Don't do it until we need to.
+        let mtu = tun_mtu.get();
+        let mtu = usize::from(mtu);
+
+        if cfg!(debug_assertions) && packet.len() > mtu {
+            log::debug!("Packet length exceeded MTU: {} > {mtu}", packet.len());
+        }
+
+        // Checking the mtu is inherently racey, so we need to be tolerant if packet.len() > mtu.
+        packet.len().next_multiple_of(16).min(mtu).max(packet.len())
+    };
+
+    debug_assert!(padded_packet_len >= packet.len());
+    packet.buf_mut().resize(padded_packet_len, 0);
+
+    packet
 }
 
 #[cfg(test)]

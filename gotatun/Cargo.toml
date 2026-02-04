@@ -17,7 +17,7 @@ keywords = ["wireguard", "vpn"]
 readme = "../README.md"
 
 [features]
-default = []
+default = ["device", "pcap", "daita", "windows-gro", "daita-uapi"]
 device = ["thiserror"]
 pcap = ["dep:pcap-file"]
 # UDP GRO appears to be broken on Windows.

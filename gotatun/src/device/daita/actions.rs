@@ -227,7 +227,7 @@ where
         self.tx_padding_packet_bytes
             .fetch_add(mtu as usize, atomic::Ordering::SeqCst);
         peer.tunnel
-            .encapsulate_with_session(self.create_padding_packet(mtu), None)
+            .encapsulate_with_session(self.create_padding_packet(mtu))
             // Encapsulate can only fail when there is no session, just drop the padding packet in that case
             .map_err(|_| ErrorAction::Ignore(IgnoreReason::NoSession))
     }

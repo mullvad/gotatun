@@ -8,13 +8,12 @@
 use crate::{
     noise::errors::WireGuardError,
     packet::{Packet, WgData, WgDataHeader, WgKind},
-    tun::MtuWatcher,
 };
 use bytes::{Buf, BytesMut};
 use parking_lot::Mutex;
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use zerocopy::{FromBytes, FromZeros};
+use zerocopy::FromBytes;
 
 pub struct Session {
     pub(crate) receiving_index: u32,
@@ -195,31 +194,13 @@ impl Session {
     }
 
     /// Encapsulate `packet` into a [`WgData`].
-    pub(super) fn format_packet_data(
-        &self,
-        packet: Packet,
-        tun_mtu: Option<&mut MtuWatcher>,
-    ) -> Packet<WgData> {
+    ///
+    /// If `tun_mtu` is `Some`, the `WgData` payload will be padded to a multiple of 16 bytes.
+    /// `tun_mtu` is used to ensure that the packet isn't padded past the MTU of the TUN device.
+    pub(super) fn format_packet_data(&self, packet: Packet) -> Packet<WgData> {
         let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
 
-        // Pad the packet to multiple of 16 bytes.
-        let padded_packet_len = match packet.len() {
-            n if n.is_multiple_of(16) => n,
-            n => {
-                // Getting the MTU involves atomics. Don't do it until we need to.
-                let mtu = tun_mtu.map(|mtu| mtu.get()).unwrap_or(0);
-                let mtu = usize::from(mtu);
-
-                if cfg!(debug_assertions) && mtu > 0 && packet.len() > mtu {
-                    log::debug!("Packet length exceeded MTU: {} > {mtu}", packet.len());
-                }
-
-                // Checking the mtu is inherently racey, so we need to be tolerant if packet.len() > mtu.
-                n.next_multiple_of(16).min(mtu).max(packet.len())
-            }
-        };
-
-        let len = WgData::OVERHEAD + padded_packet_len;
+        let len = WgData::OVERHEAD + packet.len();
 
         // Prepare a buffer to hold our the WgData packet and our encapsulated payload.
         // TODO: we can remove this allocation by pre-allocating some extra
@@ -234,21 +215,10 @@ impl Session {
             .with_receiver_idx(self.sending_index)
             .with_counter(sending_key_counter);
 
-        debug_assert_eq!(
-            padded_packet_len,
-            data.encrypted_encapsulated_packet_mut().len()
-        );
-
-        let (encapsulated_packet, encapsulated_padding) = data
-            .encrypted_encapsulated_packet_mut()
-            .split_at_mut_checked(packet.len())
-            .expect("payload buffer len >= packet.len()");
-
         // Copy inner packet into place.
-        encapsulated_packet.copy_from_slice(&packet);
-
-        // Ensure padding is zeroed.
-        encapsulated_padding.zero();
+        debug_assert_eq!(packet.len(), data.encrypted_encapsulated_packet_mut().len());
+        data.encrypted_encapsulated_packet_mut()
+            .copy_from_slice(&packet);
 
         let mut nonce = [0u8; 12];
         nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
