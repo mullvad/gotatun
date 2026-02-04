@@ -118,6 +118,9 @@ impl Tunn {
     /// If there's an active session, return the encapsulated packet. Otherwise, if needed, return
     /// a handshake initiation. `None` is returned if a handshake is already in progress. In that
     /// case, the packet is added to a queue.
+    ///
+    /// If `tun_mtu` is `Some`, `packet` will be padded with `0`s to a multiple of 16 bytes,
+    /// clamped to not exceed MTU.
     pub fn handle_outgoing_packet(
         &mut self,
         mut packet: Packet,
