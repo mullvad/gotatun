@@ -20,7 +20,7 @@ use tokio::sync::mpsc::{self};
 use zerocopy::{FromBytes, IntoBytes, TryFromBytes};
 
 /// Overhead induced by DAITA from decoy packets and constant packet size.
-/// Exposed via [`crate::device::api::command::GetPeer`].
+/// Exposed via [`crate::device::uapi::command::GetPeer`].
 #[derive(Default)]
 pub struct DaitaOverhead {
     /// Total extra bytes added due to constant-size padding of data packets.
