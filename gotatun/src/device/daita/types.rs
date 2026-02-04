@@ -44,8 +44,8 @@ pub(crate) type Result<T> = std::result::Result<T, ErrorAction>;
 
 #[derive(TryFromBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 #[repr(C)]
-pub(crate) struct PaddingPacket {
-    pub(crate) header: PaddingHeader,
+pub(crate) struct DecoyPacket {
+    pub(crate) header: DecoyHeader,
     pub(crate) payload: [u8],
 }
 
@@ -53,8 +53,8 @@ pub(crate) struct PaddingPacket {
     TryFromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq, Clone, Copy,
 )]
 #[repr(C, packed)]
-pub(crate) struct PaddingHeader {
-    pub marker: PaddingMarker,
+pub(crate) struct DecoyHeader {
+    pub marker: DecoyMarker,
     _reserved: u8,
     pub length: big_endian::U16,
 }
@@ -63,14 +63,14 @@ pub(crate) struct PaddingHeader {
     TryFromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq, Clone, Copy,
 )]
 #[repr(u8)]
-pub(crate) enum PaddingMarker {
-    Padding = 0xff,
+pub(crate) enum DecoyMarker {
+    Decoy = 0xff,
 }
 
-impl PaddingHeader {
+impl DecoyHeader {
     pub(crate) const fn new(length: big_endian::U16) -> Self {
         Self {
-            marker: PaddingMarker::Padding,
+            marker: DecoyMarker::Decoy,
             _reserved: 0,
             length,
         }
@@ -79,7 +79,7 @@ impl PaddingHeader {
 
 /// Counter for the number of normal packets that have been received on the tunnel interface
 /// but not yet sent to the network, and the number of those packets that have replaced
-/// padding packets.
+/// decoy packets.
 #[derive(Default)]
 pub(crate) struct PacketCount {
     outbound_normal: AtomicU32,
@@ -102,15 +102,15 @@ impl PacketCount {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum BlockingState {
+pub(crate) enum DelayState {
     Inactive,
     Active { bypass: bool, expires_at: Instant },
 }
 
-impl BlockingState {
-    /// Returns `true` if the blocking is [`Active`].
+impl DelayState {
+    /// Returns `true` if the delay is [`Active`].
     ///
-    /// [`Active`]: Blocking::Active
+    /// [`Active`]: DelayState::Active
     #[must_use]
     pub(crate) fn is_active(&self) -> bool {
         matches!(self, Self::Active { .. })
@@ -118,37 +118,34 @@ impl BlockingState {
 }
 
 #[derive(Clone)]
-pub struct BlockingWatcher {
-    pub(super) blocking_queue_tx: mpsc::Sender<Packet<WgData>>,
-    pub(super) blocking_state: Arc<RwLock<BlockingState>>,
-    blocking_abort: Arc<Notify>,
-    min_blocking_capacity: usize,
+pub struct DelayWatcher {
+    pub(super) delay_queue_tx: mpsc::Sender<Packet<WgData>>,
+    pub(super) delay_state: Arc<RwLock<DelayState>>,
+    delay_abort: Arc<Notify>,
+    min_delay_capacity: usize,
 }
 
-impl BlockingWatcher {
-    pub fn new(
-        blocking_queue_tx: mpsc::Sender<Packet<WgData>>,
-        min_blocking_capacity: usize,
-    ) -> Self {
-        let blocking_state = Arc::new(RwLock::new(BlockingState::Inactive));
-        let blocking_abort = Arc::new(Notify::const_new());
+impl DelayWatcher {
+    pub fn new(delay_queue_tx: mpsc::Sender<Packet<WgData>>, min_delay_capacity: usize) -> Self {
+        let delay_state = Arc::new(RwLock::new(DelayState::Inactive));
+        let delay_abort = Arc::new(Notify::const_new());
         Self {
-            blocking_queue_tx,
-            blocking_state,
-            blocking_abort,
-            min_blocking_capacity,
+            delay_queue_tx,
+            delay_state,
+            delay_abort,
+            min_delay_capacity,
         }
     }
 
-    /// Wait until the blocking timer expires, or until `blocking_abort` is notified.
+    /// Wait until the delay timer expires, or until `delay_abort` is notified.
     ///
-    /// When this future resolves, blocked packets should be flushed.
-    pub async fn wait_blocking_ended(&self) {
-        if let BlockingState::Active { expires_at, .. } = &*self.blocking_state.read().await {
+    /// When this future resolves, delayed packets should be flushed.
+    pub async fn wait_delay_ended(&self) {
+        if let DelayState::Active { expires_at, .. } = &*self.delay_state.read().await {
             futures::select! {
                 () = tokio::time::sleep_until(*expires_at).fuse() => {},
-                () = self.blocking_abort.notified().fuse() => {
-                    log::trace!("Blocking aborted with remaining capacity {}", self.blocking_queue_tx.capacity());
+                () = self.delay_abort.notified().fuse() => {
+                    log::trace!("Delay aborted with remaining capacity {}", self.delay_queue_tx.capacity());
                 },
             }
         } else {
@@ -156,26 +153,26 @@ impl BlockingWatcher {
         }
     }
 
-    /// Add the packet to the blocking queue if blocking is active, otherwise return it to be sent immediately.
+    /// Add the packet to the delay queue if the delay state is active, otherwise return it to be sent immediately.
     ///
-    /// Returns `None` if the packet was queued for blocking.
+    /// Returns `None` if the packet was added to the delay queue.
     ///
     /// Returns `Some(packet)` if the packet should be sent immediately.
-    /// This happens if blocking is inactive, or if the blocking queue is full/closed.
-    pub fn maybe_block_packet(&self, packet: Packet<WgData>) -> Option<Packet<WgData>> {
-        if let Ok(blocking) = self.blocking_state.try_read()
-            && blocking.is_active()
+    /// This happens if the delay state is inactive, or if the delay queue is full/closed.
+    pub fn maybe_delay_packet(&self, packet: Packet<WgData>) -> Option<Packet<WgData>> {
+        if let Ok(delay) = self.delay_state.try_read()
+            && delay.is_active()
         {
-            // Notify the blocking handler to abort blocking when the capacity is low
-            if self.blocking_queue_tx.capacity() < self.min_blocking_capacity {
-                self.blocking_abort.notify_one();
+            // Notify the delay handler to abort the delay state when the capacity is low
+            if self.delay_queue_tx.capacity() < self.min_delay_capacity {
+                self.delay_abort.notify_one();
             }
 
             if let Err(TrySendError::Closed(packet) | TrySendError::Full(packet)) =
-                self.blocking_queue_tx.try_send(packet)
+                self.delay_queue_tx.try_send(packet)
             {
-                log::trace!("Packet sent as it couldn't be blocked");
-                // If the queue is closed or full, we can't block anymore, so we
+                log::trace!("Packet sent as it couldn't be delayed");
+                // If the queue is closed or full, we can't delay anymore, so we
                 // send the packet anyway.
                 // TODO: this would be an out of order packet, not ideal.
                 // Should we drop the packet instead?
@@ -198,11 +195,11 @@ pub(crate) struct MachineTimers(VecDeque<(Instant, MachineId, MachineTimer)>);
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Action {
-    Padding {
+    Decoy {
         replace: bool,
         bypass: bool,
     },
-    Block {
+    Delay {
         replace: bool,
         bypass: bool,
         duration: std::time::Duration,
@@ -217,7 +214,7 @@ pub(crate) enum MachineTimer {
     /// to know when the time has passed.
     Internal,
     /// The action timer triggers a [`Action`], which can be either sending
-    /// padding packets or blocking outgoing packets.
+    /// decoy packets or delay outgoing packets.
     Action(Action),
 }
 
@@ -240,8 +237,8 @@ impl MachineTimers {
         self.0.retain(|&(_, m, _)| m != *machine);
     }
 
-    /// Schedule padding timer according to [`maybenot::TriggerAction::SendPadding`].
-    pub(crate) fn schedule_padding(
+    /// Schedule decoy timer according to [`maybenot::TriggerAction::SendPadding`].
+    pub(crate) fn schedule_decoy(
         &mut self,
         machine: MachineId,
         timeout: std::time::Duration,
@@ -259,14 +256,14 @@ impl MachineTimers {
             (
                 expiration_time,
                 machine,
-                MachineTimer::Action(Action::Padding { replace, bypass }),
+                MachineTimer::Action(Action::Decoy { replace, bypass }),
             ),
         );
         debug_assert!(self.0.iter().is_sorted_by_key(|(time, _, _)| *time));
     }
 
-    /// Schedule blocking timer according to [`maybenot::TriggerAction::BlockOutgoing`].
-    pub(crate) fn schedule_block(
+    /// Schedule delay timer according to [`maybenot::TriggerAction::BlockOutgoing`].
+    pub(crate) fn schedule_delay(
         &mut self,
         machine: MachineId,
         timeout: std::time::Duration,
@@ -285,7 +282,7 @@ impl MachineTimers {
             (
                 expiration_time,
                 machine,
-                MachineTimer::Action(Action::Block {
+                MachineTimer::Action(Action::Delay {
                     replace,
                     bypass,
                     duration,
@@ -358,7 +355,7 @@ mod tests {
     fn test_machine_timers_schedule_and_remove() {
         let mut timers = types::MachineTimers::new(4);
         let machine = MachineId::from_raw(1);
-        timers.schedule_padding(machine, std::time::Duration::from_secs(1), false, false);
+        timers.schedule_decoy(machine, std::time::Duration::from_secs(1), false, false);
         assert_eq!(timers.0.len(), 1);
         timers.schedule_internal_timer(machine, std::time::Duration::from_secs(1), false);
         assert_eq!(timers.0.len(), 2);

@@ -448,7 +448,7 @@ impl<T: DeviceTransports> DeviceState<T> {
 
         // // Then on all currently connected sockets
         // for peer in self.peers.values() {
-        //     if let Some(ref sock) = peer.blocking_lock().endpoint().conn {
+        //     if let Some(ref sock) = peer.delay_lock().endpoint().conn {
         //         sock.set_mark(mark)?
         //     }
         // }
