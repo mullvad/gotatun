@@ -110,7 +110,7 @@ pub(crate) enum DelayState {
 impl DelayState {
     /// Returns `true` if the delay is [`Active`].
     ///
-    /// [`Active`]: Delay::Active
+    /// [`Active`]: DelayState::Active
     #[must_use]
     pub(crate) fn is_active(&self) -> bool {
         matches!(self, Self::Active { .. })
