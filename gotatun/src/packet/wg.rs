@@ -157,7 +157,9 @@ pub struct WgDataAndTag {
 #[derive(Clone, Copy, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 #[repr(C)]
 pub struct EncryptedWithTag<T: Sized> {
+    /// The encrypted value.
     pub encrypted: T,
+    /// The Poly1305 authentication tag attached to `encrypted`.
     pub tag: [u8; 16],
 }
 
