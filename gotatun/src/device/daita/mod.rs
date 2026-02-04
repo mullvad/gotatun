@@ -22,7 +22,7 @@ pub use maybenot::Machine;
 pub struct DaitaSettings {
     /// The maybenot machines to use.
     pub maybenot_machines: Vec<Machine>,
-    /// Maximum fraction of bandwidth that may be used for padding packets.
+    /// Maximum fraction of bandwidth that may be used for decoy packets.
     pub max_decoy_frac: f64,
     /// Maximum fraction of bandwidth that may be used for delayed packets.
     pub max_delay_frac: f64,
