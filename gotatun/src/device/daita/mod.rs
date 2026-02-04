@@ -18,6 +18,7 @@ pub use maybenot;
 pub use maybenot::Error;
 pub use maybenot::Machine;
 
+/// Configuration settings for DAITA (Defense Against AI-guided Traffic Analysis).
 #[derive(Debug, Clone)]
 pub struct DaitaSettings {
     /// The maybenot machines to use.

@@ -328,6 +328,9 @@ impl Tunn {
         Ok(None)
     }
 
+    /// Get the time elapsed since the last successful handshake.
+    ///
+    /// Returns `None` if no session has been established.
     pub fn time_since_last_handshake(&self) -> Option<Duration> {
         let current_session = self.current;
         if self.sessions[current_session % super::N_SESSIONS].is_some() {
@@ -340,6 +343,9 @@ impl Tunn {
         }
     }
 
+    /// Get the persistent keepalive interval in seconds.
+    ///
+    /// Returns `None` if persistent keepalive is disabled (set to 0).
     pub fn persistent_keepalive(&self) -> Option<u16> {
         let keepalive = self.timers.persistent_keepalive;
 
@@ -350,6 +356,9 @@ impl Tunn {
         }
     }
 
+    /// Set the persistent keepalive interval in seconds.
+    ///
+    /// Pass `None` or `Some(0)` to disable persistent keepalive.
     pub fn set_persistent_keepalive(&mut self, seconds: Option<u16>) {
         self.timers.persistent_keepalive = usize::from(seconds.unwrap_or(0));
 

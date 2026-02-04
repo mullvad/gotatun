@@ -18,7 +18,7 @@ pub struct Udp<Payload: ?Sized = [u8]> {
     /// UDP header.
     pub header: UdpHeader,
     /// UDP payload. The type of this is `[u8]` by default, but it may be any zerocopy type,
-    /// e.g. a `WgData`
+    /// e.g. a `WgData`.
     pub payload: Payload,
 }
 
