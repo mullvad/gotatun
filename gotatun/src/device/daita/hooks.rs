@@ -1,11 +1,11 @@
 // Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use super::types::{PacketCount, PaddingPacket};
+use super::types::{DecoyPacket, PacketCount};
 use crate::device::daita::DaitaSettings;
 use crate::device::daita::actions::ActionHandler;
 use crate::device::daita::events::handle_events;
-use crate::device::daita::types::{self, DelayWatcher, PaddingMarker};
+use crate::device::daita::types::{self, DecoyMarker, DelayWatcher};
 use crate::device::peer_state::PeerState;
 use crate::packet::{self, Ip, WgData, WgKind};
 use crate::task::Task;
@@ -19,18 +19,19 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc::{self};
 use zerocopy::{FromBytes, IntoBytes, TryFromBytes};
 
-/// Padding overhead statistics, exposed via [`crate::device::api::command::GetPeer`].
+/// Overhead induced by DAITA from decoy packets and constant packet size.
+/// Exposed via [`crate::device::api::command::GetPeer`].
 #[derive(Default)]
-pub struct PaddingOverhead {
+pub struct DaitaOverhead {
     /// Total extra bytes added due to constant-size padding of data packets.
     pub tx_padding_bytes: usize,
     // This is an AtomicUsize because it is updated from `ActionHandler`
-    /// Bytes of standalone padding packets transmitted.
-    pub tx_padding_packet_bytes: Arc<AtomicUsize>,
+    /// Bytes of decoy packets transmitted.
+    pub tx_decoy_packet_bytes: Arc<AtomicUsize>,
     /// Total extra bytes removed due to constant-size padding of data packets.
     pub rx_padding_bytes: usize,
-    /// Bytes of standalone padding packets received.
-    pub rx_padding_packet_bytes: usize,
+    /// Bytes of decoy packets received.
+    pub rx_decoy_packet_bytes: usize,
 }
 
 pub struct DaitaHooks {
@@ -38,7 +39,7 @@ pub struct DaitaHooks {
     packet_count: Arc<PacketCount>,
     delay_watcher: DelayWatcher,
     mtu: MtuWatcher,
-    padding_overhead: PaddingOverhead,
+    daita_overhead: DaitaOverhead,
     _actions_task: Task,
     _events_task: Task,
 }
@@ -67,7 +68,7 @@ impl DaitaHooks {
     {
         let DaitaSettings {
             maybenot_machines,
-            max_padding_frac,
+            max_decoy_frac,
             max_delay_frac,
             max_delayed_packets,
             min_delay_capacity,
@@ -78,14 +79,14 @@ impl DaitaHooks {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (action_tx, action_rx) = mpsc::unbounded_channel();
         let packet_count = Arc::new(types::PacketCount::default());
-        let padding_overhead = PaddingOverhead::default();
+        let daita_overhead = DaitaOverhead::default();
 
         let (delay_queue_tx, delay_queue_rx) = mpsc::channel(max_delayed_packets.into());
         let delay_watcher = DelayWatcher::new(delay_queue_tx, min_delay_capacity);
 
         let maybenot = maybenot::Framework::new(
             maybenot_machines,
-            max_padding_frac,
+            max_decoy_frac,
             max_delay_frac,
             std::time::Instant::now(),
             Rng::new(RNG_RESEED_THRESHOLD, OsRng).unwrap(),
@@ -100,7 +101,7 @@ impl DaitaHooks {
             .udp_send_v4(udp_send_v4)
             .udp_send_v6(udp_send_v6)
             .mtu(mtu.clone())
-            .tx_padding_packet_bytes(padding_overhead.tx_padding_packet_bytes.clone())
+            .tx_decoy_packet_bytes(daita_overhead.tx_decoy_packet_bytes.clone())
             .event_tx(event_tx.downgrade())
             .build();
 
@@ -118,7 +119,7 @@ impl DaitaHooks {
             packet_count,
             delay_watcher,
             mtu,
-            padding_overhead,
+            daita_overhead,
             _actions_task: actions_task,
             _events_task: events_task,
         })
@@ -136,7 +137,7 @@ impl DaitaHooks {
         let mtu = usize::from(self.mtu.get());
         let mut packet: Packet = packet.into();
         if let Ok(padded_bytes) = pad_to_constant_size(&mut packet, mtu) {
-            self.padding_overhead.tx_padding_bytes += padded_bytes;
+            self.daita_overhead.tx_padding_bytes += padded_bytes;
         }
 
         packet
@@ -179,16 +180,17 @@ impl DaitaHooks {
             return Some(packet);
         }
 
-        // Check whether this is a DAITA padding-packet.
-        if let Ok(packet) = PaddingPacket::try_ref_from_bytes(packet.as_bytes()) {
-            let PaddingMarker::Padding = packet.header.marker;
+        // Check whether this is a DAITA decoy-packet.
+        if let Ok(packet) = DecoyPacket::try_ref_from_bytes(packet.as_bytes()) {
+            let DecoyMarker::Decoy = packet.header.marker;
 
             debug_assert_eq!(usize::from(packet.header.length), size_of_val(packet));
 
+            // NOTE: maybenot calls these "padding" packets
             let _ = self.event_tx.send(TriggerEvent::PaddingRecv);
 
-            // Count received padding
-            self.padding_overhead.rx_padding_packet_bytes += size_of_val(packet);
+            // Count received decoy bytes
+            self.daita_overhead.rx_decoy_packet_bytes += size_of_val(packet);
 
             return None;
         }
@@ -218,8 +220,8 @@ impl DaitaHooks {
         // TODO: If we start padding all wg payloads to be multiples of 16 bytes in length
         // as described in section 5.4.6 of the wg whitepaper, then this would count that too.
         // When done, just round `ip_len` up to the next multiple of 16.
-        // self.padding_overhead.rx_padding_bytes += packet.len() - ip_len.next_multiple_of(16);
-        self.padding_overhead.rx_padding_bytes += packet.len() - ip_len;
+        // self.daita_overhead.rx_padding_bytes += packet.len() - ip_len.next_multiple_of(16);
+        self.daita_overhead.rx_padding_bytes += packet.len() - ip_len;
 
         let _ = self.event_tx.send(TriggerEvent::NormalRecv);
 
@@ -228,8 +230,8 @@ impl DaitaHooks {
         Some(packet)
     }
 
-    pub fn padding_overhead(&self) -> &PaddingOverhead {
-        &self.padding_overhead
+    pub fn daita_overhead(&self) -> &DaitaOverhead {
+        &self.daita_overhead
     }
 }
 

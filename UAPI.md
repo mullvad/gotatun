@@ -13,14 +13,14 @@ modifying a peer:
 * `daita_max_delayed_packets`: Maximum number of packets that may be delayed at any time.
 * `daita_min_delay_capacity`: Minimum number of free slots in the delay queue to continue
   delaying packets.
-* `daita_max_padding_frac`: Maximum fraction of padding packets in `[0, 1]`.
+* `daita_max_decoy_frac`: Maximum fraction of decoy packets in `[0, 1]`.
 * `daita_max_delay_frac`: Maximum fraction of delayed packets in `[0, 1]`.
 
 In addition to the keys above, the following ones are available when retrieving a peer (`get=1`):
 
 * `daita_rx_padding_bytes`: Total padded bytes in received data packets from the previously added peer due to constant-size padding.
 * `daita_tx_padding_bytes`: Total padded bytes in sent data packets to the previously added peer due to constant-size padding.
-* `daita_rx_padding_packet_bytes`: Total bytes of standalone padding packets received from the previously added peer.
-* `daita_tx_padding_packet_bytes`: Total bytes of standalone padding packets sent to the previously added peer.
+* `daita_rx_decoy_packet_bytes`: Total bytes of decoy packets received from the previously added peer.
+* `daita_tx_decoy_packet_bytes`: Total bytes of decoy packets sent to the previously added peer.
 
 [Maybenot]: https://docs.rs/maybenot/latest/maybenot/struct.Machine.html

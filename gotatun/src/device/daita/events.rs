@@ -56,7 +56,8 @@ where
                     replace,
                     machine,
                 } => {
-                    machine_timers.schedule_padding(*machine, *timeout, *replace, *bypass);
+                    // NOTE: maybenot calls these "padding" packets
+                    machine_timers.schedule_decoy(*machine, *timeout, *replace, *bypass);
                 }
                 TriggerAction::BlockOutgoing {
                     timeout,
