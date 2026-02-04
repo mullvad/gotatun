@@ -63,17 +63,17 @@ pub struct GetPeer {
     #[builder(default, setter(strip_option, into))]
     pub tx_padding_bytes: Option<u64>,
 
-    /// Bytes of standalone padding packets transmitted for the previously added peer entry.
+    /// Bytes of decoy packets transmitted for the previously added peer entry.
     #[builder(default, setter(strip_option, into))]
-    pub tx_padding_packet_bytes: Option<u64>,
+    pub tx_decoy_packet_bytes: Option<u64>,
 
     /// Total extra bytes removed due to constant-size padding of data packets for the previously added peer entry.
     #[builder(default, setter(strip_option, into))]
     pub rx_padding_bytes: Option<u64>,
 
-    /// Bytes of standalone padding packets received for the previously added peer entry.
+    /// Bytes of decoy packets received for the previously added peer entry.
     #[builder(default, setter(strip_option, into))]
-    pub rx_padding_packet_bytes: Option<u64>,
+    pub rx_decoy_packet_bytes: Option<u64>,
 }
 
 #[derive(TypedBuilder, Default, Debug)]
@@ -260,9 +260,9 @@ impl GetPeer {
             rx_bytes: None,
             tx_bytes: None,
             tx_padding_bytes: None,
-            tx_padding_packet_bytes: None,
+            tx_decoy_packet_bytes: None,
             rx_padding_bytes: None,
-            rx_padding_packet_bytes: None,
+            rx_decoy_packet_bytes: None,
         }
     }
 }
@@ -341,9 +341,9 @@ impl Display for GetPeer {
             rx_bytes,
             tx_bytes,
             tx_padding_bytes: daita_tx_padding_bytes,
-            tx_padding_packet_bytes: daita_tx_padding_packet_bytes,
+            tx_decoy_packet_bytes: daita_tx_decoy_packet_bytes,
             rx_padding_bytes: daita_rx_padding_bytes,
-            rx_padding_packet_bytes: daita_rx_padding_packet_bytes,
+            rx_decoy_packet_bytes: daita_rx_decoy_packet_bytes,
         } = self;
 
         let public_key = Some(&public_key);
@@ -368,16 +368,16 @@ impl Display for GetPeer {
         #[cfg(not(feature = "daita-uapi"))]
         let _ = (
             daita_tx_padding_bytes,
-            daita_tx_padding_packet_bytes,
+            daita_tx_decoy_packet_bytes,
             daita_rx_padding_bytes,
-            daita_rx_padding_packet_bytes,
+            daita_rx_decoy_packet_bytes,
         );
 
         #[cfg(feature = "daita-uapi")]
         if let Some(SetUnset::Set(daita)) = daita_settings {
             let DaitaSettings {
                 maybenot_machines,
-                max_padding_frac: daita_max_padding_frac,
+                max_decoy_frac: daita_max_decoy_frac,
                 max_delay_frac: daita_max_delay_frac,
                 max_delayed_packets: daita_max_delayed_packets,
                 min_delay_capacity: daita_min_delay_capacity,
@@ -391,7 +391,7 @@ impl Display for GetPeer {
 
             writeln!(f, "daita_max_delayed_packets={daita_max_delayed_packets}")?;
             writeln!(f, "daita_min_delay_capacity={daita_min_delay_capacity}")?;
-            writeln!(f, "daita_max_padding_frac={daita_max_padding_frac}")?;
+            writeln!(f, "daita_max_decoy_frac={daita_max_decoy_frac}")?;
             writeln!(f, "daita_max_delay_frac={daita_max_delay_frac}")?;
 
             if let Some(daita_rx_padding_bytes) = daita_rx_padding_bytes {
@@ -400,16 +400,16 @@ impl Display for GetPeer {
             if let Some(daita_tx_padding_bytes) = daita_tx_padding_bytes {
                 writeln!(f, "daita_tx_padding_bytes={daita_tx_padding_bytes}")?;
             }
-            if let Some(daita_rx_padding_packet_bytes) = daita_rx_padding_packet_bytes {
+            if let Some(daita_rx_decoy_packet_bytes) = daita_rx_decoy_packet_bytes {
                 writeln!(
                     f,
-                    "daita_rx_padding_packet_bytes={daita_rx_padding_packet_bytes}"
+                    "daita_rx_decoy_packet_bytes={daita_rx_decoy_packet_bytes}"
                 )?;
             }
-            if let Some(daita_tx_padding_packet_bytes) = daita_tx_padding_packet_bytes {
+            if let Some(daita_tx_decoy_packet_bytes) = daita_tx_decoy_packet_bytes {
                 writeln!(
                     f,
-                    "daita_tx_padding_packet_bytes={daita_tx_padding_packet_bytes}"
+                    "daita_tx_decoy_packet_bytes={daita_tx_decoy_packet_bytes}"
                 )?;
             }
         }
@@ -656,9 +656,9 @@ fn try_process_daita_line(
                 .map_err(|err| eyre!("invalid daita machine {:?}: {err}", v))?;
             daita_settings.maybenot_machines.push(machine);
         }
-        "daita_max_padding_frac" => {
+        "daita_max_decoy_frac" => {
             let daita_settings = daita_or_bail(daita_settings)?;
-            daita_settings.max_padding_frac = v
+            daita_settings.max_decoy_frac = v
                 .parse()
                 .map_err(|err| eyre!("invalid padding frac: {err}"))?;
         }

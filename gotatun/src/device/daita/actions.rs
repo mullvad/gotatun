@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
-use super::types::{Action, DelayState, ErrorAction, PacketCount, PaddingHeader, Result};
+use super::types::{Action, DecoyHeader, DelayState, ErrorAction, PacketCount, Result};
 use crate::{
     device::{
         daita::types::{DelayWatcher, IgnoreReason},
@@ -44,7 +44,7 @@ where
     udp_send_v4: US,
     udp_send_v6: US,
     mtu: MtuWatcher,
-    tx_padding_packet_bytes: Arc<AtomicUsize>,
+    tx_decoy_packet_bytes: Arc<AtomicUsize>,
     event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
 }
 
@@ -71,8 +71,8 @@ where
                         break;
                     };
                     match action {
-                        Action::Padding { replace, bypass } => {
-                            self.handle_padding(machine, replace, bypass).await
+                        Action::Decoy { replace, bypass } => {
+                            self.handle_decoy(machine, replace, bypass).await
                         }
                         Action::Delay { replace, bypass, duration } => {
                             self.handle_delay(machine, replace, bypass, duration).await
@@ -115,50 +115,52 @@ where
         Ok(())
     }
 
-    /// Send a padding packet according to [`maybenot::TriggerAction::SendPadding`].
-    async fn handle_padding(
+    /// Send a decoy packet according to [`maybenot::TriggerAction::SendPadding`].
+    ///
+    /// Note that we use the term "decoy packet" to refer to what `maybenot` calls "padding packets".
+    async fn handle_decoy(
         &mut self,
         machine: MachineId,
         replace: bool,
-        padding_bypass: bool,
+        decoy_bypass: bool,
     ) -> Result<()> {
         self.send_event(TriggerEvent::PaddingSent { machine })?;
 
         let delay_state = { *self.delay_watcher.delay_state.read().await };
         match delay_state {
-            DelayState::Active { bypass: true, .. } if replace && padding_bypass => {
+            DelayState::Active { bypass: true, .. } if replace && decoy_bypass => {
                 if let Ok(packet) = self.delay_queue_rx.try_recv() {
-                    // Replace padding with a delayed packet
+                    // Replace decoy with a delayed packet
                     let peer = self.get_peer().await?;
                     self.send(packet, peer).await
                 } else {
-                    // No delayed packet to replace, just send padding
-                    self.send_padding().await
+                    // No delayed packet to replace, just send decoy
+                    self.send_decoy().await
                 }
             }
-            // Allow padding to bypass delay
-            DelayState::Active { bypass: true, .. } if !replace && padding_bypass => {
-                self.send_padding().await
+            // Allow decoy to bypass delay
+            DelayState::Active { bypass: true, .. } if !replace && decoy_bypass => {
+                self.send_decoy().await
             }
             DelayState::Active { .. }
                 if replace
                     && (self.packet_count.outbound() > 0 || !self.delay_queue_rx.is_empty()) =>
             {
-                // Replace padding with any queued packet
+                // Replace decoy with any queued packet
                 Ok(())
             }
             // Add packet to delay queue if it shouldn't or cannot be replaced
             DelayState::Active { .. } => {
                 let mut peer = self.get_peer().await?;
                 let mtu = self.mtu.get();
-                let padding_packet = self.encapsulate_padding(&mut peer, mtu)?;
-                //  Drop the padding packet if the delay queue is full
-                let _ = self.delay_watcher.delay_queue_tx.try_send(padding_packet);
+                let decoy_packet = self.encapsulate_decoy(&mut peer, mtu)?;
+                //  Drop the decoy packet if the delay queue is full
+                let _ = self.delay_watcher.delay_queue_tx.try_send(decoy_packet);
                 Ok(())
             }
-            // Replace padding packet with in-flight packet
+            // Replace decoy packet with in-flight packet
             DelayState::Inactive if replace && self.packet_count.outbound() > 0 => Ok(()),
-            DelayState::Inactive => self.send_padding().await,
+            DelayState::Inactive => self.send_decoy().await,
         }
     }
 
@@ -217,35 +219,35 @@ where
         }
     }
 
-    pub(crate) fn encapsulate_padding(
+    pub(crate) fn encapsulate_decoy(
         &self,
         peer: &mut tokio::sync::OwnedMutexGuard<PeerState>,
         mtu: u16,
     ) -> Result<Packet<WgData>> {
-        self.tx_padding_packet_bytes
+        self.tx_decoy_packet_bytes
             .fetch_add(mtu as usize, atomic::Ordering::SeqCst);
         peer.tunnel
-            .encapsulate_with_session(self.create_padding_packet(mtu))
-            // Encapsulate can only fail when there is no session, just drop the padding packet in that case
+            .encapsulate_with_session(self.create_decoy_packet(mtu))
+            // Encapsulate can only fail when there is no session, just drop the decoy packet in that case
             .map_err(|_| ErrorAction::Ignore(IgnoreReason::NoSession))
     }
 
-    pub(crate) fn create_padding_packet(&self, mtu: u16) -> Packet {
-        let padding_packet_header = PaddingHeader::new(mtu.into());
-        let mut padding_packet_buf = self.packet_pool.get();
-        padding_packet_buf.buf_mut().clear();
-        padding_packet_buf
+    pub(crate) fn create_decoy_packet(&self, mtu: u16) -> Packet {
+        let decoy_packet_header = DecoyHeader::new(mtu.into());
+        let mut decoy_packet_buf = self.packet_pool.get();
+        decoy_packet_buf.buf_mut().clear();
+        decoy_packet_buf
             .buf_mut()
-            .extend_from_slice(padding_packet_header.as_bytes());
-        padding_packet_buf.buf_mut().resize(mtu.into(), 0);
-        padding_packet_buf
+            .extend_from_slice(decoy_packet_header.as_bytes());
+        decoy_packet_buf.buf_mut().resize(mtu.into(), 0);
+        decoy_packet_buf
     }
 
-    pub(crate) async fn send_padding(&mut self) -> Result<()> {
+    pub(crate) async fn send_decoy(&mut self) -> Result<()> {
         let mtu = self.mtu.get();
         let mut peer = self.get_peer().await?;
 
-        let packet = self.encapsulate_padding(&mut peer, mtu)?;
+        let packet = self.encapsulate_decoy(&mut peer, mtu)?;
         self.send(packet, peer).await?;
         Ok(())
     }

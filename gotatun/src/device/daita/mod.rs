@@ -23,7 +23,7 @@ pub struct DaitaSettings {
     /// The maybenot machines to use.
     pub maybenot_machines: Vec<Machine>,
     /// Maximum fraction of bandwidth that may be used for padding packets.
-    pub max_padding_frac: f64,
+    pub max_decoy_frac: f64,
     /// Maximum fraction of bandwidth that may be used for delayed packets.
     pub max_delay_frac: f64,
     /// Maximum number of packets that may be delayed at any time.
@@ -36,7 +36,7 @@ impl Default for DaitaSettings {
     fn default() -> Self {
         Self {
             maybenot_machines: vec![],
-            max_padding_frac: 0.0,
+            max_decoy_frac: 0.0,
             max_delay_frac: 0.0,
             max_delayed_packets: const { NonZeroUsize::new(1024).unwrap() },
             min_delay_capacity: 50,

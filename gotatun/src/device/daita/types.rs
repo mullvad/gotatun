@@ -44,8 +44,8 @@ pub(crate) type Result<T> = std::result::Result<T, ErrorAction>;
 
 #[derive(TryFromBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 #[repr(C)]
-pub(crate) struct PaddingPacket {
-    pub(crate) header: PaddingHeader,
+pub(crate) struct DecoyPacket {
+    pub(crate) header: DecoyHeader,
     pub(crate) payload: [u8],
 }
 
@@ -53,8 +53,8 @@ pub(crate) struct PaddingPacket {
     TryFromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq, Clone, Copy,
 )]
 #[repr(C, packed)]
-pub(crate) struct PaddingHeader {
-    pub marker: PaddingMarker,
+pub(crate) struct DecoyHeader {
+    pub marker: DecoyMarker,
     _reserved: u8,
     pub length: big_endian::U16,
 }
@@ -63,14 +63,14 @@ pub(crate) struct PaddingHeader {
     TryFromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq, Clone, Copy,
 )]
 #[repr(u8)]
-pub(crate) enum PaddingMarker {
-    Padding = 0xff,
+pub(crate) enum DecoyMarker {
+    Decoy = 0xff,
 }
 
-impl PaddingHeader {
+impl DecoyHeader {
     pub(crate) const fn new(length: big_endian::U16) -> Self {
         Self {
-            marker: PaddingMarker::Padding,
+            marker: DecoyMarker::Decoy,
             _reserved: 0,
             length,
         }
@@ -79,7 +79,7 @@ impl PaddingHeader {
 
 /// Counter for the number of normal packets that have been received on the tunnel interface
 /// but not yet sent to the network, and the number of those packets that have replaced
-/// padding packets.
+/// decoy packets.
 #[derive(Default)]
 pub(crate) struct PacketCount {
     outbound_normal: AtomicU32,
@@ -195,7 +195,7 @@ pub(crate) struct MachineTimers(VecDeque<(Instant, MachineId, MachineTimer)>);
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Action {
-    Padding {
+    Decoy {
         replace: bool,
         bypass: bool,
     },
@@ -256,7 +256,7 @@ impl MachineTimers {
             (
                 expiration_time,
                 machine,
-                MachineTimer::Action(Action::Padding { replace, bypass }),
+                MachineTimer::Action(Action::Decoy { replace, bypass }),
             ),
         );
         debug_assert!(self.0.iter().is_sorted_by_key(|(time, _, _)| *time));

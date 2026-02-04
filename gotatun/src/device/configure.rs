@@ -22,13 +22,14 @@ pub struct Stats {
 #[cfg(feature = "daita")]
 #[derive(Debug)]
 pub struct DaitaStats {
+    /// Total padded bytes in sent data packets due to constant-size padding.
     pub tx_padding_bytes: usize,
-    /// Bytes of standalone padding packets transmitted for the previously added peer entry.
-    pub tx_padding_packet_bytes: usize,
-    /// Total extra bytes removed due to constant-size padding of data packets for the previously added peer entry.
+    /// Total padded bytes in received data packets due to constant-size padding.
     pub rx_padding_bytes: usize,
-    /// Bytes of standalone padding packets received for the previously added peer entry.
-    pub rx_padding_packet_bytes: usize,
+    /// Total bytes of sent decoy packets.
+    pub tx_decoy_packet_bytes: usize,
+    /// Total bytes of received decoy packets.
+    pub rx_decoy_packet_bytes: usize,
 }
 
 /// A [`Peer`] with [`Stats`].
@@ -123,14 +124,14 @@ impl<T: DeviceTransports> DeviceRead<'_, T> {
             let daita = p.daita_settings().cloned();
             #[cfg(feature = "daita")]
             let daita_stats = p.daita().map(|daita| {
-                let padding = daita.padding_overhead();
+                let overhead = daita.daita_overhead();
                 DaitaStats {
-                    tx_padding_bytes: padding.tx_padding_bytes,
-                    tx_padding_packet_bytes: padding
-                        .tx_padding_packet_bytes
+                    tx_padding_bytes: overhead.tx_padding_bytes,
+                    tx_decoy_packet_bytes: overhead
+                        .tx_decoy_packet_bytes
                         .load(std::sync::atomic::Ordering::SeqCst),
-                    rx_padding_bytes: padding.rx_padding_bytes,
-                    rx_padding_packet_bytes: padding.rx_padding_packet_bytes,
+                    rx_padding_bytes: overhead.rx_padding_bytes,
+                    rx_decoy_packet_bytes: overhead.rx_decoy_packet_bytes,
                 }
             });
 
