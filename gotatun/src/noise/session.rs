@@ -194,9 +194,6 @@ impl Session {
     }
 
     /// Encapsulate `packet` into a [`WgData`].
-    ///
-    /// If `tun_mtu` is `Some`, the `WgData` payload will be padded to a multiple of 16 bytes.
-    /// `tun_mtu` is used to ensure that the packet isn't padded past the MTU of the TUN device.
     pub(super) fn format_packet_data(&self, packet: Packet) -> Packet<WgData> {
         let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
 
