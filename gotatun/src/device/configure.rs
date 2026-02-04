@@ -1,3 +1,4 @@
+/// Configuration and inspection interface for WireGuard devices.
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use ipnetwork::IpNetwork;
@@ -6,19 +7,28 @@ use x25519_dalek::{PublicKey, StaticSecret};
 use crate::device::Error;
 use crate::device::{Connection, Device, DeviceState, DeviceTransports, Peer, Reconfigure};
 
+/// Read-only view of a WireGuard device for inspection.
+///
+/// Use [`Device::read`] to obtain this handle.
 pub struct DeviceRead<'a, T: DeviceTransports> {
     device: &'a DeviceState<T>,
 }
 
+/// Statistics for a peer connection.
 #[derive(Debug)]
 pub struct Stats {
+    /// Time elapsed since the last successful handshake with this peer.
     pub last_handshake: Option<Duration>,
+    /// Total number of bytes received from this peer.
     pub rx_bytes: usize,
+    /// Total number of bytes sent to this peer.
     pub tx_bytes: usize,
+    /// DAITA-specific statistics, if DAITA is enabled for this peer.
     #[cfg(feature = "daita")]
     pub daita: Option<DaitaStats>,
 }
 
+/// DAITA (Defense Against AI-guided Traffic Analysis) statistics for a peer.
 #[cfg(feature = "daita")]
 #[derive(Debug)]
 pub struct DaitaStats {
@@ -36,10 +46,15 @@ pub struct DaitaStats {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct PeerStats {
+    /// The peer configuration.
     pub peer: Peer,
+    /// The peer's connection statistics.
     pub stats: Stats,
 }
 
+/// Mutable view of a WireGuard device for configuration changes.
+///
+/// Use [`Device::write`] to obtain this handle. Changes are applied when this handle is dropped.
 pub struct DeviceWrite<'a, T: DeviceTransports> {
     device: &'a mut DeviceState<T>,
     reconfigure: Reconfigure,
@@ -59,6 +74,9 @@ impl<T> From<Option<T>> for Update<T> {
     }
 }
 
+/// Builder for updating an existing peer's configuration.
+///
+/// Use [`DeviceWrite::modify_peer`] to obtain this handle.
 #[derive(Default)]
 #[non_exhaustive]
 pub struct PeerMut {
@@ -71,26 +89,33 @@ pub struct PeerMut {
 }
 
 impl PeerMut {
+    /// Set or clear the preshared key for this peer.
     pub fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
         self.preshared_key = preshared_key.into();
     }
 
+    /// Set or clear the endpoint address for this peer.
     pub fn set_endpoint(&mut self, addr: Option<SocketAddr>) {
         self.endpoint = addr.into();
     }
 
+    /// Set or clear the persistent keepalive interval (in seconds) for this peer.
     pub fn set_keepalive(&mut self, keepalive: Option<u16>) {
         self.keepalive = keepalive.into();
     }
 
+    /// Clear all allowed IPs for this peer.
     pub fn clear_allowed_ips(&mut self) {
         self.clear_allowed_ips = true;
     }
 
+    /// Add a single allowed IP network for this peer.
+    /// Can be called multiple times.
     pub fn add_allowed_ip(&mut self, allowed_ip: impl Into<IpNetwork>) {
         self.add_allowed_ips.push(allowed_ip.into());
     }
 
+    /// Add multiple allowed IP networks for this peer.
     pub fn add_allowed_ips(&mut self, allowed_ips: impl IntoIterator<Item = impl Into<IpNetwork>>) {
         self.add_allowed_ips
             .extend(allowed_ips.into_iter().map(Into::into));

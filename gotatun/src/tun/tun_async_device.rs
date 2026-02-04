@@ -99,6 +99,7 @@ impl TunDevice {
         })
     }
 
+    /// Get the name of the TUN device.
     pub fn name(&self) -> Result<String, Error> {
         self.tun.tun_name().map_err(Error::GetTunName)
     }

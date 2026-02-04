@@ -33,6 +33,7 @@ impl<const N: usize> PacketBufPool<N> {
         }
     }
 
+    /// Get the configured capacity of this pool.
     pub fn capacity(&self) -> usize {
         self.capacity
     }

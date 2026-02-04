@@ -12,7 +12,6 @@
 
 #[cfg(feature = "device")]
 pub mod device;
-
 pub mod noise;
 pub mod packet;
 pub mod tun;
