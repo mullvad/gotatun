@@ -79,7 +79,7 @@ impl DaitaHooks {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (action_tx, action_rx) = mpsc::unbounded_channel();
         let packet_count = Arc::new(types::PacketCount::default());
-        let padding_overhead = DaitaOverhead::default();
+        let daita_overhead = DaitaOverhead::default();
 
         let (delay_queue_tx, delay_queue_rx) = mpsc::channel(max_delayed_packets.into());
         let delay_watcher = DelayWatcher::new(delay_queue_tx, min_delay_capacity);
@@ -101,7 +101,7 @@ impl DaitaHooks {
             .udp_send_v4(udp_send_v4)
             .udp_send_v6(udp_send_v6)
             .mtu(mtu.clone())
-            .tx_decoy_packet_bytes(padding_overhead.tx_decoy_packet_bytes.clone())
+            .tx_decoy_packet_bytes(daita_overhead.tx_decoy_packet_bytes.clone())
             .event_tx(event_tx.downgrade())
             .build();
 
@@ -119,7 +119,7 @@ impl DaitaHooks {
             packet_count,
             delay_watcher,
             mtu,
-            daita_overhead: padding_overhead,
+            daita_overhead,
             _actions_task: actions_task,
             _events_task: events_task,
         })

@@ -340,7 +340,7 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
         let (_, tx_bytes, rx_bytes, ..) = peer.tunnel.stats();
         let endpoint = peer.endpoint().addr;
         #[cfg(feature = "daita-uapi")]
-        let padding_overhead = peer.daita.as_ref().map(|daita| daita.daita_overhead());
+        let daita_overhead = peer.daita.as_ref().map(|daita| daita.daita_overhead());
 
         let last_handshake_time = peer.time_since_last_handshake().and_then(|d| {
             SystemTime::now()
@@ -366,20 +366,20 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
             rx_bytes: Some(rx_bytes as u64),
             tx_bytes: Some(tx_bytes as u64),
             #[cfg(feature = "daita-uapi")]
-            tx_padding_bytes: padding_overhead.map(|p| p.tx_padding_bytes as u64),
+            tx_padding_bytes: daita_overhead.map(|p| p.tx_padding_bytes as u64),
             #[cfg(not(feature = "daita-uapi"))]
             tx_padding_bytes: None,
             #[cfg(feature = "daita-uapi")]
-            tx_decoy_packet_bytes: padding_overhead
+            tx_decoy_packet_bytes: daita_overhead
                 .map(|p| p.tx_decoy_packet_bytes.load(atomic::Ordering::SeqCst) as u64),
             #[cfg(not(feature = "daita-uapi"))]
             tx_decoy_packet_bytes: None,
             #[cfg(feature = "daita-uapi")]
-            rx_padding_bytes: padding_overhead.map(|p| p.rx_padding_bytes as u64),
+            rx_padding_bytes: daita_overhead.map(|p| p.rx_padding_bytes as u64),
             #[cfg(not(feature = "daita-uapi"))]
             rx_padding_bytes: None,
             #[cfg(feature = "daita-uapi")]
-            rx_decoy_packet_bytes: padding_overhead.map(|p| p.rx_decoy_packet_bytes as u64),
+            rx_decoy_packet_bytes: daita_overhead.map(|p| p.rx_decoy_packet_bytes as u64),
             #[cfg(not(feature = "daita-uapi"))]
             rx_decoy_packet_bytes: None,
         });

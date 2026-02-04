@@ -660,7 +660,7 @@ fn try_process_daita_line(
             let daita_settings = daita_or_bail(daita_settings)?;
             daita_settings.max_decoy_frac = v
                 .parse()
-                .map_err(|err| eyre!("invalid padding frac: {err}"))?;
+                .map_err(|err| eyre!("invalid decoy frac: {err}"))?;
         }
         "daita_max_delay_frac" => {
             let daita_settings = daita_or_bail(daita_settings)?;
