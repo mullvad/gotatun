@@ -34,6 +34,10 @@ pub struct DaitaOverhead {
     pub rx_decoy_packet_bytes: usize,
 }
 
+/// DAITA (Defense Against AI-guided Traffic Analysis) hooks for packet processing.
+///
+/// This struct manages the DAITA implementation by coordinating packet padding,
+/// decoy packet generation, and packet delays according to the maybenot framework.
 pub struct DaitaHooks {
     event_tx: mpsc::UnboundedSender<TriggerEvent>,
     packet_count: Arc<PacketCount>,
@@ -55,6 +59,14 @@ type Rng = ReseedingRng<rand_chacha::ChaCha12Core, OsRng>;
 const RNG_RESEED_THRESHOLD: u64 = 1024 * 64; // 64 KiB
 
 impl DaitaHooks {
+    /// Create a new DAITA hooks instance.
+    ///
+    /// This initializes the maybenot framework with the provided settings and spawns
+    /// background tasks to handle DAITA events and actions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the maybenot framework initialization fails.
     pub fn new<US>(
         daita_settings: DaitaSettings,
         peer: Weak<Mutex<PeerState>>,
@@ -130,6 +142,10 @@ impl DaitaHooks {
     /// Note:
     /// Should not be called on keepalive packets (they are 0-length data packets).
     /// They do not contain an IP header, thus they would become malformed if padded.
+    /// Map an outgoing IP packet before WireGuard encapsulation, padding it to constant size.
+    ///
+    /// This method should not be called on keepalive packets (0-length data packets)
+    /// as they do not contain an IP header and would become malformed if padded.
     pub fn before_data_encapsulate(&mut self, packet: Packet<Ip>) -> Packet {
         let _ = self.event_tx.send(TriggerEvent::NormalSent);
         self.packet_count.inc(1);
@@ -230,6 +246,9 @@ impl DaitaHooks {
         Some(packet)
     }
 
+    /// Get a reference to the DAITA overhead statistics.
+    ///
+    /// This includes padding bytes and decoy packet bytes for both transmission and reception.
     pub fn daita_overhead(&self) -> &DaitaOverhead {
         &self.daita_overhead
     }

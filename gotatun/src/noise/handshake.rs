@@ -300,6 +300,9 @@ enum HandshakeState {
     Expired,
 }
 
+/// WireGuard handshake state machine.
+///
+/// Manages the Noise protocol handshake for establishing secure sessions.
 pub struct Handshake {
     params: NoiseParams,
     /// Index of the next session
@@ -324,11 +327,25 @@ struct Cookies {
 }
 
 #[derive(Debug)]
+/// Partial handshake information extracted from a handshake initiation packet.
+///
+/// This contains the peer's index and public key without requiring knowledge
+/// of which peer sent the packet.
 pub struct HalfHandshake {
+    /// The sender's session index.
     pub peer_index: u32,
+    /// The sender's static public key.
     pub peer_static_public: [u8; 32],
 }
 
+/// Parse a handshake initiation packet without prior knowledge of the sender.
+///
+/// This performs cryptographic validation to extract the peer's public key
+/// from the handshake initiation, allowing the receiver to identify the peer.
+///
+/// # Errors
+///
+/// Returns an error if the packet is malformed or cryptographic validation fails.
 pub fn parse_handshake_anon(
     static_private: &x25519::StaticSecret,
     static_public: &x25519::PublicKey,

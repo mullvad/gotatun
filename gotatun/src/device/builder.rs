@@ -186,6 +186,14 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
 }
 
 impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, TunTx, TunRx> {
+    /// Build the final [`Device`] from this builder.
+    ///
+    /// This will initialize the device state, add all configured peers, and optionally
+    /// start the UAPI server if one was provided via [`with_uapi`](Self::with_uapi).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the UDP socket cannot be bound or if peer initialization fails.
     pub async fn build(self) -> Result<Device<(Udp, TunTx, TunRx)>, Error> {
         #[cfg(target_os = "linux")]
         let fwmark = self.fwmark;

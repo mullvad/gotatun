@@ -28,6 +28,7 @@
 //! [`DeviceBuilder::with_uapi`]: crate::device::builder::DeviceBuilder::with_uapi
 #![doc = include_str!("../../../../UAPI.md")]
 
+/// Command types for the WireGuard userspace API.
 pub mod command;
 
 use super::{Connection, DeviceState, Reconfigure};
@@ -70,6 +71,11 @@ pub struct UapiClient {
 }
 
 impl UapiClient {
+    /// Send a request to the device and wait for a response asynchronously.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the channel is closed or the request fails.
     pub async fn send(&self, request: impl Into<Request>) -> eyre::Result<Response> {
         let request = request.into();
         log::trace!("Handling API request: {request:?}");
@@ -84,6 +90,11 @@ impl UapiClient {
             .map_err(|_| eyre!("Channel closed"))
     }
 
+    /// Send a request to the device and wait for a response synchronously (blocking).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the channel is closed or the request fails.
     pub fn send_sync(&self, request: impl Into<Request>) -> eyre::Result<Response> {
         let request = request.into();
         log::trace!("Handling API request: {request:?}");
@@ -162,6 +173,9 @@ impl UapiClient {
 }
 
 impl UapiServer {
+    /// Create a new UAPI client and server pair.
+    ///
+    /// The client can be used to send requests, and the server receives them.
     pub fn new() -> (UapiClient, UapiServer) {
         let (tx, rx) = mpsc::channel(100);
 
@@ -227,7 +241,11 @@ impl UapiServer {
         rx
     }
 
-    /// Wait for a [`Request`]. The response should be sent on the provided [`oneshot`].
+    /// Wait for a [`Request`] from a client.
+    ///
+    /// The response should be sent back using the provided [`oneshot`] sender.
+    ///
+    /// Returns `None` when all clients have disconnected.
     pub(crate) async fn recv(&mut self) -> Option<(Request, oneshot::Sender<Response>)> {
         let (request, response_tx) = self.rx.recv().await?;
 

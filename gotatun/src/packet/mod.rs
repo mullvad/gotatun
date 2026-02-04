@@ -3,9 +3,9 @@
 
 //! Types to create, parse, and move network packets around in a zero-copy manner.
 //!
-//! See [`Packet`] for an implementation of a [`bytes`]-backed owned packet buffer.
+//! See [`Packet`](crate::packet::Packet) for an implementation of a <https://docs.rs/bytes>-backed owned packet buffer.
 //!
-//! Any of the [`zerocopy`]-enabled definitions such as [`Ipv4`] or [`Udp`] can be used to cheaply
+//! Any of the <https://docs.rs/zerocopy>-enabled definitions such as [`Ipv4`](crate::packet::Ipv4) or [`Udp`](crate::packet::Udp) can be used to cheaply
 //! construct or parse packets:
 //! ```
 //! let example_ipv4_icmp: &mut [u8] = &mut [
@@ -216,6 +216,10 @@ impl Default for Packet<[u8]> {
 }
 
 impl Packet<[u8]> {
+    /// Create a new packet from a pool, with automatic return-to-pool on drop.
+    ///
+    /// This is used internally by [`PacketBufPool`] to create packets that are
+    /// automatically returned to the pool when dropped.
     pub fn new_from_pool(return_to_pool: ReturnToPool, bytes: BytesMut) -> Self {
         Self {
             inner: PacketInner {
@@ -410,6 +414,7 @@ impl Packet<Ipv6> {
 }
 
 impl<T: CheckedPayload + ?Sized> Packet<Ipv4<T>> {
+    /// Strip the IPv4 header and return the payload.
     pub fn into_payload(mut self) -> Packet<T> {
         debug_assert_eq!(
             self.header.ihl() as usize * 4,
@@ -421,12 +426,14 @@ impl<T: CheckedPayload + ?Sized> Packet<Ipv4<T>> {
     }
 }
 impl<T: CheckedPayload + ?Sized> Packet<Ipv6<T>> {
+    /// Strip the IPv6 header and return the payload.
     pub fn into_payload(mut self) -> Packet<T> {
         self.inner.buf.advance(Ipv6Header::LEN);
         self.cast::<T>()
     }
 }
 impl<T: CheckedPayload + ?Sized> Packet<Udp<T>> {
+    /// Strip the UDP header and return the payload.
     pub fn into_payload(mut self) -> Packet<T> {
         self.inner.buf.advance(UdpHeader::LEN);
         self.cast::<T>()
