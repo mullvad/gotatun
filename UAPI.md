@@ -18,13 +18,9 @@ modifying a peer:
 
 In addition to the keys above, the following ones are available when retrieving a peer (`get=1`):
 
-* `daita_rx_padding_bytes`: Extra bytes added due to constant-size padding of data packets for the
-  previously added peer entry.
-* `daita_tx_padding_bytes`: Bytes of standalone padding packets transmitted for the previously added
-  peer entry.
-* `daita_rx_padding_packet_bytes`: Total extra bytes removed due to constant-size padding of data
-  packets for the previously added peer entry.
-* `daita_tx_padding_packet_bytes`: Bytes of standalone padding packets received for the previously
-  added peer entry.
+* `daita_rx_padding_bytes`: Total padded bytes in received data packets from the previously added peer due to constant-size padding.
+* `daita_tx_padding_bytes`: Total padded bytes in sent data packets to the previously added peer due to constant-size padding.
+* `daita_rx_padding_packet_bytes`: Total bytes of standalone padding packets received from the previously added peer.
+* `daita_tx_padding_packet_bytes`: Total bytes of standalone padding packets sent to the previously added peer.
 
 [Maybenot]: https://docs.rs/maybenot/latest/maybenot/struct.Machine.html
