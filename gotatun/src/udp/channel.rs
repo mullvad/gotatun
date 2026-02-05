@@ -18,8 +18,7 @@ use zerocopy::{FromBytes, IntoBytes};
 
 use crate::{
     packet::{
-        Ip, IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Ipv6Header, Packet, PacketBufPool, Udp,
-        UdpHeader,
+        IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Ipv6Header, Packet, PacketBufPool, Udp, UdpHeader,
     },
     tun::{
         MtuWatcher,
@@ -39,7 +38,8 @@ pub struct UdpChannelTx {
     source_port: u16,
     connection_id: u32,
 
-    udp_tx: mpsc::Sender<Packet<Ip>>,
+    udp_tx_v4: mpsc::Sender<Packet<Ipv4>>,
+    udp_tx_v6: mpsc::Sender<Packet<Ipv6>>,
 }
 
 type Ipv4UdpReceiver = mpsc::Receiver<Packet<Ipv4<Udp>>>;
@@ -69,7 +69,8 @@ pub struct UdpChannelFactory {
     source_ip_v4: Ipv4Addr,
     source_ip_v6: Ipv6Addr,
 
-    udp_tx: mpsc::Sender<Packet<Ip>>,
+    udp_tx_v4: mpsc::Sender<Packet<Ipv4>>,
+    udp_tx_v6: mpsc::Sender<Packet<Ipv6>>,
     udp_rx_v4: Arc<Mutex<Ipv4UdpReceiver>>,
     udp_rx_v6: Arc<Mutex<Ipv6UdpReceiver>>,
 }
@@ -112,9 +113,12 @@ pub fn new_udp_tun_channel(
     source_ip_v6: Ipv6Addr,
     tun_link_mtu: MtuWatcher,
 ) -> (TunChannelTx, TunChannelRx, UdpChannelFactory) {
-    let (udp_tx, tun_rx) = mpsc::channel(capacity);
+    let (udp_tx_v4, tun_rx_v4) = mpsc::channel(capacity);
+    let (udp_tx_v6, tun_rx_v6) = mpsc::channel(capacity);
+
     let (tun_tx_v4, udp_rx_v4) = mpsc::channel(capacity);
     let (tun_tx_v6, udp_rx_v6) = mpsc::channel(capacity);
+
     let tun_tx = TunChannelTx {
         tun_tx_v4,
         tun_tx_v6,
@@ -122,28 +126,31 @@ pub fn new_udp_tun_channel(
         fragments_v4: Ipv4Fragments::default(),
     };
     let tun_rx = TunChannelRx {
-        tun_rx,
         mtu: tun_link_mtu,
+        tun_rx_v4,
+        tun_rx_v6,
     };
     let udp_channel_factory = UdpChannelFactory {
         source_ip_v4,
         source_ip_v6,
-        udp_tx,
         udp_rx_v4: Arc::new(Mutex::new(udp_rx_v4)),
         udp_rx_v6: Arc::new(Mutex::new(udp_rx_v6)),
+        udp_tx_v4,
+        udp_tx_v6,
     };
     (tun_tx, tun_rx, udp_channel_factory)
 }
 
 impl UdpTransportFactory for UdpChannelFactory {
-    type Send = UdpChannelTx;
+    type SendV4 = UdpChannelTx;
+    type SendV6 = UdpChannelTx;
     type RecvV4 = UdpChannelV4Rx;
     type RecvV6 = UdpChannelV6Rx;
 
     async fn bind(
         &mut self,
         params: &UdpTransportFactoryParams,
-    ) -> io::Result<((Self::Send, Self::RecvV4), (Self::Send, Self::RecvV6))> {
+    ) -> io::Result<((Self::SendV4, Self::RecvV4), (Self::SendV6, Self::RecvV6))> {
         let connection_id = rand_core::OsRng.next_u32().max(1);
         let source_port = match params.port {
             0 => rand::random_range(1u16..u16::MAX),
@@ -155,7 +162,8 @@ impl UdpTransportFactory for UdpChannelFactory {
             source_ip_v6: self.source_ip_v6,
             source_port,
             connection_id,
-            udp_tx: self.udp_tx.clone(),
+            udp_tx_v4: self.udp_tx_v4.clone(),
+            udp_tx_v6: self.udp_tx_v6.clone(),
         };
 
         let channel_rx_v4 = UdpChannelV4Rx {
@@ -178,25 +186,29 @@ impl UdpSend for UdpChannelTx {
         // send an IP packet on the channel.
         // the IP and UDP headers will need to be added to `udp_payload`
 
-        let packet = match destination {
-            SocketAddr::V4(dest) => create_ipv4_payload(
-                self.source_ip_v4,
-                self.source_port,
-                *dest.ip(),
-                dest.port(),
-                &udp_payload,
-            ),
-            SocketAddr::V6(dest) => create_ipv6_payload(
-                &self.source_ip_v6,
-                self.source_port,
-                dest.ip(),
-                dest.port(),
-                &udp_payload,
-                self.connection_id,
-            ),
+        match destination {
+            SocketAddr::V4(dest) => {
+                let ipv4 = create_ipv4_payload(
+                    self.source_ip_v4,
+                    self.source_port,
+                    *dest.ip(),
+                    dest.port(),
+                    &udp_payload,
+                );
+                self.udp_tx_v4.send(ipv4).await.expect("receiver exists");
+            }
+            SocketAddr::V6(dest) => {
+                let ipv6 = create_ipv6_payload(
+                    &self.source_ip_v6,
+                    self.source_port,
+                    dest.ip(),
+                    dest.port(),
+                    &udp_payload,
+                    self.connection_id,
+                );
+                self.udp_tx_v6.send(ipv6).await.expect("receiver exists");
+            }
         };
-
-        self.udp_tx.send(packet).await.expect("receiver exists");
 
         Ok(())
     }
@@ -245,7 +257,7 @@ fn create_ipv4_payload(
     destination_ip: Ipv4Addr,
     destination_port: u16,
     udp_payload: &[u8],
-) -> Packet<Ip> {
+) -> Packet<Ipv4> {
     let udp_len: u16 = (UdpHeader::LEN + udp_payload.len()).try_into().unwrap();
     let total_len = u16::try_from(Ipv4Header::LEN).unwrap() + udp_len;
 
@@ -283,7 +295,9 @@ fn create_ipv4_payload(
 
     Packet::from_bytes(packet)
         .try_into_ip()
+        .and_then(|p| p.try_into_ipvx())
         .expect("packet is valid")
+        .expect_left("packet is ipv4")
 }
 
 fn create_ipv6_payload(
@@ -293,7 +307,7 @@ fn create_ipv6_payload(
     destination_port: u16,
     udp_payload: &[u8],
     connection_id: u32,
-) -> Packet<Ip> {
+) -> Packet<Ipv6> {
     let udp_len: u16 = (UdpHeader::LEN + udp_payload.len()).try_into().unwrap();
     let total_len = u16::try_from(Ipv6Header::LEN).unwrap() + udp_len;
 
@@ -326,5 +340,7 @@ fn create_ipv6_payload(
 
     Packet::from_bytes(packet)
         .try_into_ip()
+        .and_then(|p| p.try_into_ipvx())
         .expect("packet is valid")
+        .expect_right("packet is ipv6")
 }

@@ -131,8 +131,8 @@ pub(crate) struct DeviceState<T: DeviceTransports> {
 }
 
 pub(crate) struct Connection<T: DeviceTransports> {
-    udp4: <T::UdpTransportFactory as UdpTransportFactory>::Send,
-    udp6: <T::UdpTransportFactory as UdpTransportFactory>::Send,
+    udp4: <T::UdpTransportFactory as UdpTransportFactory>::SendV4,
+    udp6: <T::UdpTransportFactory as UdpTransportFactory>::SendV6,
 
     listen_port: Option<u16>,
 
@@ -388,9 +388,9 @@ impl<T: DeviceTransports> DeviceState<T> {
         &mut self,
     ) -> Result<
         (
-            <T::UdpTransportFactory as UdpTransportFactory>::Send,
+            <T::UdpTransportFactory as UdpTransportFactory>::SendV4,
             <T::UdpTransportFactory as UdpTransportFactory>::RecvV4,
-            <T::UdpTransportFactory as UdpTransportFactory>::Send,
+            <T::UdpTransportFactory as UdpTransportFactory>::SendV6,
             <T::UdpTransportFactory as UdpTransportFactory>::RecvV6,
         ),
         Error,
