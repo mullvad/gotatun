@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Fix excessive rekey attempts.
+- Fix potential panic due to clocks not being truly monotonic.
 
 
 ## [0.2.0] - 2026-01-13
