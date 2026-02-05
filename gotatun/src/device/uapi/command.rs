@@ -311,9 +311,9 @@ impl GetResponse {
     }
 }
 
-impl GetPeer {
+impl From<Peer> for GetPeer {
     /// Create a new [`GetPeer`] with only the peer configuration set.
-    pub fn new(peer: Peer) -> Self {
+    fn from(peer: Peer) -> Self {
         Self::builder().peer(peer).build()
     }
 }
