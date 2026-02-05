@@ -18,7 +18,7 @@ pub struct Ipv6<Payload: ?Sized = [u8]> {
     /// IPv6 header.
     pub header: Ipv6Header,
     /// IPv6 payload. The type of this is `[u8]` by default, but it may be any zerocopy type,
-    /// e.g. a `Udp<WgData>`
+    /// e.g. a `Udp<WgData>`.
     pub payload: Payload,
 }
 
