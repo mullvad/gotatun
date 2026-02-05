@@ -371,7 +371,7 @@ mod tests {
     use std::net::Ipv4Addr;
 
     #[cfg(feature = "mock_instant")]
-    use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT};
+    use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT, TimerName};
     use crate::packet::Ipv4;
 
     const HANDSHAKE_RATE_LIMIT: u64 = 100;
@@ -664,5 +664,93 @@ mod tests {
             unreachable!("expected WritetoTunnelV4");
         };
         assert_eq!(sent_packet_buf.as_bytes(), recv_packet_buf.as_bytes());
+    }
+
+    /// Test that `update_timers()` does not panic if clock jumps back.
+    #[test]
+    #[cfg(feature = "mock_instant")]
+    fn update_timers_handles_backward_time_jump() {
+        MockClock::set_time(Duration::ZERO);
+
+        let (mut my_tun, mut _their_tun) = create_two_tuns_and_handshake();
+
+        // Advance time and update timers
+        MockClock::advance(Duration::from_secs(10));
+        my_tun.update_timers().unwrap();
+
+        let time_current_before = my_tun.timers[TimerName::TimeCurrent];
+        assert_eq!(time_current_before, Duration::from_secs(10));
+
+        // Jump back in time
+        MockClock::set_time(Duration::from_secs(5));
+
+        my_tun.update_timers().unwrap();
+
+        // TimeCurrent timer should not never decrease
+        let time_current_after = my_tun.timers[TimerName::TimeCurrent];
+        assert_eq!(
+            time_current_after,
+            Duration::from_secs(10),
+            "TimeCurrent should not never decrease"
+        );
+    }
+
+    /// Test that `time_since_last_handshake()` saturates if clock jumps back.
+    #[test]
+    #[cfg(feature = "mock_instant")]
+    fn time_since_last_handshake_saturates_on_backward_jump() {
+        MockClock::set_time(Duration::ZERO);
+
+        let (mut my_tun, mut _their_tun) = create_two_tuns_and_handshake();
+
+        MockClock::advance(Duration::from_secs(60));
+        my_tun.update_timers().unwrap();
+
+        // Verify we have a valid time_since_last_handshake
+        let time_since = my_tun.time_since_last_handshake().expect("have handshake");
+        assert!(time_since >= Duration::from_secs(59));
+
+        MockClock::set_time(Duration::ZERO);
+
+        // Verify that `time_since_last_handshake` saturates
+        let time_since_after_jump = my_tun.time_since_last_handshake();
+        assert_eq!(
+            time_since_after_jump,
+            Some(Duration::ZERO),
+            "time_since_last_handshake should saturate"
+        );
+    }
+
+    /// Test that timers "freeze" if clock jumps back.
+    #[test]
+    #[cfg(feature = "mock_instant")]
+    fn timers_freeze_during_backward_jump() {
+        MockClock::set_time(Duration::ZERO);
+
+        let (mut my_tun, mut _their_tun) = create_two_tuns_and_handshake();
+
+        MockClock::set_time(Duration::from_secs(100));
+        my_tun.update_timers().unwrap();
+        assert_eq!(
+            my_tun.timers[TimerName::TimeCurrent],
+            Duration::from_secs(100)
+        );
+
+        // Jump backward
+        MockClock::set_time(Duration::from_secs(95));
+        my_tun.update_timers().unwrap();
+        // Time should be frozen at 100
+        assert_eq!(
+            my_tun.timers[TimerName::TimeCurrent],
+            Duration::from_secs(100)
+        );
+
+        // Time should resume after 100
+        MockClock::set_time(Duration::from_secs(105));
+        my_tun.update_timers().unwrap();
+        assert_eq!(
+            my_tun.timers[TimerName::TimeCurrent],
+            Duration::from_secs(105)
+        );
     }
 }
