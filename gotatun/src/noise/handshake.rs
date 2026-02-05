@@ -23,7 +23,7 @@ use std::time::{Duration, SystemTime};
 use zerocopy::IntoBytes;
 
 #[cfg(feature = "mock_instant")]
-use mock_instant::Instant;
+use mock_instant::thread_local::Instant;
 
 pub(crate) const LABEL_MAC1: &[u8; 8] = b"mac1----";
 pub(crate) const LABEL_COOKIE: &[u8; 8] = b"cookie--";
