@@ -94,7 +94,6 @@ impl Ipv4Header {
     /// Construct an IPv4 header with the reasonable defaults.
     ///
     /// `payload` field is used to set the `total_len` field.
-    #[allow(dead_code)]
     pub const fn new(
         source: Ipv4Addr,
         destination: Ipv4Addr,
