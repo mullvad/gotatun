@@ -379,7 +379,7 @@ mod tests {
     use super::*;
     use bytes::BytesMut;
     #[cfg(feature = "mock_instant")]
-    use mock_instant::MockClock;
+    use mock_instant::thread_local::MockClock;
     use rand_core::{OsRng, RngCore};
 
     fn create_two_tuns() -> (Tunn, Tunn) {
@@ -620,7 +620,7 @@ mod tests {
 
         // Advance time 1 second and "send" 1 packet so that we send a handshake
         // after the timeout
-        mock_instant::MockClock::advance(Duration::from_secs(1));
+        MockClock::advance(Duration::from_secs(1));
         assert!(matches!(their_tun.update_timers(), Ok(None)));
         assert!(matches!(my_tun.update_timers(), Ok(None)));
         let sent_packet_buf = create_ipv4_udp_packet();
@@ -629,7 +629,7 @@ mod tests {
             .expect("expected encapsulated packet");
 
         //Advance to timeout
-        mock_instant::MockClock::advance(REKEY_AFTER_TIME);
+        MockClock::advance(REKEY_AFTER_TIME);
         assert!(matches!(their_tun.update_timers(), Ok(None)));
         update_timer_results_in_handshake(&mut my_tun);
     }
@@ -641,7 +641,7 @@ mod tests {
 
         let _init = create_handshake_init(&mut my_tun);
 
-        mock_instant::MockClock::advance(REKEY_TIMEOUT);
+        MockClock::advance(REKEY_TIMEOUT);
         update_timer_results_in_handshake(&mut my_tun)
     }
 
