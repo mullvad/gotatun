@@ -75,7 +75,8 @@ impl UapiClient {
     ///
     /// # Errors
     ///
-    /// Returns an error if the channel is closed or the request fails.
+    /// Returns `Err` if the channel is closed.
+    /// Returns a [`Response`] with `errno` set if the request fails.
     pub async fn send(&self, request: impl Into<Request>) -> eyre::Result<Response> {
         let request = request.into();
         log::trace!("Handling API request: {request:?}");
@@ -94,7 +95,8 @@ impl UapiClient {
     ///
     /// # Errors
     ///
-    /// Returns an error if the channel is closed or the request fails.
+    /// Returns `Err` if the channel is closed.
+    /// Returns a [`Response`] with `errno` set if the request fails.
     pub fn send_sync(&self, request: impl Into<Request>) -> eyre::Result<Response> {
         let request = request.into();
         log::trace!("Handling API request: {request:?}");
