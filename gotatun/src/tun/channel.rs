@@ -4,7 +4,8 @@
 //! Implementations of [`IpSend`] and [`IpRecv`] using tokio channels.
 
 use either::Either;
-use std::{io, iter};
+use futures::{FutureExt as _, select};
+use std::{convert::Infallible, io, iter};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -18,7 +19,8 @@ pub use fragmentation::Ipv4Fragments;
 /// An implementation of [`IpRecv`] using tokio channels. Create using
 /// [`new_udp_tun_channel`].
 pub struct TunChannelRx {
-    pub(crate) tun_rx: mpsc::Receiver<Packet<Ip>>,
+    pub(crate) tun_rx_v4: mpsc::Receiver<Packet<Ipv4>>,
+    pub(crate) tun_rx_v6: mpsc::Receiver<Packet<Ipv6>>,
     pub(crate) mtu: MtuWatcher,
 }
 
@@ -87,9 +89,14 @@ impl IpRecv for TunChannelRx {
         &'a mut self,
         _pool: &mut PacketBufPool,
     ) -> io::Result<impl Iterator<Item = Packet<Ip>> + Send + 'a> {
-        let Some(packet) = self.tun_rx.recv().await else {
+        let packet = select! {
+            packet = self.tun_rx_v4.recv().fuse() => packet.map(Packet::<Ip>::from),
+            packet = self.tun_rx_v6.recv().fuse() => packet.map(Packet::<Ip>::from),
+        };
+
+        let Some(packet) = packet else {
             log::trace!("tun_rx sender dropped and no more packet can be received");
-            let () = std::future::pending().await;
+            std::future::pending::<Infallible>().await;
             unreachable!();
         };
         Ok(iter::once(packet))

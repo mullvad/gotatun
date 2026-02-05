@@ -31,14 +31,15 @@ const UDP_RECV_BUFFER_SIZE: usize = 7 * 1024 * 1024;
 const UDP_SEND_BUFFER_SIZE: usize = 7 * 1024 * 1024;
 
 impl UdpTransportFactory for UdpSocketFactory {
-    type Send = UdpSocket;
+    type SendV4 = UdpSocket;
+    type SendV6 = UdpSocket;
     type RecvV4 = UdpSocket;
     type RecvV6 = UdpSocket;
 
     async fn bind(
         &mut self,
         params: &UdpTransportFactoryParams,
-    ) -> io::Result<((Self::Send, Self::RecvV4), (Self::Send, Self::RecvV6))> {
+    ) -> io::Result<((Self::SendV4, Self::RecvV4), (Self::SendV6, Self::RecvV6))> {
         let mut port = params.port;
         let udp_v4 = UdpSocket::bind((params.addr_v4, port).into())?;
         if port == 0 {
