@@ -89,7 +89,9 @@ impl Timers {
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
     pub(super) fn clear(&mut self) {
-        let now = Instant::now().duration_since(self.time_started);
+        let now = Instant::now()
+            .duration_since(self.time_started)
+            .max(self[TimeCurrent]);
         for t in &mut self.timers[..] {
             *t = now;
         }
@@ -179,13 +181,14 @@ impl Tunn {
         let mut handshake_initiation_required = false;
         let mut keepalive_required = false;
 
-        let time = Instant::now();
-
         self.rate_limiter.try_reset_count();
 
         // All the times are counted from tunnel initiation, for efficiency our timers are rounded
         // to a second, as there is no real benefit to having highly accurate timers.
-        let now = time.duration_since(self.timers.time_started);
+        // NOTE: `now` is guaranteed to be monotonic
+        let now = Instant::now()
+            .duration_since(self.timers.time_started)
+            .max(self.timers[TimeCurrent]);
         self.timers[TimeCurrent] = now;
 
         self.update_session_timers(now);
@@ -326,7 +329,7 @@ impl Tunn {
             let duration_since_tun_start = Instant::now().duration_since(self.timers.time_started);
             let duration_since_session_established = self.timers[TimeSessionEstablished];
 
-            Some(duration_since_tun_start - duration_since_session_established)
+            Some(duration_since_tun_start.saturating_sub(duration_since_session_established))
         } else {
             None
         }
