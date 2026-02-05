@@ -32,7 +32,7 @@ const MAX_QUEUE_DEPTH: usize = 256;
 /// number of sessions in the ring, better keep a PoT.
 const N_SESSIONS: usize = 8;
 
-/// Result of processing a WireGuard packet through the tunnel.
+/// Result of processing a WireGuard packet through the [`Tunn`].
 #[derive(Debug)]
 pub enum TunnResult {
     /// Operation completed successfully with no further action needed.
