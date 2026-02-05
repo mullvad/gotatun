@@ -3,7 +3,7 @@
 
 //! Trait abstractions for TUN devices.
 //!
-//! See [`IpSend`](crate::tun::IpSend) and [`IpRecv`](crate::tun::IpRecv).
+//! See [`IpSend`] and [`IpRecv`].
 
 use tokio::sync::watch;
 

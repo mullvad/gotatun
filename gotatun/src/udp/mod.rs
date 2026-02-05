@@ -3,8 +3,8 @@
 
 //! Trait abstractions for UDP sockets.
 //!
-//! [`socket`](crate::udp::socket) contains implementation for actual UDP sockets.
-//! [`channel`](crate::udp::channel) contains implementation for tokio-based channels.
+//! [`socket`] contains implementation for actual UDP sockets.
+//! [`channel`] contains implementation for tokio-based channels.
 
 use std::{
     future::Future,
