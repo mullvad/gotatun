@@ -745,10 +745,10 @@ mod tests {
         // Jump backward
         MockClock::set_time(JUMPED_BACK_TIME);
         my_tun.update_timers().unwrap();
-        // Time should be frozen at 100
+        // Time should be frozen at `INITIAL_TIME`
         assert_eq!(my_tun.timers[TimerName::TimeCurrent], INITIAL_TIME);
 
-        // Time should resume after 100
+        // Time should resume after `INITIAL_TIME`
         MockClock::set_time(RESUMED_TIME);
         my_tun.update_timers().unwrap();
         assert_eq!(my_tun.timers[TimerName::TimeCurrent], RESUMED_TIME);
