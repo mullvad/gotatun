@@ -115,6 +115,7 @@ impl PeerMut {
     }
 
     /// Add multiple allowed IP networks for this peer.
+    /// Can be called multiple times.
     pub fn add_allowed_ips(&mut self, allowed_ips: impl IntoIterator<Item = impl Into<IpNetwork>>) {
         self.add_allowed_ips
             .extend(allowed_ips.into_iter().map(Into::into));
