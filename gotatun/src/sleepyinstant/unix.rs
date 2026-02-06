@@ -27,7 +27,7 @@ impl Instant {
         Self { t }
     }
 
-    fn checked_duration_since(&self, earlier: Instant) -> Option<Duration> {
+    pub(crate) fn checked_duration_since(&self, earlier: Instant) -> Option<Duration> {
         const NANOSECOND: nix::libc::c_long = 1_000_000_000;
         let (tv_sec, tv_nsec) = if self.t.tv_nsec() < earlier.t.tv_nsec() {
             (
@@ -46,10 +46,5 @@ impl Instant {
         } else {
             Some(Duration::new(tv_sec as _, tv_nsec as _))
         }
-    }
-
-    pub(crate) fn duration_since(&self, earlier: Instant) -> Duration {
-        self.checked_duration_since(earlier)
-            .unwrap_or(Duration::ZERO)
     }
 }
