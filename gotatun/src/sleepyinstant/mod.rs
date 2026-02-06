@@ -57,7 +57,7 @@ impl Instant {
     }
 
     /// Returns the amount of time elapsed from another instant to this one,
-    /// or zero duration if that instant is later than this one.
+    /// or zero if `earlier` is later than `self`.
     pub fn duration_since(&self, earlier: Instant) -> Duration {
         self.checked_duration_since(earlier)
             .unwrap_or(Duration::ZERO)
