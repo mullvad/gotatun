@@ -89,15 +89,21 @@ impl Timers {
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
     pub(super) fn clear(&mut self) {
-        let now = Instant::now()
-            .checked_duration_since(self.time_started)
-            .unwrap_or(Duration::ZERO)
-            .max(self[TimeCurrent]);
+        let now = self.now();
         for t in &mut self.timers[..] {
             *t = now;
         }
         self.want_handshake = None;
         self.want_keepalive = false;
+    }
+
+    /// Compute the time elapsed since [`Self::time_started`] based on [`Instant::now`].
+    /// This is guaranteed to be monotonic and no less than `self[TimeCurrent]`.
+    pub(super) fn now(&self) -> Duration {
+        Instant::now()
+            .checked_duration_since(self.time_started)
+            .unwrap_or(Duration::ZERO)
+            .max(self[TimeCurrent])
     }
 }
 
@@ -186,11 +192,7 @@ impl Tunn {
 
         // All the times are counted from tunnel initiation, for efficiency our timers are rounded
         // to a second, as there is no real benefit to having highly accurate timers.
-        // NOTE: `now` is guaranteed to be monotonic
-        let now = Instant::now()
-            .checked_duration_since(self.timers.time_started)
-            .unwrap_or(Duration::ZERO)
-            .max(self.timers[TimeCurrent]);
+        let now = self.timers.now();
         self.timers[TimeCurrent] = now;
 
         self.update_session_timers(now);
@@ -328,11 +330,7 @@ impl Tunn {
     pub fn time_since_last_handshake(&self) -> Option<Duration> {
         let current_session = self.current;
         if self.sessions[current_session % super::N_SESSIONS].is_some() {
-            // NOTE: `now` is guaranteed to be monotonic
-            let duration_since_tun_start = Instant::now()
-                .checked_duration_since(self.timers.time_started)
-                .unwrap_or(Duration::ZERO)
-                .max(self.timers[TimeCurrent]);
+            let duration_since_tun_start = self.timers.now();
             let duration_since_session_established = self.timers[TimeSessionEstablished];
 
             Some(duration_since_tun_start.saturating_sub(duration_since_session_established))
