@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Add `daita-uapi` feature for configuring DAITA using the UAPI socket. This is disabled by default.
 
+### Fixed
+- Fix excessive rekey attempts.
+
 
 ## [0.2.0] - 2026-01-13
 ### Changed
