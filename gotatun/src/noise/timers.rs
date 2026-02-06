@@ -90,7 +90,8 @@ impl Timers {
     // so the reference time frame is the same
     pub(super) fn clear(&mut self) {
         let now = Instant::now()
-            .duration_since(self.time_started)
+            .checked_duration_since(self.time_started)
+            .unwrap_or(Duration::ZERO)
             .max(self[TimeCurrent]);
         for t in &mut self.timers[..] {
             *t = now;
@@ -184,7 +185,8 @@ impl Tunn {
         // to a second, as there is no real benefit to having highly accurate timers.
         // NOTE: `now` is guaranteed to be monotonic
         let now = Instant::now()
-            .duration_since(self.timers.time_started)
+            .checked_duration_since(self.timers.time_started)
+            .unwrap_or(Duration::ZERO)
             .max(self.timers[TimeCurrent]);
         self.timers[TimeCurrent] = now;
 
@@ -324,7 +326,9 @@ impl Tunn {
     pub fn time_since_last_handshake(&self) -> Option<Duration> {
         let current_session = self.current;
         if self.sessions[current_session % super::N_SESSIONS].is_some() {
-            let duration_since_tun_start = Instant::now().duration_since(self.timers.time_started);
+            let duration_since_tun_start = Instant::now()
+                .checked_duration_since(self.timers.time_started)
+                .unwrap_or(Duration::ZERO);
             let duration_since_session_established = self.timers[TimeSessionEstablished];
 
             Some(duration_since_tun_start.saturating_sub(duration_since_session_established))
