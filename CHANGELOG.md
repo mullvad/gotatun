@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Fix excessive rekey attempts.
+- Fix potential panic due to clocks not being truly monotonic.
 
 
 ## [0.2.0] - 2026-01-13
@@ -28,7 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Update daemonize to `0.5` in CLI to resolve deprecation warning.
 - Report correct last handshake in UAPI.
-- Fix potential panic due to clocks not being truly monotonic.
 
 ### Removed
 - Remove unused `device::Error` variants.
