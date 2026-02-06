@@ -328,9 +328,11 @@ impl Tunn {
     pub fn time_since_last_handshake(&self) -> Option<Duration> {
         let current_session = self.current;
         if self.sessions[current_session % super::N_SESSIONS].is_some() {
+            // NOTE: `now` is guaranteed to be monotonic
             let duration_since_tun_start = Instant::now()
                 .checked_duration_since(self.timers.time_started)
-                .unwrap_or(Duration::ZERO);
+                .unwrap_or(Duration::ZERO)
+                .max(self.timers[TimeCurrent]);
             let duration_since_session_established = self.timers[TimeSessionEstablished];
 
             Some(duration_since_tun_start.saturating_sub(duration_since_session_established))

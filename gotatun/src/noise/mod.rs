@@ -714,13 +714,14 @@ mod tests {
         assert!(time_since >= PRESENT);
         assert!(time_since > Duration::ZERO);
 
-        MockClock::set_time(Duration::ZERO);
-
         // Verify that `time_since_last_handshake` saturates
+        MockClock::set_time(Duration::ZERO);
+        my_tun.update_timers().unwrap();
+
         let time_since_after_jump = my_tun.time_since_last_handshake();
         assert_eq!(
             time_since_after_jump,
-            Some(Duration::ZERO),
+            Some(PRESENT),
             "time_since_last_handshake should saturate"
         );
     }
