@@ -243,7 +243,8 @@ impl DaitaHooks {
 
     /// Get a reference to the DAITA overhead statistics.
     ///
-    /// This includes padding bytes and decoy packet bytes for both transmission and reception.
+    /// This includes overhead in bytes induced by constant packet size-padding and decoy packets
+    /// for both transmission and reception.
     pub fn daita_overhead(&self) -> &DaitaOverhead {
         &self.daita_overhead
     }
