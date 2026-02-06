@@ -99,7 +99,7 @@ impl Timers {
 
     /// Compute the time elapsed since [`Self::time_started`] based on [`Instant::now`].
     /// This is guaranteed to be monotonic and no less than `self[TimeCurrent]`.
-    pub(super) fn now(&self) -> Duration {
+    fn now(&self) -> Duration {
         Instant::now()
             .checked_duration_since(self.time_started)
             .unwrap_or(Duration::ZERO)
