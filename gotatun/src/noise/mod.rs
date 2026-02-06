@@ -688,11 +688,11 @@ mod tests {
 
         my_tun.update_timers().unwrap();
 
-        // TimeCurrent timer should not never decrease
+        // TimeCurrent timer should never decrease
         let time_current_after = my_tun.timers[TimerName::TimeCurrent];
         assert_eq!(
             time_current_after, PRESENT,
-            "TimeCurrent should not never decrease"
+            "TimeCurrent should never decrease"
         );
     }
 
