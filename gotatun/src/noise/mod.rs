@@ -696,10 +696,10 @@ mod tests {
         );
     }
 
-    /// Test that [`Tunn::time_since_last_handshake`] saturates if clock jumps back.
+    /// Test that [`Tunn::time_since_last_handshake`] never decreases if clock jumps back.
     #[test]
     #[cfg(feature = "mock_instant")]
-    fn time_since_last_handshake_saturates_on_backward_jump() {
+    fn time_since_last_handshake_doesnt_decrease_on_backward_jump() {
         const PRESENT: Duration = Duration::from_secs(60);
 
         MockClock::set_time(Duration::ZERO);
@@ -714,7 +714,7 @@ mod tests {
         assert!(time_since >= PRESENT);
         assert!(time_since > Duration::ZERO);
 
-        // Verify that `time_since_last_handshake` saturates
+        // Verify that `time_since_last_handshake` doesn't decrease
         MockClock::set_time(Duration::ZERO);
         my_tun.update_timers().unwrap();
 
@@ -722,7 +722,7 @@ mod tests {
         assert_eq!(
             time_since_after_jump,
             Some(PRESENT),
-            "time_since_last_handshake should saturate"
+            "time_since_last_handshake should never decrease"
         );
     }
 
