@@ -24,6 +24,7 @@ targets = ["aarch64-apple-darwin", "x86_64-pc-windows-msvc", "aarch64-linux-andr
 [features]
 default = []
 device = ["thiserror"]
+tun = ["dep:tun", "thiserror"]
 pcap = ["dep:pcap-file"]
 # UDP GRO appears to be broken on Windows.
 # In some cases it fails to return UDP_COALESCED_INFO
