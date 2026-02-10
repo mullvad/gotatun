@@ -51,13 +51,16 @@ impl Instant {
     }
 
     /// Returns the amount of time elapsed from another instant to this one,
-    /// or zero duration if that instant is later than this one.
-    ///
-    /// # Panics
-    ///
-    /// panics when `earlier` was later than `self`.
+    /// or `None` if `earlier` is later than `self`.
+    pub fn checked_duration_since(&self, earlier: Instant) -> Option<Duration> {
+        self.t.checked_duration_since(earlier.t)
+    }
+
+    /// Returns the amount of time elapsed from another instant to this one,
+    /// or zero if `earlier` is later than `self`.
     pub fn duration_since(&self, earlier: Instant) -> Duration {
-        self.t.duration_since(earlier.t)
+        self.checked_duration_since(earlier)
+            .unwrap_or(Duration::ZERO)
     }
 
     /// Returns the amount of time elapsed since this instant was created.
