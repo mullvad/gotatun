@@ -90,6 +90,9 @@ nix = { version = "0.30", default-features = false, features = [
 [dev-dependencies]
 etherparse = "0.13"
 criterion = { version = "0.7.0", features = ["html_reports"] }
+x25519-dalek = { version = "2.0.1", features = ["getrandom"] }
+test-log = "0.2.19"
+tokio-stream = { version = "0.1.18", features = ["sync"] }
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]

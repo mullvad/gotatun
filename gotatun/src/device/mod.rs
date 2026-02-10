@@ -15,6 +15,8 @@ mod index_lfsr;
 mod integration_tests;
 mod peer;
 mod peer_state;
+#[cfg(test)]
+mod tests;
 mod transports;
 pub mod uapi;
 
@@ -587,6 +589,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                 TunnResult::Err(_) => continue,
                 // Flush pending queue
                 TunnResult::WriteToNetwork(packet) => {
+                    // TODO: does this end up with the packets being out-of-order?
                     let packets =
                         std::iter::once(packet).chain(tunnel.get_queued_packets(&mut tun_mtu));
 
