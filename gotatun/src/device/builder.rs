@@ -198,7 +198,8 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
     ///
     /// # Errors
     ///
-    /// Returns an error if the UDP socket cannot be bound or if peer initialization fails.
+    /// Errors if the UDP socket cannot be bound.
+    #[cfg_attr(feature = "daita", doc = "Errors if DAITA initialization fails.")]
     pub async fn build(self) -> Result<Device<(Udp, TunTx, TunRx)>, Error> {
         #[cfg(target_os = "linux")]
         let fwmark = self.fwmark;
