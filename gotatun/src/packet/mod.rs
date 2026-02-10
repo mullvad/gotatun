@@ -3,7 +3,7 @@
 
 //! Types to create, parse, and move network packets around in a zero-copy manner.
 //!
-//! See [`Packet`](crate::packet::Packet) for an implementation of a <https://docs.rs/bytes>-backed owned packet buffer.
+//! See [`Packet`](crate::packet::Packet) for an implementation of a [`bytes`]-backed owned packet buffer.
 //!
 //! Any of the <https://docs.rs/zerocopy>-enabled definitions such as [`Ipv4`](crate::packet::Ipv4) or [`Udp`](crate::packet::Udp) can be used to cheaply
 //! construct or parse packets:
