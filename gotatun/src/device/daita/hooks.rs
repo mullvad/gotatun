@@ -36,8 +36,8 @@ pub struct DaitaOverhead {
 
 /// DAITA (Defense Against AI-guided Traffic Analysis) hooks for packet processing.
 ///
-/// This struct manages the DAITA implementation by coordinating packet padding,
-/// decoy packet generation, and packet delays according to the maybenot framework.
+/// The struct exposes a number of hooks for the data pipeline which add constant packet
+/// size-padding, decoy packet generation, and packet delays according to the maybenot framework.
 pub struct DaitaHooks {
     event_tx: mpsc::UnboundedSender<TriggerEvent>,
     packet_count: Arc<PacketCount>,
