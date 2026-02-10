@@ -76,15 +76,10 @@ pub enum Error {
     #[error("Failed to drop privileges: {0}")]
     DropPrivileges(String),
 
-    /// Failed to open TUN device
+    /// TUN device error
+    #[error("TUN device error: {0}")]
     #[cfg(feature = "tun")]
-    #[error("Failed to open TUN device: {0}")]
-    OpenTun(#[source] tun::Error),
-
-    /// Failed to get TUN device name
-    #[cfg(feature = "tun")]
-    #[error("Failed to get TUN device name: {0}")]
-    GetTunName(#[source] tun::Error),
+    TunDevice(#[from] crate::tun::tun_async_device::Error),
 
     /// Failed to initialize DAITA hooks
     #[error("Failed to initialize DAITA hooks")]
