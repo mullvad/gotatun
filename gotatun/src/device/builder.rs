@@ -121,8 +121,13 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
         Ok(self.with_ip(tun))
     }
 
-    /// Set the channel where the device will read and write IP packets. This is normally a
-    /// [`TunDevice`], but can be any type that implements both [`IpSend`] and [`IpRecv`].
+    /// Set the channel where the device will read and write IP packets.
+    #[cfg_attr(feature = "tun", doc = "This is normally a [`TunDevice`], ")]
+    #[cfg_attr(
+        not(feature = "tun"),
+        doc = "This is normally a `TunDevice` (requires feature `tun`), "
+    )]
+    /// but can be any type that implements both [`IpSend`] and [`IpRecv`].
     pub fn with_ip<Ip: IpSend + IpRecv + Clone>(self, ip: Ip) -> DeviceBuilder<X, Ip, Ip> {
         self.with_ip_pair(ip.clone(), ip)
     }
