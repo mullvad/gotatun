@@ -141,6 +141,43 @@ pub fn new_udp_tun_channel(
     (tun_tx, tun_rx, udp_channel_factory)
 }
 
+// TODO: docstring
+// TODO: name "new_udp_udp" is wack
+// TODO: use a builder?
+pub fn new_udp_udp_channel(
+    capacity: usize,
+    a_source_ip_v4: Ipv4Addr,
+    a_source_ip_v6: Ipv6Addr,
+    b_source_ip_v4: Ipv4Addr,
+    b_source_ip_v6: Ipv6Addr,
+) -> [UdpChannelFactory; 2] {
+    let (a_tx_v4, b_rx_v4) = mpsc::channel(capacity);
+    let (a_tx_v6, b_rx_v6) = mpsc::channel(capacity);
+
+    let (b_tx_v4, a_rx_v4) = mpsc::channel(capacity);
+    let (b_tx_v6, a_rx_v6) = mpsc::channel(capacity);
+
+    let a = UdpChannelFactory {
+        source_ip_v4: a_source_ip_v4,
+        source_ip_v6: a_source_ip_v6,
+        udp_tx_v4: a_tx_v4,
+        udp_tx_v6: a_tx_v6,
+        udp_rx_v4: Arc::new(Mutex::new(a_rx_v4)),
+        udp_rx_v6: Arc::new(Mutex::new(a_rx_v6)),
+    };
+
+    let b = UdpChannelFactory {
+        source_ip_v4: b_source_ip_v4,
+        source_ip_v6: b_source_ip_v6,
+        udp_tx_v4: b_tx_v4,
+        udp_tx_v6: b_tx_v6,
+        udp_rx_v4: Arc::new(Mutex::new(b_rx_v4)),
+        udp_rx_v6: Arc::new(Mutex::new(b_rx_v6)),
+    };
+
+    [a, b]
+}
+
 impl UdpTransportFactory for UdpChannelFactory {
     type SendV4 = UdpChannelTx;
     type SendV6 = UdpChannelTx;

@@ -15,6 +15,8 @@ mod index_lfsr;
 mod integration_tests;
 mod peer;
 mod peer_state;
+#[cfg(test)]
+mod tests;
 mod transports;
 pub mod uapi;
 
