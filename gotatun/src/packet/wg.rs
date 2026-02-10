@@ -14,7 +14,7 @@ use crate::packet::{CheckedPayload, Packet};
 
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
-struct Wg {
+pub(crate) struct Wg {
     pub packet_type: WgPacketType,
     rest: [u8],
 }
@@ -169,23 +169,44 @@ impl WgData {
     pub const TAG_LEN: usize = 16;
 
     /// Strip the tag from the encapsulated packet.
-    fn split_encapsulated_packet_and_tag(&mut self) -> (&mut [u8], &mut [u8; WgData::TAG_LEN]) {
+    fn split_encapsulated_packet_and_tag(&self) -> (&[u8], &[u8; WgData::TAG_LEN]) {
+        self.encrypted_encapsulated_packet_and_tag
+            .split_last_chunk::<{ WgData::TAG_LEN }>()
+            .expect("WgDataAndTag is at least TAG_LEN bytes long")
+    }
+
+    /// Strip the tag from the encapsulated packet.
+    fn split_encapsulated_packet_and_tag_mut(&mut self) -> (&mut [u8], &mut [u8; WgData::TAG_LEN]) {
         self.encrypted_encapsulated_packet_and_tag
             .split_last_chunk_mut::<{ WgData::TAG_LEN }>()
             .expect("WgDataAndTag is at least TAG_LEN bytes long")
     }
 
     /// Get a reference to the encapsulated packet, without the trailing tag.
-    pub fn encrypted_encapsulated_packet_mut(&mut self) -> &mut [u8] {
+    pub fn encrypted_encapsulated_packet(&self) -> &[u8] {
         let (encrypted_encapsulated_packet, _) = self.split_encapsulated_packet_and_tag();
+        encrypted_encapsulated_packet
+    }
+
+    /// Get a mutable reference to the encapsulated packet, without the trailing tag.
+    pub fn encrypted_encapsulated_packet_mut(&mut self) -> &mut [u8] {
+        let (encrypted_encapsulated_packet, _) = self.split_encapsulated_packet_and_tag_mut();
         encrypted_encapsulated_packet
     }
 
     /// Get a reference to the tag of the encapsulated packet.
     ///
     /// Returns None if if the encapsulated packet + tag is less than 16 bytes.
-    pub fn tag_mut(&mut self) -> &mut [u8; WgData::TAG_LEN] {
+    pub fn tag(&mut self) -> &[u8; WgData::TAG_LEN] {
         let (_, tag) = self.split_encapsulated_packet_and_tag();
+        tag
+    }
+
+    /// Get a mutable reference to the tag of the encapsulated packet.
+    ///
+    /// Returns None if if the encapsulated packet + tag is less than 16 bytes.
+    pub fn tag_mut(&mut self) -> &mut [u8; WgData::TAG_LEN] {
+        let (_, tag) = self.split_encapsulated_packet_and_tag_mut();
         tag
     }
 

@@ -5,7 +5,7 @@
 
 use either::Either;
 use futures::{FutureExt as _, select};
-use std::{convert::Infallible, io, iter};
+use std::{io, iter};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -95,9 +95,10 @@ impl IpRecv for TunChannelRx {
         };
 
         let Some(packet) = packet else {
-            log::trace!("tun_rx sender dropped and no more packet can be received");
-            std::future::pending::<Infallible>().await;
-            unreachable!();
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "channel closed",
+            ));
         };
         Ok(iter::once(packet))
     }

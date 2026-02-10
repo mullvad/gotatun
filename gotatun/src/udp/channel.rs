@@ -6,6 +6,7 @@
 //! See [`new_udp_tun_channel`]
 
 use bytes::BytesMut;
+use duplicate::duplicate_item;
 use pnet_packet::ip::IpNextHeaderProtocols;
 use rand_core::RngCore;
 use std::{
@@ -139,6 +140,47 @@ pub fn new_udp_tun_channel(
         udp_tx_v6,
     };
     (tun_tx, tun_rx, udp_channel_factory)
+}
+
+pub(crate) struct UdpChannelV4 {
+    pub tx: mpsc::Sender<Packet<Ipv4<Udp>>>,
+    pub rx: mpsc::Receiver<Packet<Ipv4<Udp>>>,
+}
+
+pub(crate) struct UdpChannelV6 {
+    pub tx: mpsc::Sender<Packet<Ipv6<Udp>>>,
+    pub rx: mpsc::Receiver<Packet<Ipv6<Udp>>>,
+}
+
+#[duplicate_item(
+    UdpChannel;
+    [UdpChannelV4];
+    [UdpChannelV6];
+)]
+impl UdpChannel {
+    pub(crate) fn new_pair(capacity: usize) -> [Self; 2] {
+        let (a_tx, b_rx) = mpsc::channel(capacity);
+        let (b_tx, a_rx) = mpsc::channel(capacity);
+        [Self { tx: a_tx, rx: a_rx }, Self { tx: b_tx, rx: b_rx }]
+    }
+}
+
+impl UdpChannelFactory {
+    pub(crate) fn new(
+        v4_src: Ipv4Addr,
+        v4: UdpChannelV4,
+        v6_src: Ipv6Addr,
+        v6: UdpChannelV6,
+    ) -> Self {
+        Self {
+            source_ip_v4: v4_src,
+            source_ip_v6: v6_src,
+            udp_tx_v4: v4.tx,
+            udp_tx_v6: v6.tx,
+            udp_rx_v4: Arc::new(Mutex::new(v4.rx)),
+            udp_rx_v6: Arc::new(Mutex::new(v6.rx)),
+        }
+    }
 }
 
 impl UdpTransportFactory for UdpChannelFactory {
