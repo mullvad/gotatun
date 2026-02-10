@@ -205,7 +205,6 @@ pub struct Peer {
     /// The value for this is IP/cidr, indicating a new added allowed IP entry for the previously
     /// added peer entry. If an identical value already exists as part of a prior peer, the allowed
     /// IP entry will be removed from that peer and added to this peer.
-    /// List of allowed IP networks for this peer.
     #[builder(default)]
     pub allowed_ip: Vec<IpNetwork>,
 

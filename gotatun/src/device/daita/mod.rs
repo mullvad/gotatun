@@ -19,9 +19,6 @@ pub use maybenot::Error;
 pub use maybenot::Machine;
 
 /// Configuration settings for DAITA (Defense Against AI-guided Traffic Analysis).
-///
-/// DAITA uses the [maybenot] framework to defend against traffic analysis attacks
-/// by introducing decoy packets and packet delays.
 #[derive(Debug, Clone)]
 pub struct DaitaSettings {
     /// The maybenot machines to use.

@@ -109,6 +109,7 @@ impl PeerMut {
     }
 
     /// Add a single allowed IP network for this peer.
+    /// Can be called multiple times.
     pub fn add_allowed_ip(&mut self, allowed_ip: impl Into<IpNetwork>) {
         self.add_allowed_ips.push(allowed_ip.into());
     }
