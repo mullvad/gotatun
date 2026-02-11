@@ -686,7 +686,12 @@ impl<T: DeviceTransports> DeviceState<T> {
                 let peer = {
                     let device = device.read().await;
                     let Some(peer) = device.peers_by_ip.find(dst_addr).cloned() else {
+                        if cfg!(debug_assertions) {
+                            log::trace!("Dropping packet with no routable peer");
+                        }
+
                         // Drop packet if no peer has allowed IPs for destination
+                        drop(packet);
                         continue;
                     };
                     peer
