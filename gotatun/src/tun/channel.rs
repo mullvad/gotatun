@@ -19,8 +19,8 @@ pub use fragmentation::Ipv4Fragments;
 /// An implementation of [`IpRecv`] using tokio channels. Create using
 /// [`new_udp_tun_channel`].
 pub struct TunChannelRx {
-    pub(crate) tun_rx_v4: mpsc::Receiver<Packet<Ipv4>>,
-    pub(crate) tun_rx_v6: mpsc::Receiver<Packet<Ipv6>>,
+    pub(crate) tun_rx_v4: mpsc::Receiver<Packet<Ipv4<Udp>>>,
+    pub(crate) tun_rx_v6: mpsc::Receiver<Packet<Ipv6<Udp>>>,
     pub(crate) mtu: MtuWatcher,
 }
 

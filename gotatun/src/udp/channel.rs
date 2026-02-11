@@ -38,8 +38,8 @@ pub struct UdpChannelTx {
     source_port: u16,
     connection_id: u32,
 
-    udp_tx_v4: mpsc::Sender<Packet<Ipv4>>,
-    udp_tx_v6: mpsc::Sender<Packet<Ipv6>>,
+    udp_tx_v4: mpsc::Sender<Packet<Ipv4<Udp>>>,
+    udp_tx_v6: mpsc::Sender<Packet<Ipv6<Udp>>>,
 }
 
 type Ipv4UdpReceiver = mpsc::Receiver<Packet<Ipv4<Udp>>>;
@@ -69,8 +69,8 @@ pub struct UdpChannelFactory {
     source_ip_v4: Ipv4Addr,
     source_ip_v6: Ipv6Addr,
 
-    udp_tx_v4: mpsc::Sender<Packet<Ipv4>>,
-    udp_tx_v6: mpsc::Sender<Packet<Ipv6>>,
+    udp_tx_v4: mpsc::Sender<Packet<Ipv4<Udp>>>,
+    udp_tx_v6: mpsc::Sender<Packet<Ipv6<Udp>>>,
     udp_rx_v4: Arc<Mutex<Ipv4UdpReceiver>>,
     udp_rx_v6: Arc<Mutex<Ipv6UdpReceiver>>,
 }
@@ -257,7 +257,7 @@ fn create_ipv4_payload(
     destination_ip: Ipv4Addr,
     destination_port: u16,
     udp_payload: &[u8],
-) -> Packet<Ipv4> {
+) -> Packet<Ipv4<Udp>> {
     let udp_len: u16 = (UdpHeader::LEN + udp_payload.len()).try_into().unwrap();
     let total_len = u16::try_from(Ipv4Header::LEN).unwrap() + udp_len;
 
@@ -298,6 +298,8 @@ fn create_ipv4_payload(
         .and_then(|p| p.try_into_ipvx())
         .expect("packet is valid")
         .expect_left("packet is ipv4")
+        .try_into_udp()
+        .expect("packet is udp")
 }
 
 fn create_ipv6_payload(
@@ -307,7 +309,7 @@ fn create_ipv6_payload(
     destination_port: u16,
     udp_payload: &[u8],
     connection_id: u32,
-) -> Packet<Ipv6> {
+) -> Packet<Ipv6<Udp>> {
     let udp_len: u16 = (UdpHeader::LEN + udp_payload.len()).try_into().unwrap();
     let total_len = u16::try_from(Ipv6Header::LEN).unwrap() + udp_len;
 
@@ -343,4 +345,6 @@ fn create_ipv6_payload(
         .and_then(|p| p.try_into_ipvx())
         .expect("packet is valid")
         .expect_right("packet is ipv6")
+        .try_into_udp()
+        .expect("packet is udp")
 }
