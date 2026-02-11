@@ -16,6 +16,7 @@ use std::{convert::Infallible, io, iter, sync::Arc, time::Duration};
 
 /// Error from [`TunDevice`].
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// Failed to open TUN device
     #[error("Failed to open TUN device: {0}")]
