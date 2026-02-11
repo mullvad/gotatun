@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pad payload to multiple of 16 bytes before encryption in accordance with the WireGuard
   specification.
 
+### Changed
+- Make `device::Error` non-exhaustive.
+- Move `device::Error` variants specific to the `tun` feature into `tun::tun_async_device::Error`.
+- Rename DAITA-concept of "padding packets" to "decoy packets"
+
 
 ## [0.2.0] - 2026-01-13
 ### Changed
