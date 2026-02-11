@@ -59,6 +59,7 @@ const MAX_PACKET_BUFS: usize = 4000;
 
 /// Error of [`Device`]-related operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// I/O error
     #[error("i/o error: {0}")]
