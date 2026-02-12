@@ -1,16 +1,9 @@
-use tokio::select;
+use std::time::Duration;
+
+use tokio::{select, time::sleep};
 use zerocopy::IntoBytes;
 
 pub mod mock;
-
-macro_rules! timeout {
-    ($n:literal sec) => {
-        async {
-            tokio::time::sleep(std::time::Duration::from_secs($n)).await;
-            panic!("timeout");
-        }
-    };
-}
 
 /// Test that packets can be sent from one [`Device`] to another and that they arrive intact and in order.
 #[tokio::test]
@@ -38,7 +31,7 @@ async fn test_send_packets() {
     select! {
         _ = wait_for_x_packets => {},
         _ = spam_packets => unreachable!(),
-        _ = alice.app_rx.recv() => panic!(),
-        _ = timeout!(1 sec) => {}
+        _ = alice.app_rx.recv() => panic!("no data is sent from bob to alice"),
+        _ = sleep(Duration::from_secs(1)) => panic!("timeout"),
     }
 }
