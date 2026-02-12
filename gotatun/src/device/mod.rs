@@ -589,6 +589,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                 TunnResult::Err(_) => continue,
                 // Flush pending queue
                 TunnResult::WriteToNetwork(packet) => {
+                    // TODO: does this end up with the packets being out-of-order?
                     let packets =
                         std::iter::once(packet).chain(tunnel.get_queued_packets(&mut tun_mtu));
 
@@ -675,7 +676,10 @@ impl<T: DeviceTransports> DeviceState<T> {
                 }
             };
 
+            let mut n = 0;
             for packet in packets {
+                n += 1;
+
                 // Determine peer to use from the destination address
                 let Some(dst_addr) = packet.destination() else {
                     continue;
@@ -743,6 +747,11 @@ impl<T: DeviceTransports> DeviceState<T> {
                 if result.is_err() {
                     break;
                 }
+            }
+
+            if n == 0 {
+                log::debug!("No more packets, shutting down.");
+                break;
             }
         }
     }

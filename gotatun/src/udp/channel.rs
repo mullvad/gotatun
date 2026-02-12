@@ -6,6 +6,7 @@
 //! See [`new_udp_tun_channel`]
 
 use bytes::BytesMut;
+use duplicate::duplicate_item;
 use pnet_packet::ip::IpNextHeaderProtocols;
 use rand_core::RngCore;
 use std::{
@@ -141,6 +142,47 @@ pub fn new_udp_tun_channel(
     (tun_tx, tun_rx, udp_channel_factory)
 }
 
+pub(crate) struct UdpChannelV4 {
+    pub tx: mpsc::Sender<Packet<Ipv4<Udp>>>,
+    pub rx: mpsc::Receiver<Packet<Ipv4<Udp>>>,
+}
+
+pub(crate) struct UdpChannelV6 {
+    pub tx: mpsc::Sender<Packet<Ipv6<Udp>>>,
+    pub rx: mpsc::Receiver<Packet<Ipv6<Udp>>>,
+}
+
+#[duplicate_item(
+    UdpChannel;
+    [UdpChannelV4];
+    [UdpChannelV6];
+)]
+impl UdpChannel {
+    pub(crate) fn new_pair(capacity: usize) -> [Self; 2] {
+        let (a_tx, b_rx) = mpsc::channel(capacity);
+        let (b_tx, a_rx) = mpsc::channel(capacity);
+        [Self { tx: a_tx, rx: a_rx }, Self { tx: b_tx, rx: b_rx }]
+    }
+}
+
+impl UdpChannelFactory {
+    pub(crate) fn new(
+        v4_src: Ipv4Addr,
+        v4: UdpChannelV4,
+        v6_src: Ipv6Addr,
+        v6: UdpChannelV6,
+    ) -> Self {
+        Self {
+            source_ip_v4: v4_src,
+            source_ip_v6: v6_src,
+            udp_tx_v4: v4.tx,
+            udp_tx_v6: v6.tx,
+            udp_rx_v4: Arc::new(Mutex::new(v4.rx)),
+            udp_rx_v6: Arc::new(Mutex::new(v6.rx)),
+        }
+    }
+}
+
 // TODO: docstring
 // TODO: name "new_udp_udp" is wack
 // TODO: use a builder?
@@ -151,29 +193,11 @@ pub fn new_udp_udp_channel(
     b_source_ip_v4: Ipv4Addr,
     b_source_ip_v6: Ipv6Addr,
 ) -> [UdpChannelFactory; 2] {
-    let (a_tx_v4, b_rx_v4) = mpsc::channel(capacity);
-    let (a_tx_v6, b_rx_v6) = mpsc::channel(capacity);
+    let [a_v4, b_v4] = UdpChannelV4::new_pair(capacity);
+    let [a_v6, b_v6] = UdpChannelV6::new_pair(capacity);
 
-    let (b_tx_v4, a_rx_v4) = mpsc::channel(capacity);
-    let (b_tx_v6, a_rx_v6) = mpsc::channel(capacity);
-
-    let a = UdpChannelFactory {
-        source_ip_v4: a_source_ip_v4,
-        source_ip_v6: a_source_ip_v6,
-        udp_tx_v4: a_tx_v4,
-        udp_tx_v6: a_tx_v6,
-        udp_rx_v4: Arc::new(Mutex::new(a_rx_v4)),
-        udp_rx_v6: Arc::new(Mutex::new(a_rx_v6)),
-    };
-
-    let b = UdpChannelFactory {
-        source_ip_v4: b_source_ip_v4,
-        source_ip_v6: b_source_ip_v6,
-        udp_tx_v4: b_tx_v4,
-        udp_tx_v6: b_tx_v6,
-        udp_rx_v4: Arc::new(Mutex::new(b_rx_v4)),
-        udp_rx_v6: Arc::new(Mutex::new(b_rx_v6)),
-    };
+    let a = UdpChannelFactory::new(a_source_ip_v4, a_v4, a_source_ip_v6, a_v6);
+    let b = UdpChannelFactory::new(b_source_ip_v4, b_v4, b_source_ip_v6, b_v6);
 
     [a, b]
 }
