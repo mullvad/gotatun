@@ -41,12 +41,11 @@ pub async fn device_pair() -> (MockDevice, MockDevice, MockEavesdropper) {
     let endpoint_b = Ipv4Addr::new(10, 0, 0, 2);
 
     let channel_capacity = 10;
-    let [alice_v4, mut alice_eve_v4] = UdpChannelV4::new_pair(channel_capacity);
-    let [bob_v4, mut bob_eve_v4] = UdpChannelV4::new_pair(channel_capacity);
+    let (alice_v4, mut alice_eve_v4) = UdpChannelV4::new_pair(channel_capacity);
+    let (bob_v4, mut bob_eve_v4) = UdpChannelV4::new_pair(channel_capacity);
 
-    let [alice_v6, mut alice_eve_v6] = UdpChannelV6::new_pair(channel_capacity);
-    let [bob_v6, mut bob_eve_v6] = UdpChannelV6::new_pair(channel_capacity);
-
+    let (alice_v6, mut alice_eve_v6) = UdpChannelV6::new_pair(channel_capacity);
+    let (bob_v6, mut bob_eve_v6) = UdpChannelV6::new_pair(channel_capacity);
     let (eve_tx, eve_rx) = broadcast::channel(1000);
     let eve = MockEavesdropper { rx: eve_rx };
 
