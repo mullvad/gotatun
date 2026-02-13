@@ -7,7 +7,6 @@
 
 pub(crate) mod allowed_ips;
 mod builder;
-/// Configuration and inspection interface for WireGuard devices.
 pub mod configure;
 #[cfg(feature = "daita")]
 pub mod daita;
