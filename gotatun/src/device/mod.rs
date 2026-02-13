@@ -5,6 +5,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! WireGuard device implementation with support for peers, handshakes, and packet routing.
 pub(crate) mod allowed_ips;
 mod builder;
 pub mod configure;

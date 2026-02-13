@@ -5,6 +5,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! Noise protocol implementation for WireGuard cryptographic handshakes and sessions.
+
 /// Error types for WireGuard protocol operations.
 pub mod errors;
 /// WireGuard handshake implementation using the Noise protocol.
