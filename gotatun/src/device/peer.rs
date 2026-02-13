@@ -16,6 +16,10 @@ pub struct Peer {
     /// The peer's public key.
     pub public_key: PublicKey,
     /// The peer's endpoint address (IP and port).
+    ///
+    /// An incoming handshake from the peer will overwrite the endpoint to the source
+    /// address of the handshake. If `None`, the peer is inactive until we receive a
+    /// handshake from that peer.
     pub endpoint: Option<SocketAddr>,
     /// List of IP networks that are allowed to be routed through this peer.
     pub allowed_ips: Vec<IpNetwork>,
