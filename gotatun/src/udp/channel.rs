@@ -114,32 +114,23 @@ pub fn new_udp_tun_channel(
     source_ip_v6: Ipv6Addr,
     tun_link_mtu: MtuWatcher,
 ) -> (TunChannelTx, TunChannelRx, UdpChannelFactory) {
-    let (udp_tx_v4, tun_rx_v4) = mpsc::channel(capacity);
-    let (udp_tx_v6, tun_rx_v6) = mpsc::channel(capacity);
-
-    let (tun_tx_v4, udp_rx_v4) = mpsc::channel(capacity);
-    let (tun_tx_v6, udp_rx_v6) = mpsc::channel(capacity);
+    let [udp_v4, tun_v4] = UdpChannelV4::new_pair(capacity);
+    let [udp_v6, tun_v6] = UdpChannelV6::new_pair(capacity);
 
     let tun_tx = TunChannelTx {
-        tun_tx_v4,
-        tun_tx_v6,
-
+        tun_tx_v4: tun_v4.tx,
+        tun_tx_v6: tun_v6.tx,
         fragments_v4: Ipv4Fragments::default(),
     };
     let tun_rx = TunChannelRx {
+        tun_rx_v4: tun_v4.rx,
+        tun_rx_v6: tun_v6.rx,
         mtu: tun_link_mtu,
-        tun_rx_v4,
-        tun_rx_v6,
     };
-    let udp_channel_factory = UdpChannelFactory {
-        source_ip_v4,
-        source_ip_v6,
-        udp_rx_v4: Arc::new(Mutex::new(udp_rx_v4)),
-        udp_rx_v6: Arc::new(Mutex::new(udp_rx_v6)),
-        udp_tx_v4,
-        udp_tx_v6,
-    };
-    (tun_tx, tun_rx, udp_channel_factory)
+
+    let udp = UdpChannelFactory::new(source_ip_v4, udp_v4, source_ip_v6, udp_v6);
+
+    (tun_tx, tun_rx, udp)
 }
 
 pub(crate) struct UdpChannelV4 {
