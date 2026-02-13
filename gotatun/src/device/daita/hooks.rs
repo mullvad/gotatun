@@ -142,7 +142,6 @@ impl DaitaHooks {
     /// Note:
     /// Should not be called on keepalive packets (0-length data packets).
     /// They do not contain an IP header, thus they would become malformed if padded.
-    /// Map an outgoing IP packet before WireGuard encapsulation, padding it to constant size.
     pub fn before_data_encapsulate(&mut self, packet: Packet<Ip>) -> Packet {
         let _ = self.event_tx.send(TriggerEvent::NormalSent);
         self.packet_count.inc(1);
