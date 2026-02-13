@@ -174,25 +174,6 @@ impl UdpChannelFactory {
     }
 }
 
-// TODO: docstring
-// TODO: name "new_udp_udp" is wack
-// TODO: use a builder?
-pub fn new_udp_udp_channel(
-    capacity: usize,
-    a_source_ip_v4: Ipv4Addr,
-    a_source_ip_v6: Ipv6Addr,
-    b_source_ip_v4: Ipv4Addr,
-    b_source_ip_v6: Ipv6Addr,
-) -> [UdpChannelFactory; 2] {
-    let [a_v4, b_v4] = UdpChannelV4::new_pair(capacity);
-    let [a_v6, b_v6] = UdpChannelV6::new_pair(capacity);
-
-    let a = UdpChannelFactory::new(a_source_ip_v4, a_v4, a_source_ip_v6, a_v6);
-    let b = UdpChannelFactory::new(b_source_ip_v4, b_v4, b_source_ip_v6, b_v6);
-
-    [a, b]
-}
-
 impl UdpTransportFactory for UdpChannelFactory {
     type SendV4 = UdpChannelTx;
     type SendV6 = UdpChannelTx;
