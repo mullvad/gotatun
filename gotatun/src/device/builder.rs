@@ -192,7 +192,7 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
 
         let rate_limiter = key_pair
             .as_ref()
-            .map(|(.., public_key)| Arc::new(RateLimiter::new(&public_key, HANDSHAKE_RATE_LIMIT)));
+            .map(|(.., public_key)| Arc::new(RateLimiter::new(public_key, HANDSHAKE_RATE_LIMIT)));
 
         let mut state = DeviceState {
             api: None,
