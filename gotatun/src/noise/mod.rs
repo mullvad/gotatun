@@ -381,6 +381,12 @@ impl Tunn {
 /// Try to pad `packet` with `0`s such that `packet.len().is_multiple_of(16)`.
 ///
 /// The padding is clamped to not exceed `tun_mtu`.
+///
+/// # Spec compliance
+/// The WireGuard whitepaper says that the "UDP packet" size must not exceed MTU after padding.
+/// A literal interpretation would imply keeping track of the route MTU for each peer.
+/// Using the MTU from the TUN device instead is a simpler, more reasonable, approach.
+/// `wireguard-go` uses this same method.
 fn pad_to_x16(mut packet: Packet, tun_mtu: &mut MtuWatcher) -> Packet {
     if packet.len().is_multiple_of(16) {
         return packet;
