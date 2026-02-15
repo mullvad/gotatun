@@ -30,6 +30,8 @@ use crate::{
     udp::channel::{UdpChannelFactory, UdpChannelV4, UdpChannelV6},
 };
 
+pub const TUN_MTU: u16 = 1360;
+
 pub async fn device_pair() -> (MockDevice, MockDevice, MockEavesdropper) {
     let (mock_tun_a, mock_app_tx_a, mock_app_rx_a) = mock_tun();
     let (mock_tun_b, mock_app_tx_b, mock_app_rx_b) = mock_tun();
@@ -156,14 +158,27 @@ pub fn packet(payload: impl AsRef<[u8]>) -> Packet<Ip> {
     packet.try_into_ip().unwrap()
 }
 
-/// Create an `FnMut` that returns a new unique packet every time it's called.
-pub fn packet_generator() -> impl FnMut() -> Packet<Ip> + Clone {
+/// Create an `Iterator` that returns one packet for every possible payload size (with respect to [`TUN_MTU`]).
+pub fn packets_of_every_size() -> impl ExactSizeIterator<Item = Packet<Ip>> + Clone {
+    let tun_mtu = usize::from(TUN_MTU);
+
+    // Include some randomness for good measure.
     let random: u64 = random();
-    let mut n = 0;
-    move || {
-        n += 1;
-        packet(format!("Hello there! {random} {n}"))
-    }
+
+    // Don't exceed max payload size
+    let max_payload = tun_mtu - Ipv4Header::LEN;
+
+    (0..max_payload + 1).map(move |len| {
+        // Generate some nonsense payload
+        let mut payload = vec![b'!'; tun_mtu];
+        let message = format!("{random} Hello there!");
+        let message = message.as_bytes();
+        let message_len = message.len().min(len);
+        payload[..message_len].copy_from_slice(&message[..message_len]);
+
+        // Wrap it in an IP packet
+        packet(&payload[..len])
+    })
 }
 
 pub struct MockDevice {
@@ -289,6 +304,6 @@ impl IpRecv for MockTun {
     }
 
     fn mtu(&self) -> MtuWatcher {
-        MtuWatcher::new(1360)
+        MtuWatcher::new(TUN_MTU)
     }
 }

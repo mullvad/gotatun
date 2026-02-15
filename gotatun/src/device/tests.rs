@@ -1,22 +1,20 @@
 use std::{future::ready, time::Duration};
 
-use futures::StreamExt;
+use futures::{StreamExt, future::pending};
 use mock::MockEavesdropper;
 use tokio::{join, select, time::sleep};
 use zerocopy::IntoBytes;
 
 pub mod mock;
 
-/// How many packets we send through the tunnel
-const N: usize = 100;
-
 /// Assert that the expected number of packets is sent.
-// We expect there to be N WgData packets, one handshake init, one handshake resp, and one keepalive.
+/// We expect there to be [`packet_count`] data packets, one handshake init,
+/// one handshake resp, and one keepalive.
 #[tokio::test]
 #[test_log::test]
 async fn number_of_packets() {
     test_device_pair(async |eve| {
-        let expected_count = N + 2 + 1;
+        let expected_count = packet_count() + 2 + 1;
         let ipv4_count = eve.ipv4().count().await;
         assert_eq!(ipv4_count, expected_count);
     })
@@ -86,9 +84,14 @@ async fn wg_data_length_is_x16() {
             .count()
             .await;
 
-        assert!(dbg!(wg_data_count) >= N);
+        assert!(dbg!(wg_data_count) >= packet_count());
     })
     .await
+}
+
+/// The number of packets we send through the tunnel
+fn packet_count() -> usize {
+    mock::packets_of_every_size().len()
 }
 
 /// Helper method to test that packets can be sent from one [`Device`] to another.
@@ -106,32 +109,33 @@ async fn test_device_pair(eavesdrop: impl AsyncFnOnce(MockEavesdropper) + Send) 
 
     // Create a future to drive alice and bob.
     let drive_connection = async move {
-        let mut next_packet_to_send = mock::packet_generator();
-        let mut next_packet_to_recv = next_packet_to_send.clone();
+        let packets_to_send = mock::packets_of_every_size();
+        let packets_to_recv = packets_to_send.clone();
 
         // Send a bunch of packets from alice to bob.
-        let spam_packets = async {
-            loop {
-                alice.app_tx.send(next_packet_to_send()).await;
+        let send_packets = async {
+            for packet in packets_to_send {
+                alice.app_tx.send(packet).await;
             }
+            pending().await
         };
 
-        // Receive exactly N packets to bob from alice.
-        let wait_for_n_packets = async {
-            for _ in 0..N {
+        // Receive expected packets to bob from alice.
+        let wait_for_packets = async {
+            for expected_packet in packets_to_recv {
                 let p = bob.app_rx.recv().await;
-                assert_eq!(p.as_bytes(), next_packet_to_recv().as_bytes());
+                assert_eq!(p.as_bytes(), expected_packet.as_bytes());
             }
         };
 
         select! {
-            _ = wait_for_n_packets => {},
-            _ = spam_packets => unreachable!(),
+            _ = wait_for_packets => {},
+            _ = send_packets => unreachable!(),
             _ = alice.app_rx.recv() => panic!("no data is sent from bob to alice"),
             _ = sleep(Duration::from_secs(1)) => panic!("timeout"),
         }
 
-        // Shut down alice and bob after `wait_for_n_packets`
+        // Shut down alice and bob after `wait_for_packets`
         drop((alice, bob));
     };
 
