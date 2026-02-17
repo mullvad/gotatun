@@ -279,16 +279,14 @@ impl Tunn {
             .sessions
             .iter()
             .enumerate()
-            .find(|(_, s)| {
-                s.as_ref()
-                    .is_some_and(|s| s.receiving_index.value() == r_idx)
-            })
+            .filter_map(|(i, s)| s.as_ref().map(|s| (i, s)))
+            .find(|(_, s)| s.receiving_index.value() == r_idx)
             .ok_or_else(|| {
                 log::trace!("No current session available: {r_idx}");
                 WireGuardError::NoCurrentSession
             })?;
 
-        let decapsulated_packet = session.as_ref().unwrap().receive_packet_data(packet)?;
+        let decapsulated_packet = session.receive_packet_data(packet)?;
 
         self.set_current_session(slot);
 
