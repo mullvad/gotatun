@@ -114,8 +114,8 @@ pub fn new_udp_tun_channel(
     source_ip_v6: Ipv6Addr,
     tun_link_mtu: MtuWatcher,
 ) -> (TunChannelTx, TunChannelRx, UdpChannelFactory) {
-    let [udp_v4, tun_v4] = UdpChannelV4::new_pair(capacity);
-    let [udp_v6, tun_v6] = UdpChannelV6::new_pair(capacity);
+    let (udp_v4, tun_v4) = UdpChannelV4::new_pair(capacity);
+    let (udp_v6, tun_v6) = UdpChannelV6::new_pair(capacity);
 
     let tun_tx = TunChannelTx {
         tun_tx_v4: tun_v4.tx,
@@ -149,10 +149,10 @@ pub(crate) struct UdpChannelV6 {
     [UdpChannelV6];
 )]
 impl UdpChannel {
-    pub(crate) fn new_pair(capacity: usize) -> [Self; 2] {
+    pub(crate) fn new_pair(capacity: usize) -> (Self, Self) {
         let (a_tx, b_rx) = mpsc::channel(capacity);
         let (b_tx, a_rx) = mpsc::channel(capacity);
-        [Self { tx: a_tx, rx: a_rx }, Self { tx: b_tx, rx: b_rx }]
+        (Self { tx: a_tx, rx: a_rx }, Self { tx: b_tx, rx: b_rx })
     }
 }
 
