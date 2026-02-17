@@ -7,6 +7,7 @@
 
 use crate::{
     noise::errors::WireGuardError,
+    noise::index_table::Index,
     packet::{Packet, WgData, WgDataHeader, WgKind},
 };
 use bytes::{Buf, BytesMut};
@@ -16,7 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use zerocopy::FromBytes;
 
 pub struct Session {
-    pub(crate) receiving_index: u32,
+    pub(crate) receiving_index: Index,
     sending_index: u32,
     receiver: LessSafeKey,
     sender: LessSafeKey,
@@ -156,14 +157,14 @@ impl ReceivingKeyCounterValidator {
 
 impl Session {
     pub(super) fn new(
-        local_index: u32,
-        peer_index: u32,
+        local_index: Index,
+        sending_index: u32,
         receiving_key: [u8; 32],
         sending_key: [u8; 32],
     ) -> Session {
         Session {
             receiving_index: local_index,
-            sending_index: peer_index,
+            sending_index,
             receiver: LessSafeKey::new(
                 UnboundKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
             ),
@@ -171,10 +172,6 @@ impl Session {
             sending_key_counter: AtomicUsize::new(0),
             receiving_key_counter: Mutex::new(Default::default()),
         }
-    }
-
-    pub(super) fn local_index(&self) -> usize {
-        self.receiving_index as usize
     }
 
     /// Returns true if receiving counter is good to use
@@ -241,7 +238,7 @@ impl Session {
         &self,
         mut packet: Packet<WgData>,
     ) -> Result<Packet, WireGuardError> {
-        if packet.header.receiver_idx != self.receiving_index {
+        if packet.header.receiver_idx.get() != self.receiving_index.value() {
             return Err(WireGuardError::WrongIndex);
         }
 

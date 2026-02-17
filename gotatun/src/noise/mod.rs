@@ -7,6 +7,7 @@
 
 pub mod errors;
 pub mod handshake;
+pub mod index_table;
 pub mod rate_limiter;
 
 mod session;
@@ -16,6 +17,7 @@ use zerocopy::IntoBytes;
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
+use crate::noise::index_table::IndexTable;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
 use crate::packet::{Packet, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind};
@@ -47,10 +49,12 @@ impl From<WireGuardError> for TunnResult {
 pub struct Tunn {
     /// The handshake currently in progress.
     handshake: handshake::Handshake,
-    /// The [`N_SESSIONS`] most recent sessions, index is session id modulo [`N_SESSIONS`].
+    /// The [`N_SESSIONS`] most recent sessions.
     sessions: [Option<session::Session>; N_SESSIONS],
-    /// Index of most recently used session.
+    /// Index of the most recently used session.
     current: usize,
+    /// Counter for slot selection when inserting new sessions.
+    session_counter: u8,
     /// Queue to store blocked packets.
     packet_queue: VecDeque<Packet>,
 
@@ -72,7 +76,7 @@ impl Tunn {
         peer_static_public: x25519::PublicKey,
         preshared_key: Option<[u8; 32]>,
         persistent_keepalive: Option<u16>,
-        index: u32,
+        index_table: IndexTable,
         rate_limiter: Arc<RateLimiter>,
     ) -> Self {
         let static_public = x25519::PublicKey::from(&static_private);
@@ -82,11 +86,12 @@ impl Tunn {
                 static_private,
                 static_public,
                 peer_static_public,
-                index << 8,
+                index_table,
                 preshared_key,
             ),
             sessions: Default::default(),
             current: Default::default(),
+            session_counter: Default::default(),
             tx_bytes: Default::default(),
             rx_bytes: Default::default(),
 
@@ -167,15 +172,15 @@ impl Tunn {
 
         let (packet, session) = self.handshake.receive_handshake_initialization(p)?;
 
-        // Store new session in ring buffer
-        let index = session.local_index();
-        self.sessions[index % N_SESSIONS] = Some(session);
+        // Store new session in next slot
+        let slot = self.next_session_slot();
+        self.put_session(slot, session);
 
         self.timer_tick(TimerName::TimeLastPacketReceived);
         self.timer_tick(TimerName::TimeLastPacketSent);
-        self.timer_tick_session_established(false, index); // New session established, we are not the initiator
+        self.timer_tick_session_established(false, slot); // New session established, we are not the initiator
 
-        log::debug!("Sending handshake_response: {index}");
+        log::debug!("Sending handshake_response: {slot}");
 
         Ok(TunnResult::WriteToNetwork(packet.into()))
     }
@@ -196,14 +201,13 @@ impl Tunn {
         p.truncate(0);
 
         let keepalive_packet = session.format_packet_data(p);
-        // Store new session in ring buffer
-        let l_idx = session.local_index();
-        let index = l_idx % N_SESSIONS;
-        self.sessions[index] = Some(session);
+        // Store new session in next slot
+        let slot = self.next_session_slot();
+        self.put_session(slot, session);
 
         self.timer_tick(TimerName::TimeLastPacketReceived);
-        self.timer_tick_session_established(true, index); // New session established, we are the initiator
-        self.set_current_session(l_idx);
+        self.timer_tick_session_established(true, slot); // New session established, we are the initiator
+        self.set_current_session(slot);
 
         log::debug!("Sending keepalive");
 
@@ -222,20 +226,35 @@ impl Tunn {
         Ok(TunnResult::Done)
     }
 
-    /// Update the index of the currently used session, if needed.
-    fn set_current_session(&mut self, new_idx: usize) {
-        let cur_idx = self.current;
-        if cur_idx == new_idx {
+    /// Update the slot index of the currently used session, if needed.
+    fn set_current_session(&mut self, new_slot: usize) {
+        let cur_slot = self.current;
+        if cur_slot == new_slot {
             // There is nothing to do, already using this session, this is the common case
             return;
         }
-        if self.sessions[cur_idx % N_SESSIONS].is_none()
-            || self.timers.session_timers[new_idx % N_SESSIONS]
-                >= self.timers.session_timers[cur_idx % N_SESSIONS]
+        if self.sessions[cur_slot % N_SESSIONS].is_none()
+            || self.timers.session_timers[new_slot % N_SESSIONS]
+                >= self.timers.session_timers[cur_slot % N_SESSIONS]
         {
-            self.current = new_idx;
-            log::debug!("New session: {new_idx}");
+            self.current = new_slot;
+            log::debug!("New session slot: {new_slot}");
         }
+    }
+
+    /// Get the next round-robin session slot index.
+    fn next_session_slot(&mut self) -> usize {
+        let slot = (self.session_counter as usize) % N_SESSIONS;
+        self.session_counter = self.session_counter.wrapping_add(1);
+        slot
+    }
+
+    /// Place a session into the given slot.
+    ///
+    /// If the slot was occupied, the old session (and its [`Index`](index_table::Index)) is dropped,
+    /// which automatically frees the index from the shared table.
+    fn put_session(&mut self, slot: usize, session: session::Session) {
+        self.sessions[slot % N_SESSIONS] = Some(session);
     }
 
     /// Decrypt a data packet, and return a [`TunnResult::WriteToTunnel`] (`Ipv4` or `Ipv6`) if successful.
@@ -252,21 +271,28 @@ impl Tunn {
         &mut self,
         packet: Packet<WgData>,
     ) -> Result<Packet, WireGuardError> {
-        let r_idx = packet.header.receiver_idx.get() as usize;
-        let idx = r_idx % N_SESSIONS;
+        let r_idx = packet.header.receiver_idx.get();
 
-        // Get the (probably) right session
-        let decapsulated_packet = {
-            let session = self.sessions[idx].as_ref();
-            let session = session.ok_or_else(|| {
-                //log::trace!(message = "No current session available", remote_idx = r_idx);
+        // Search for the matching session.
+        // Since `N_SESSIONS` is small (8), this is cheap.
+        let slot = self
+            .sessions
+            .iter()
+            .position(|s| {
+                s.as_ref()
+                    .is_some_and(|s| s.receiving_index.value() == r_idx)
+            })
+            .ok_or_else(|| {
                 log::trace!("No current session available: {r_idx}");
                 WireGuardError::NoCurrentSession
             })?;
-            session.receive_packet_data(packet)?
-        };
 
-        self.set_current_session(r_idx);
+        let decapsulated_packet = self.sessions[slot]
+            .as_ref()
+            .unwrap()
+            .receive_packet_data(packet)?;
+
+        self.set_current_session(slot);
 
         self.timer_tick(TimerName::TimeLastPacketReceived);
 
@@ -329,7 +355,7 @@ impl Tunn {
         let mut total_weight = 0.0;
 
         for i in 0..N_SESSIONS {
-            if let Some(ref session) = self.sessions[(session_idx.wrapping_sub(i)) % N_SESSIONS] {
+            if let Some(ref session) = self.sessions[session_idx.wrapping_sub(i) % N_SESSIONS] {
                 let (expected, received) = session.current_packet_cnt();
 
                 let loss = if expected == 0 {
@@ -380,16 +406,14 @@ mod tests {
     use bytes::BytesMut;
     #[cfg(feature = "mock_instant")]
     use mock_instant::thread_local::MockClock;
-    use rand_core::{OsRng, RngCore};
+    use rand_core::OsRng;
 
     fn create_two_tuns() -> (Tunn, Tunn) {
         let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
         let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
-        let my_idx = OsRng.next_u32();
 
         let their_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
         let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
-        let their_idx = OsRng.next_u32();
 
         let rate_limiter = Arc::new(RateLimiter::new(&my_public_key, HANDSHAKE_RATE_LIMIT));
         let my_tun = Tunn::new(
@@ -397,7 +421,7 @@ mod tests {
             their_public_key,
             None,
             None,
-            my_idx,
+            IndexTable::default(),
             rate_limiter,
         );
 
@@ -407,7 +431,7 @@ mod tests {
             my_public_key,
             None,
             None,
-            their_idx,
+            IndexTable::default(),
             rate_limiter,
         );
 

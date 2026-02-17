@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::device::Error;
+use crate::noise::index_table::IndexTable;
 #[cfg(feature = "tun")]
 use crate::tun::tun_async_device::TunDevice;
 use crate::{
@@ -182,9 +183,9 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             tun_rx: Arc::new(Mutex::new(self.tun_rx)),
             fwmark,
             key_pair: Default::default(),
-            next_index: Default::default(),
+            index_table: IndexTable::default(),
             peers: Default::default(),
-            peers_by_idx: Default::default(),
+            peers_by_idx: parking_lot::Mutex::new(Default::default()),
             peers_by_ip: AllowedIps::new(),
             rate_limiter: None,
             port: self.port,
@@ -193,8 +194,7 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
 
         let has_peers = !self.peers.is_empty();
         for peer in self.peers {
-            let index = state.next_index();
-            state.add_peer(peer, index);
+            state.add_peer(peer);
         }
 
         let inner = Arc::new(RwLock::new(state));
