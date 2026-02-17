@@ -181,8 +181,7 @@ impl<T: DeviceTransports> DeviceWrite<'_, T> {
         if self.device.peers.contains_key(&peer.public_key) {
             return false;
         }
-        let index = self.device.next_index();
-        self.device.add_peer(peer, index);
+        self.device.add_peer(peer);
         true
     }
 
@@ -201,8 +200,7 @@ impl<T: DeviceTransports> DeviceWrite<'_, T> {
         }
 
         for peer in peers {
-            let index = self.device.next_index();
-            self.device.add_peer(peer, index);
+            self.device.add_peer(peer);
         }
         true
     }
