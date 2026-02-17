@@ -11,7 +11,6 @@ mod builder;
 pub mod configure;
 #[cfg(feature = "daita")]
 pub mod daita;
-mod index_lfsr;
 #[cfg(test)]
 mod integration_tests;
 mod peer;
@@ -21,8 +20,8 @@ mod tests;
 mod transports;
 pub mod uapi;
 
+use crate::noise::index_table::IndexTable;
 use builder::Nul;
-use index_lfsr::IndexLfsr;
 use std::collections::HashMap;
 use std::io::{self};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
@@ -115,8 +114,8 @@ pub(crate) struct DeviceState<T: DeviceTransports> {
 
     peers: HashMap<x25519::PublicKey, Arc<Mutex<PeerState>>>,
     peers_by_ip: AllowedIps<Arc<Mutex<PeerState>>>,
-    peers_by_idx: HashMap<u32, Arc<Mutex<PeerState>>>,
-    next_index: IndexLfsr,
+    peers_by_idx: parking_lot::Mutex<HashMap<u32, Arc<Mutex<PeerState>>>>,
+    index_table: IndexTable,
 
     rate_limiter: Option<Arc<RateLimiter>>,
 
@@ -301,17 +300,12 @@ impl BitOrAssign for Reconfigure {
 }
 
 impl<T: DeviceTransports> DeviceState<T> {
-    fn next_index(&mut self) -> u32 {
-        self.next_index.next()
-    }
-
     async fn remove_peer(&mut self, pub_key: &x25519::PublicKey) -> Option<Arc<Mutex<PeerState>>> {
         if let Some(peer) = self.peers.remove(pub_key) {
-            // Found a peer to remove, now purge all references to it:
-            {
-                let p = peer.lock().await;
-                self.peers_by_idx.remove(&p.index());
-            }
+            // Remove all session index entries that point to this peer
+            self.peers_by_idx
+                .lock()
+                .retain(|_idx, p| !Arc::ptr_eq(&peer, p));
             self.peers_by_ip
                 .remove(&|p: &Arc<Mutex<PeerState>>| Arc::ptr_eq(&peer, p));
 
@@ -323,13 +317,12 @@ impl<T: DeviceTransports> DeviceState<T> {
         }
     }
 
-    fn add_peer(&mut self, peer_builder: Peer, index: u32) {
+    fn add_peer(&mut self, peer_builder: Peer) {
         let pub_key = peer_builder.public_key;
         let allowed_ips = peer_builder.allowed_ips.clone();
-        let peer = self.create_peer(peer_builder, index);
+        let peer = self.create_peer(peer_builder);
         let peer = Arc::new(Mutex::new(peer));
 
-        self.peers_by_idx.insert(index, Arc::clone(&peer));
         self.peers.insert(pub_key, Arc::clone(&peer));
 
         for allowed_ip in allowed_ips {
@@ -341,8 +334,7 @@ impl<T: DeviceTransports> DeviceState<T> {
         log::info!("Peer added");
     }
 
-    fn create_peer(&mut self, peer_builder: Peer, index: u32) -> PeerState {
-        // Update an existing peer or add peer
+    fn create_peer(&mut self, peer_builder: Peer) -> PeerState {
         let device_key_pair = self
             .key_pair
             .as_ref()
@@ -358,13 +350,12 @@ impl<T: DeviceTransports> DeviceState<T> {
             peer_builder.public_key,
             peer_builder.preshared_key,
             peer_builder.keepalive,
-            index,
+            self.index_table.clone(),
             rate_limiter,
         );
 
         PeerState::new(
             tunn,
-            index,
             peer_builder.endpoint,
             peer_builder.allowed_ips.as_slice(),
             peer_builder.preshared_key,
@@ -461,10 +452,24 @@ impl<T: DeviceTransports> DeviceState<T> {
     fn clear_peers(&mut self) -> usize {
         let n = self.peers.len();
         self.peers.clear();
-        self.peers_by_idx.clear();
+        self.peers_by_idx.lock().clear();
         self.peers_by_ip.clear();
         // TODO: tear down connection?
         n
+    }
+
+    /// If `packet` is a handshake init or response, register its `sender_idx` in `peers_by_idx`.
+    fn register_handshake_idx(
+        peers_by_idx: &parking_lot::Mutex<HashMap<u32, Arc<Mutex<PeerState>>>>,
+        packet: &WgKind,
+        peer: &Arc<Mutex<PeerState>>,
+    ) {
+        let sender_idx = match packet {
+            WgKind::HandshakeInit(p) => p.sender_idx.get(),
+            WgKind::HandshakeResp(p) => p.sender_idx.get(),
+            _ => return,
+        };
+        peers_by_idx.lock().insert(sender_idx, Arc::clone(peer));
     }
 
     async fn handle_timers(device: Weak<RwLock<Self>>, udp4: impl UdpSend, udp6: impl UdpSend) {
@@ -488,6 +493,9 @@ impl<T: DeviceTransports> DeviceState<T> {
 
                 match p.update_timers() {
                     Ok(Some(packet)) => {
+                        // Register sender_idx from outgoing handshake packets
+                        Self::register_handshake_idx(&device.peers_by_idx, &packet, peer);
+
                         drop(p);
 
                         // NOTE: we don't bother with triggering TunnelRecv DAITA events here.
@@ -548,26 +556,38 @@ impl<T: DeviceTransports> DeviceState<T> {
 
             let device_guard = device.read().await;
             let peers = &device_guard.peers;
-            let peers_by_idx = &device_guard.peers_by_idx;
             let peer = match &parsed_packet {
                 WgKind::HandshakeInit(p) => {
                     let peer = parse_handshake_anon(&private_key, &public_key, p)
                         .ok()
-                        .and_then(|hh| peers.get(&x25519::PublicKey::from(hh.peer_static_public)));
+                        .and_then(|hh| peers.get(&x25519::PublicKey::from(hh.peer_static_public)))
+                        .cloned();
 
-                    if let Some(peer) = peer {
+                    if let Some(peer) = &peer {
                         // Remember peer endpoint
                         peer.lock().await.set_endpoint(addr);
                     }
 
                     peer
                 }
-                WgKind::HandshakeResp(p) => peers_by_idx.get(&(p.receiver_idx.get() >> 8)),
-                WgKind::CookieReply(p) => peers_by_idx.get(&(p.receiver_idx.get() >> 8)),
-                WgKind::Data(p) => peers_by_idx.get(&(p.header.receiver_idx.get() >> 8)),
+                WgKind::HandshakeResp(p) => device_guard
+                    .peers_by_idx
+                    .lock()
+                    .get(&p.receiver_idx.get())
+                    .cloned(),
+                WgKind::CookieReply(p) => device_guard
+                    .peers_by_idx
+                    .lock()
+                    .get(&p.receiver_idx.get())
+                    .cloned(),
+                WgKind::Data(p) => device_guard
+                    .peers_by_idx
+                    .lock()
+                    .get(&p.header.receiver_idx.get())
+                    .cloned(),
             };
-            let Some(peer) = peer else { continue };
-            let mut peer = peer.lock().await;
+            let Some(peer_arc) = peer else { continue };
+            let mut peer = peer_arc.lock().await;
 
             #[cfg(feature = "daita")]
             let PeerState { tunnel, daita, .. } = &mut *peer;
@@ -586,6 +606,9 @@ impl<T: DeviceTransports> DeviceState<T> {
                 TunnResult::Err(_) => continue,
                 // Flush pending queue
                 TunnResult::WriteToNetwork(packet) => {
+                    // Register sender_idx from outgoing handshake packets
+                    Self::register_handshake_idx(&device_guard.peers_by_idx, &packet, &peer_arc);
+
                     // TODO: does this end up with the packets being out-of-order?
                     let packets =
                         std::iter::once(packet).chain(tunnel.get_queued_packets(&mut tun_mtu));
@@ -679,25 +702,23 @@ impl<T: DeviceTransports> DeviceState<T> {
                     continue;
                 };
 
-                let Some(device) = device.upgrade() else {
+                let Some(device_arc) = device.upgrade() else {
                     return;
                 };
 
-                let peer = {
-                    let device = device.read().await;
-                    let Some(peer) = device.peers_by_ip.find(dst_addr).cloned() else {
-                        if cfg!(debug_assertions) {
-                            log::trace!("Dropping packet with no routable peer");
-                        }
+                let device_guard = device_arc.read().await;
 
-                        // Drop packet if no peer has allowed IPs for destination
-                        drop(packet);
-                        continue;
-                    };
-                    peer
+                let Some(peer_arc) = device_guard.peers_by_ip.find(dst_addr).cloned() else {
+                    if cfg!(debug_assertions) {
+                        log::trace!("Dropping packet with no routable peer");
+                    }
+
+                    // Drop packet if no peer has allowed IPs for destination
+                    drop(packet);
+                    continue;
                 };
 
-                let mut peer = peer.lock().await;
+                let mut peer = peer_arc.lock().await;
                 let Some(peer_addr) = peer.endpoint().addr else {
                     // TODO: Implement the following error handling from section 3 of the
                     // whitepaper: If [peer_addr] matches no peer, it is dropped, and the sender is
@@ -724,6 +745,9 @@ impl<T: DeviceTransports> DeviceState<T> {
                     continue;
                 };
 
+                // Register sender_idx from outgoing handshake packets
+                Self::register_handshake_idx(&device_guard.peers_by_idx, &packet, &peer_arc);
+
                 #[cfg(feature = "daita")]
                 let packet = match daita {
                     None => packet.into(),
@@ -736,6 +760,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                 let packet = packet.into();
 
                 drop(peer); // release lock
+                drop(device_guard);
 
                 let result = match peer_addr {
                     SocketAddr::V4(..) => udp4.send_to(packet, peer_addr).await,
