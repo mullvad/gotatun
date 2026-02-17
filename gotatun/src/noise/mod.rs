@@ -274,11 +274,14 @@ impl Tunn {
         let r_idx = packet.header.receiver_idx.get();
 
         // Search for the matching session.
-        // Since `N_SESSIONS` is small (8), this is cheap.
+        // Is this ever not `self.current`?
         let (slot, session) = self
             .sessions
             .iter()
             .enumerate()
+            .cycle()
+            .skip(self.current)
+            .take(N_SESSIONS)
             .filter_map(|(i, s)| s.as_ref().map(|s| (i, s)))
             .find(|(_, s)| s.receiving_index.value() == r_idx)
             .ok_or_else(|| {
