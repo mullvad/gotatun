@@ -409,6 +409,13 @@ impl Tunn {
         }
     }
 
+    /// Return the receiving indices of all active sessions.
+    pub fn active_receiving_indices(&self) -> impl Iterator<Item = u32> + '_ {
+        self.sessions
+            .iter()
+            .filter_map(|s| s.as_ref().map(|s| s.receiving_index.value()))
+    }
+
     /// Return stats from the tunnel:
     /// * Time since last handshake in seconds
     /// * Data bytes sent
