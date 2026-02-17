@@ -185,15 +185,6 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
         #[cfg(not(target_os = "linux"))]
         let fwmark = None;
 
-        let key_pair = self.private_key.map(|private_key| {
-            let public_key = PublicKey::from(&private_key);
-            (private_key, public_key)
-        });
-
-        let rate_limiter = key_pair
-            .as_ref()
-            .map(|(.., public_key)| Arc::new(RateLimiter::new(public_key, HANDSHAKE_RATE_LIMIT)));
-
         let mut state = DeviceState {
             api: None,
             udp_factory: self.udp,
@@ -201,15 +192,19 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             tun_rx_mtu: self.tun_rx.mtu(),
             tun_rx: Arc::new(Mutex::new(self.tun_rx)),
             fwmark,
-            key_pair,
+            key_pair: None,
             next_index: Default::default(),
             peers: Default::default(),
             peers_by_idx: Default::default(),
             peers_by_ip: AllowedIps::new(),
-            rate_limiter,
+            rate_limiter: None,
             port: self.port,
             connection: None,
         };
+
+        if let Some(private_key) = self.private_key {
+            let _ = state.set_key(private_key);
+        }
 
         let has_peers = !self.peers.is_empty();
         for peer in self.peers {
