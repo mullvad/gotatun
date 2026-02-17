@@ -494,6 +494,12 @@ impl<T: DeviceTransports> DeviceState<T> {
                     None => continue,
                 };
 
+                // Remove stale session indices.
+                device.peers_by_idx.lock().retain(|idx, map_peer| {
+                    !Arc::ptr_eq(peer, map_peer)
+                        || p.tunnel.active_receiving_indices().any(|i| i == *idx)
+                });
+
                 match p.update_timers() {
                     Ok(Some(packet)) => {
                         // Register sender_idx from outgoing handshake packets
