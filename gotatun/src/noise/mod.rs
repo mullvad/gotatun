@@ -275,10 +275,11 @@ impl Tunn {
 
         // Search for the matching session.
         // Since `N_SESSIONS` is small (8), this is cheap.
-        let slot = self
+        let (slot, session) = self
             .sessions
             .iter()
-            .position(|s| {
+            .enumerate()
+            .find(|(_, s)| {
                 s.as_ref()
                     .is_some_and(|s| s.receiving_index.value() == r_idx)
             })
@@ -287,10 +288,7 @@ impl Tunn {
                 WireGuardError::NoCurrentSession
             })?;
 
-        let decapsulated_packet = self.sessions[slot]
-            .as_ref()
-            .unwrap()
-            .receive_packet_data(packet)?;
+        let decapsulated_packet = session.as_ref().unwrap().receive_packet_data(packet)?;
 
         self.set_current_session(slot);
 
