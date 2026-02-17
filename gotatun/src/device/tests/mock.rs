@@ -298,8 +298,9 @@ impl IpRecv for MockTun {
             .try_lock()
             .expect("may not call `recv` concurrently")
             .recv()
-            .await;
-        Ok(packet.into_iter())
+            .await
+            .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "channel closed"))?;
+        Ok(std::iter::once(packet))
     }
 
     fn mtu(&self) -> MtuWatcher {
