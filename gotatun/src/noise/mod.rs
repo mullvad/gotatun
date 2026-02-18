@@ -245,7 +245,7 @@ impl Tunn {
 
     /// Get the next round-robin session slot index.
     fn next_session_slot(&mut self) -> usize {
-        let slot = (self.session_counter as usize) % N_SESSIONS;
+        let slot = self.session_counter % N_SESSIONS;
         self.session_counter = self.session_counter.wrapping_add(1);
         slot
     }
