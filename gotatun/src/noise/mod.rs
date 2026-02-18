@@ -54,7 +54,8 @@ pub struct Tunn {
     /// Index of the most recently used session.
     current: usize,
     /// Counter for slot selection when inserting new sessions.
-    session_counter: u8,
+    /// Used to find the next index in `sessions` with `session_counter % N_SESSIONS`.
+    session_counter: usize,
     /// Queue to store blocked packets.
     packet_queue: VecDeque<Packet>,
 
@@ -427,7 +428,7 @@ mod tests {
             their_public_key,
             None,
             None,
-            IndexTable::default(),
+            IndexTable::from_os_rng(),
             rate_limiter,
         );
 
@@ -437,7 +438,7 @@ mod tests {
             my_public_key,
             None,
             None,
-            IndexTable::default(),
+            IndexTable::from_os_rng(),
             rate_limiter,
         );
 

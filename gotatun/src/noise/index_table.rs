@@ -4,8 +4,8 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use rand::rngs::StdRng;
-use rand::{RngCore, SeedableRng};
+use rand::rngs::{OsRng, StdRng};
+use rand::{RngCore, SeedableRng, TryRngCore};
 
 /// A table of unique session IDs.
 ///
@@ -65,18 +65,25 @@ impl IndexTable {
         }
     }
 
+    /// Create a new [`IndexTable`] using the given seed.
+    pub fn from_seed(seed: [u8; 32]) -> Self {
+        IndexTable(Arc::new(Mutex::new((
+            StdRng::from_seed(seed),
+            HashSet::new(),
+        ))))
+    }
+
+    /// Create a new [`IndexTable`] seeded using [`OsRng`].
+    pub fn from_os_rng() -> Self {
+        let mut seed = [0u8; 32];
+        // `StdRng::from_os_rng` also unwraps, so we can trust that this won't fail
+        OsRng.try_fill_bytes(&mut seed).unwrap();
+        Self::from_seed(seed)
+    }
+
     /// Remove an index from the table, making it available for reuse.
     fn free_index(&self, index: u32) {
         let mut g = self.0.lock().unwrap();
         g.1.remove(&index);
-    }
-}
-
-impl Default for IndexTable {
-    fn default() -> Self {
-        IndexTable(Arc::new(Mutex::new((
-            StdRng::from_os_rng(),
-            HashSet::new(),
-        ))))
     }
 }

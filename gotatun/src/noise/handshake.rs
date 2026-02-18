@@ -573,7 +573,7 @@ impl Handshake {
                 let HandshakeState::InitSent(state) =
                     std::mem::replace(&mut self.state, HandshakeState::None)
                 else {
-                    unreachable!()
+                    unreachable!("self.state was HandshakeState::InitSent")
                 };
                 state
             }
@@ -583,7 +583,7 @@ impl Handshake {
                 let HandshakeState::InitSent(state) =
                     std::mem::replace(&mut self.previous, HandshakeState::None)
                 else {
-                    unreachable!()
+                    unreachable!("self.previous was HandshakeState::InitSent")
                 };
                 state
             }
