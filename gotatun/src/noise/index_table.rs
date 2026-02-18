@@ -82,9 +82,12 @@ where
     }
 }
 
-impl IndexTable<StdRng> {
-    /// Create a new [`IndexTable`] seeded using [`OsRng`].
+impl<Rng> IndexTable<Rng>
+where
+    Rng: SeedableRng + RngCore,
+{
+    /// Create a new [`IndexTable`] seeded using `OsRng`.
     pub fn from_os_rng() -> Self {
-        Self::from_rng(StdRng::try_from_os_rng().unwrap())
+        Self::from_rng(Rng::from_os_rng())
     }
 }
