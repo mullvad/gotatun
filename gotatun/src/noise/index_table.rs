@@ -4,20 +4,20 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use rand::rngs::{OsRng, StdRng};
-use rand::{RngCore, SeedableRng, TryRngCore};
+use rand::rngs::StdRng;
+use rand::{RngCore, SeedableRng};
 
 /// A table of unique session IDs.
 ///
 /// All peers share a single `IndexTable` to ensure no two sessions use the same index.
 /// Indices are random `u32`s and freed automatically when the returned [`Index`] is dropped.
 #[derive(Clone)]
-pub struct IndexTable(Arc<Mutex<(StdRng, HashSet<u32>)>>);
+pub struct IndexTable<Rng = StdRng>(Arc<Mutex<(Rng, HashSet<u32>)>>);
 
 /// An allocated session index that is automatically freed from its [`IndexTable`] on drop.
-pub struct Index {
+pub struct Index<Rng = StdRng> {
     value: u32,
-    table: IndexTable,
+    table: IndexTable<Rng>,
 }
 
 impl Index {
@@ -27,7 +27,7 @@ impl Index {
     }
 }
 
-impl Drop for Index {
+impl<Rng> Drop for Index<Rng> {
     fn drop(&mut self) {
         self.table.free_index(self.value);
     }
@@ -45,11 +45,22 @@ impl std::fmt::Display for Index {
     }
 }
 
-impl IndexTable {
+impl<Rng> IndexTable<Rng> {
+    /// Remove an index from the table, making it available for reuse.
+    fn free_index(&self, index: u32) {
+        let mut g = self.0.lock().unwrap();
+        g.1.remove(&index);
+    }
+}
+
+impl<Rng> IndexTable<Rng>
+where
+    Rng: RngCore,
+{
     /// Generate a random `u32` not already in the table.
     ///
     /// The returned [`Index`] keeps the entry reserved; dropping it frees the slot.
-    pub fn new_index(&self) -> Index {
+    pub fn new_index(&self) -> Index<Rng> {
         let mut g = self.0.lock().unwrap();
         // Find a free index by guessing. See the rationale here:
         // https://github.com/torvalds/linux/blob/e81dd54f62c753dd423d1a9b62481a1c599fb975/drivers/net/wireguard/peerlookup.c#L95-L117
@@ -59,31 +70,21 @@ impl IndexTable {
             if g.1.insert(idx) {
                 return Index {
                     value: idx,
-                    table: self.clone(),
+                    table: Self(Arc::clone(&self.0)),
                 };
             }
         }
     }
 
-    /// Create a new [`IndexTable`] using the given seed.
-    pub fn from_seed(seed: [u8; 32]) -> Self {
-        IndexTable(Arc::new(Mutex::new((
-            StdRng::from_seed(seed),
-            HashSet::new(),
-        ))))
+    /// Create a new [`IndexTable`] using the given [rng]().
+    pub fn from_rng(rng: Rng) -> Self {
+        IndexTable(Arc::new(Mutex::new((rng, HashSet::new()))))
     }
+}
 
+impl IndexTable<StdRng> {
     /// Create a new [`IndexTable`] seeded using [`OsRng`].
     pub fn from_os_rng() -> Self {
-        let mut seed = [0u8; 32];
-        // `StdRng::from_os_rng` also unwraps, so we can trust that this won't fail
-        OsRng.try_fill_bytes(&mut seed).unwrap();
-        Self::from_seed(seed)
-    }
-
-    /// Remove an index from the table, making it available for reuse.
-    fn free_index(&self, index: u32) {
-        let mut g = self.0.lock().unwrap();
-        g.1.remove(&index);
+        Self::from_rng(StdRng::try_from_os_rng().unwrap())
     }
 }
