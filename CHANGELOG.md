@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix excessive rekey attempts.
 - Fix potential panic due to clocks not being truly monotonic.
 
+### Security
+- Randomize all session identifiers. This prevents a passive observer from inferring the number of
+  peers and relating session IDs to some specific peer.
+
 
 ## [0.2.0] - 2026-01-13
 ### Changed
