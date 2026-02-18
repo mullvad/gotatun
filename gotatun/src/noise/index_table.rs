@@ -76,7 +76,7 @@ where
         }
     }
 
-    /// Create a new [`IndexTable`] using the given [rng]().
+    /// Create a new [`IndexTable`] using the given [`RngCore`].
     pub fn from_rng(rng: Rng) -> Self {
         IndexTable(Arc::new(Mutex::new((rng, HashSet::new()))))
     }
