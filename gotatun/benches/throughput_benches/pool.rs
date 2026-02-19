@@ -132,7 +132,7 @@ pub fn bench_pool_write(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("pool_write");
     for &packet_size in &[64usize, 512, 1500, 4096] {
-        let data = vec![0u8; packet_size];
+        let data = black_box(vec![0u8; packet_size]);
         group.throughput(criterion::Throughput::Bytes(
             (CAPACITY * packet_size) as u64,
         ));
