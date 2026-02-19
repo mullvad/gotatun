@@ -331,7 +331,7 @@ impl Display for Response {
     }
 }
 
-/// Convert an &Option<T> to Option<(&str, &dyn Display)>, turning the variable name into the str.
+/// Convert an `&Option<T>` to `Option<(&str, &dyn Display)>`, turning the variable name into the str.
 macro_rules! opt_to_key_and_display {
     ($i:ident) => {
         $i.as_ref().map(|r| (stringify!($i), r as &dyn Display))
