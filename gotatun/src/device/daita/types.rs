@@ -153,7 +153,8 @@ impl DelayWatcher {
         }
     }
 
-    /// Add the packet to the delay queue if the delay state is active, otherwise return it to be sent immediately.
+    /// Add the packet to the delay queue if the delay state is active, otherwise return it to be
+    /// sent immediately.
     ///
     /// Returns `None` if the packet was added to the delay queue.
     ///

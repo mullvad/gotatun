@@ -486,7 +486,8 @@ pub mod cmsg {
         assert!(mem::align_of::<CMSGHDR>() == mem::align_of::<Hdr>());
 
         // The data field must be aligned to `usize` (source: CMSG_DATA macro in ws2def.h)
-        // This is fortunately true even for a packed struct on x86_64 Windows if the CMSG itself is aligned to CMSGHDR:
+        // This is fortunately true even for a packed struct on x86_64 Windows if the CMSG itself is
+        // aligned to CMSGHDR:
         // * the alignment of `Hdr` is the same as that of usize
         // * the size of `Hdr` is a multiple of that alignment
         // As such, no padding is required to align `data`.
@@ -503,7 +504,8 @@ pub mod cmsg {
 
         /// Test that Cmsg is aligned to CMSGHDR despite being `repr(packed)`
         ///
-        /// We pack the struct due to zerocopy DST limitations, so we're at the mercy of the allocator.
+        /// We pack the struct due to zerocopy DST limitations, so we're at the mercy of the
+        /// allocator.
         #[test]
         fn test_cmsg_alignment() {
             for size in [0, 1, 2, 8, 16, 100] {

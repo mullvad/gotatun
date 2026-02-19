@@ -307,7 +307,8 @@ pub struct Handshake {
     params: NoiseParams,
     /// Index of the next session
     next_index: u32,
-    /// Allow to have two outgoing handshakes in flight, because sometimes we may receive a delayed response to a handshake with bad networks
+    /// Allow to have two outgoing handshakes in flight, because sometimes we may receive a delayed
+    /// response to a handshake with bad networks
     previous: HandshakeState,
     /// Current handshake state
     state: HandshakeState,
@@ -485,7 +486,8 @@ impl Handshake {
         self.cookies.write_cookie = None;
     }
 
-    // The index used is 24 bits for peer index, allowing for 16M active peers per server and 8 bits for cyclic session index
+    // The index used is 24 bits for peer index, allowing for 16M active peers per server and 8 bits
+    // for cyclic session index
     fn inc_index(&mut self) -> u32 {
         let index = self.next_index;
         let idx8 = index as u8;
