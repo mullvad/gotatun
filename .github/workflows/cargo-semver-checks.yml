@@ -1,0 +1,22 @@
+---
+name: Check semver compatibility
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  cargo-semver-checks:
+    strategy:
+      matrix:
+        os: [ windows-latest, ubuntu-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      # Check semver compatibility with the most recently-published version on crates.io.
+      - name: Check SemVer (${{ matrix.os }})
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          # All crates in this repository are intended to be library crates, except for the CLI.
+          exclude: gotatun-cli
