@@ -21,6 +21,7 @@ name = "gotatun"
 path = "src/main.rs"
 
 [target.'cfg(unix)'.dependencies]
+gotatun = { workspace = true, features = ["device", "tun"] }
 daemonize = "0.5.0"
 clap = { version = "3.1.6", features = ["derive", "env"] }
 tracing = "0.1.40"
@@ -37,8 +38,3 @@ nix = { version = "0.30", default-features = false, features = [
     "uio",
     "net",
 ] }
-
-[target.'cfg(unix)'.dependencies.gotatun]
-version = "0.2.0"
-path = "../gotatun"
-features = ["device", "tun"]

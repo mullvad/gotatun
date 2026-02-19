@@ -21,3 +21,6 @@ strip = false
 [profile.bench]
 lto = true        # Enable full link-time optimization.
 codegen-units = 1 # Use only 1 codegen-unit to enable full optimizations.
+
+[workspace.dependencies]
+gotatun = { path = "./gotatun" }
