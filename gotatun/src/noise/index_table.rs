@@ -58,7 +58,7 @@ impl<Rng> IndexTable<Rng>
 where
     Rng: SeedableRng + RngCore,
 {
-    /// Create a new [`IndexTable`] seeded using `OsRng`.
+    /// Create a new [`IndexTable`] seeded using [`SeedableRng::from_os_rng`].
     pub fn from_os_rng() -> Self {
         Self::from_rng(Rng::from_os_rng())
     }
