@@ -63,3 +63,36 @@ where
         Self::from_rng(Rng::from_os_rng())
     }
 }
+
+impl<Rng> IndexTable<Rng> {
+    /// Remove an index from the table, making it available for reuse.
+    fn free_index(&self, index: u32) {
+        let mut g = self.0.lock().unwrap();
+        g.1.remove(&index);
+    }
+}
+
+impl Index {
+    /// The raw `u32` index value.
+    pub fn value(&self) -> u32 {
+        self.value
+    }
+}
+
+impl<Rng> Drop for Index<Rng> {
+    fn drop(&mut self) {
+        self.table.free_index(self.value);
+    }
+}
+
+impl std::fmt::Debug for Index {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.value.fmt(f)
+    }
+}
+
+impl std::fmt::Display for Index {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.value.fmt(f)
+    }
+}
