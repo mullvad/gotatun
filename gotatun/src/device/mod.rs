@@ -71,14 +71,6 @@ pub enum Error {
     #[error("Failed to bind UDP sockets (params={1:?}): {0}")]
     Bind(#[source] io::Error, UdpTransportFactoryParams),
 
-    /// Invalid tunnel name
-    #[error("Invalid tunnel name")]
-    InvalidTunnelName,
-
-    /// Failed to drop privileges
-    #[error("Failed to drop privileges: {0}")]
-    DropPrivileges(String),
-
     /// TUN device error
     #[error("TUN device error: {0}")]
     #[cfg(feature = "tun")]
