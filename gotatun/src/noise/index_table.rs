@@ -14,7 +14,12 @@ use rand::{RngCore, SeedableRng};
 #[derive(Clone)]
 pub struct IndexTable<Rng = StdRng>(Arc<Mutex<(Rng, HashSet<u32>)>>);
 
-/// An allocated session index that is automatically freed from its [`IndexTable`] on drop.
+/// A 32-bit index that locally represents the other peer, analogous to IPsec’s “SPI”.
+///
+/// A session index is derived from [`IndexTable::new_index`], and the session index is
+/// automatically freed from its [`IndexTable`] on drop.
+///
+/// See section 5.4 of the [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
 pub struct Index<Rng = StdRng> {
     value: u32,
     table: IndexTable<Rng>,
