@@ -320,9 +320,8 @@ impl Tunn {
         }
 
         if keepalive_required {
-            return Ok(
-                self.handle_outgoing_packet(crate::packet::Packet::from_bytes(BytesMut::new()))
-            );
+            return Ok(self
+                .handle_outgoing_packet(crate::packet::Packet::from_bytes(BytesMut::new()), None));
         }
 
         Ok(None)

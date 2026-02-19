@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use tokio::sync::{Mutex, RwLock};
+use x25519_dalek::StaticSecret;
 
 use crate::device::Error;
 #[cfg(feature = "tun")]
@@ -29,6 +30,7 @@ pub struct DeviceBuilder<Udp, TunTx, TunRx> {
     udp: Udp,
     tun_tx: TunTx,
     tun_rx: TunRx,
+    private_key: Option<StaticSecret>,
     port: u16,
     uapi: Option<UapiServer>,
 
@@ -63,6 +65,7 @@ impl DeviceBuilder<Nul, Nul, Nul> {
             udp: Nul,
             tun_tx: Nul,
             tun_rx: Nul,
+            private_key: None,
             uapi: None,
             port: 0,
             peers: Vec::new(),
@@ -83,6 +86,7 @@ impl<X, Y> DeviceBuilder<Nul, X, Y> {
             udp,
             tun_tx: self.tun_tx,
             tun_rx: self.tun_rx,
+            private_key: self.private_key,
             uapi: self.uapi,
             port: self.port,
             peers: self.peers,
@@ -130,6 +134,7 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
             udp: self.udp,
             tun_tx: ip_tx,
             tun_rx: ip_rx,
+            private_key: self.private_key,
             uapi: self.uapi,
             port: self.port,
             peers: self.peers,
@@ -140,6 +145,12 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
 }
 
 impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
+    /// Set the private key of the device.
+    pub fn with_private_key(mut self, private_key: StaticSecret) -> Self {
+        self.private_key = Some(private_key);
+        self
+    }
+
     pub fn with_uapi(mut self, uapi: UapiServer) -> Self {
         self.uapi = Some(uapi);
         self
@@ -181,7 +192,7 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             tun_rx_mtu: self.tun_rx.mtu(),
             tun_rx: Arc::new(Mutex::new(self.tun_rx)),
             fwmark,
-            key_pair: Default::default(),
+            key_pair: None,
             next_index: Default::default(),
             peers: Default::default(),
             peers_by_idx: Default::default(),
@@ -190,6 +201,10 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             port: self.port,
             connection: None,
         };
+
+        if let Some(private_key) = self.private_key {
+            let _ = state.set_key(private_key).await;
+        }
 
         let has_peers = !self.peers.is_empty();
         for peer in self.peers {

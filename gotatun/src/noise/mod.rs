@@ -19,6 +19,7 @@ use crate::noise::handshake::Handshake;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
 use crate::packet::{Packet, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind};
+use crate::tun::MtuWatcher;
 use crate::x25519;
 
 use std::collections::VecDeque;
@@ -117,7 +118,18 @@ impl Tunn {
     /// If there's an active session, return the encapsulated packet. Otherwise, if needed, return
     /// a handshake initiation. `None` is returned if a handshake is already in progress. In that
     /// case, the packet is added to a queue.
-    pub fn handle_outgoing_packet(&mut self, packet: Packet) -> Option<WgKind> {
+    ///
+    /// If `tun_mtu` is `Some`, `packet` will be padded with `0`s to a multiple of 16 bytes,
+    /// clamped to not exceed MTU.
+    pub fn handle_outgoing_packet(
+        &mut self,
+        mut packet: Packet,
+        tun_mtu: Option<&mut MtuWatcher>,
+    ) -> Option<WgKind> {
+        if let Some(tun_mtu) = tun_mtu {
+            packet = pad_to_x16(packet, tun_mtu);
+        }
+
         match self.encapsulate_with_session(packet) {
             Ok(encapsulated_packet) => Some(encapsulated_packet.into()),
             Err(packet) => {
@@ -302,10 +314,10 @@ impl Tunn {
     }
 
     /// Encapsulate and return all queued packets.
-    pub fn get_queued_packets(&mut self) -> impl Iterator<Item = WgKind> {
+    pub fn get_queued_packets(&mut self, tun_mtu: &mut MtuWatcher) -> impl Iterator<Item = WgKind> {
         std::iter::from_fn(|| {
             self.dequeue_packet()
-                .and_then(|packet| self.handle_outgoing_packet(packet))
+                .and_then(|packet| self.handle_outgoing_packet(packet, Some(tun_mtu)))
         })
     }
 
@@ -364,6 +376,39 @@ impl Tunn {
 
         (time, tx_bytes, rx_bytes, loss, rtt)
     }
+}
+
+/// Try to pad `packet` with `0`s such that `packet.len().is_multiple_of(16)`.
+///
+/// The padding is clamped to not exceed `tun_mtu`.
+///
+/// # Spec compliance
+/// The WireGuard whitepaper says that the "UDP packet" size must not exceed MTU after padding.
+/// A literal interpretation would imply keeping track of the route MTU for each peer.
+/// Using the MTU from the TUN device instead is a simpler, more reasonable, approach.
+/// `wireguard-go` uses this same method.
+fn pad_to_x16(mut packet: Packet, tun_mtu: &mut MtuWatcher) -> Packet {
+    if packet.len().is_multiple_of(16) {
+        return packet;
+    }
+
+    let padded_packet_len = {
+        // Getting the MTU involves atomics. Don't do it until we need to.
+        let mtu = tun_mtu.get();
+        let mtu = usize::from(mtu);
+
+        if cfg!(debug_assertions) && packet.len() > mtu {
+            log::debug!("Packet length exceeded MTU: {} > {mtu}", packet.len());
+        }
+
+        // Checking the mtu is inherently racey, so we need to be tolerant if packet.len() > mtu.
+        packet.len().next_multiple_of(16).min(mtu).max(packet.len())
+    };
+
+    debug_assert!(padded_packet_len >= packet.len());
+    packet.buf_mut().resize(padded_packet_len, 0);
+
+    packet
 }
 
 #[cfg(test)]
@@ -625,7 +670,7 @@ mod tests {
         assert!(matches!(my_tun.update_timers(), Ok(None)));
         let sent_packet_buf = create_ipv4_udp_packet();
         let _data = my_tun
-            .handle_outgoing_packet(sent_packet_buf.into_bytes())
+            .handle_outgoing_packet(sent_packet_buf.into_bytes(), None)
             .expect("expected encapsulated packet");
 
         //Advance to timeout
@@ -652,7 +697,7 @@ mod tests {
         let sent_packet_buf = create_ipv4_udp_packet();
 
         let data = my_tun
-            .handle_outgoing_packet(sent_packet_buf.clone().into_bytes())
+            .handle_outgoing_packet(sent_packet_buf.clone().into_bytes(), None)
             .unwrap();
 
         assert!(matches!(data, WgKind::Data(..)));
