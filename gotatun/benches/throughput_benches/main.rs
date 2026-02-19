@@ -9,6 +9,8 @@ use rand::rngs::StdRng;
 use rand::{SeedableRng, seq::SliceRandom};
 use std::hint::black_box;
 use std::net::Ipv4Addr;
+use std::sync::{Arc, Barrier};
+use std::time::{Duration, Instant};
 use zerocopy::FromBytes;
 
 fn bench_pool(c: &mut Criterion) {
@@ -74,6 +76,112 @@ fn bench_pool_reordered(c: &mut Criterion) {
             })
         });
     }
+    group.finish();
+}
+
+/// Benchmark the pool when multiple OS threads concurrently get and return packets.
+/// This exercises Mutex contention on the shared VecDeque, matching production usage
+/// where handle_incoming (x2), handle_outgoing, and DAITA all share the same pool.
+fn bench_pool_multithreaded(c: &mut Criterion) {
+    const CAPACITY: usize = 4000;
+
+    let mut group = c.benchmark_group("pool_multithreaded");
+    for &num_threads in &[2, 4, 8] {
+        let pool = gotatun::packet::PacketBufPool::<4096>::new(CAPACITY);
+        let per_thread = CAPACITY / num_threads;
+        group.throughput(criterion::Throughput::Elements(CAPACITY as u64));
+        group.bench_function(BenchmarkId::from_parameter(num_threads), |b| {
+            b.iter_custom(|iters| {
+                // Pre-spawn threads so thread creation isn't included in the measurement.
+                // Two barriers synchronize each iteration: the main thread releases all
+                // workers at once and then waits for them all to finish.
+                let start_barrier = Arc::new(Barrier::new(num_threads + 1));
+                let end_barrier = Arc::new(Barrier::new(num_threads + 1));
+
+                let handles: Vec<_> = (0..num_threads)
+                    .map(|_| {
+                        let pool = pool.clone();
+                        let start = start_barrier.clone();
+                        let end = end_barrier.clone();
+                        std::thread::spawn(move || {
+                            let mut packets = Vec::with_capacity(per_thread);
+                            for _ in 0..iters {
+                                start.wait();
+                                packets.extend((0..per_thread).map(|_| pool.get()));
+                                black_box(packets.drain(..));
+                                end.wait();
+                            }
+                        })
+                    })
+                    .collect();
+
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    start_barrier.wait(); // release all workers simultaneously
+                    let t = Instant::now();
+                    end_barrier.wait(); // wait until all workers have finished
+                    total += t.elapsed();
+                }
+
+                for h in handles {
+                    h.join().unwrap();
+                }
+                total
+            })
+        });
+    }
+    group.finish();
+}
+
+/// Benchmark the full get-write-drop cycle, modelling the UDP/TUN recv path:
+///   pool.get() → copy payload into buffer → truncate → drop
+/// Parameterised by packet size to show how write cost scales and whether the
+/// pool's pre-warmed allocation reduces page-fault overhead vs a cold BytesMut.
+fn bench_pool_write(c: &mut Criterion) {
+    const CAPACITY: usize = 4000;
+    let pool = gotatun::packet::PacketBufPool::<4096>::new(CAPACITY);
+
+    let mut group = c.benchmark_group("pool_write");
+    for &packet_size in &[64usize, 512, 1500, 4096] {
+        let data = vec![0u8; packet_size];
+        group.throughput(criterion::Throughput::Bytes(
+            (CAPACITY * packet_size) as u64,
+        ));
+        group.bench_function(BenchmarkId::from_parameter(packet_size), |b| {
+            let mut packets = Vec::with_capacity(CAPACITY);
+            b.iter(|| {
+                for _ in 0..CAPACITY {
+                    let mut pkt = pool.get();
+                    // Simulate writing received network data into the pre-allocated buffer.
+                    pkt[..packet_size].copy_from_slice(&data);
+                    pkt.truncate(packet_size);
+                    packets.push(pkt);
+                }
+                black_box(packets.drain(..));
+            })
+        });
+    }
+    group.finish();
+}
+
+/// Benchmark pool.get() when the pool is always empty (capacity = 0).
+/// ReturnToPool::drop checks `queue.len() < queue.capacity()`, which is `0 < 0`
+/// when the VecDeque was created with capacity 0, so buffers are never re-enqueued.
+/// Every call therefore falls through to a fresh BytesMut::zeroed allocation,
+/// giving a cost baseline to compare against the warm-pool benchmarks.
+fn bench_pool_cold(c: &mut Criterion) {
+    const CAPACITY: usize = 4000;
+    let pool = gotatun::packet::PacketBufPool::<4096>::new(0);
+
+    let mut group = c.benchmark_group("pool_cold");
+    group.throughput(criterion::Throughput::Elements(CAPACITY as u64));
+    group.bench_function("always_allocate", |b| {
+        let mut packets = Vec::with_capacity(CAPACITY);
+        b.iter(|| {
+            packets.extend((0..CAPACITY).map(|_| pool.get()));
+            black_box(packets.drain(..));
+        })
+    });
     group.finish();
 }
 
@@ -228,6 +336,9 @@ criterion_group!(
     bench_assemble_ipv4_fragment_reverse_order,
     bench_assemble_ipv4_fragment_interleaved,
     bench_pool,
-    bench_pool_reordered
+    bench_pool_reordered,
+    bench_pool_multithreaded,
+    bench_pool_write,
+    bench_pool_cold
 );
 criterion_main!(benches);
