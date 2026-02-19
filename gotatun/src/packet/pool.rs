@@ -2,71 +2,53 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use bytes::BytesMut;
-use std::{
-    collections::VecDeque,
-    sync::{Arc, Mutex},
-};
 
 use crate::packet::Packet;
 
 /// A pool of packet buffers.
 #[derive(Clone)]
 pub struct PacketBufPool<const N: usize = 4096> {
-    queue: Arc<Mutex<VecDeque<BytesMut>>>,
-    capacity: usize,
+    rx: crossbeam_channel::Receiver<BytesMut>,
+    _tx: crossbeam_channel::Sender<BytesMut>,
 }
 
 impl<const N: usize> PacketBufPool<N> {
     /// Create a new [`PacketBufPool`] with space for at least `capacity` packets,
     /// each allocated with a capacity of `N` bytes.
     pub fn new(capacity: usize) -> Self {
-        let mut queue = VecDeque::with_capacity(capacity);
+        let (_tx, rx) = crossbeam_channel::bounded(capacity);
 
+        let mut contiguous_buf = BytesMut::zeroed(N * capacity);
         // pre-allocate buffers
         for _ in 0..capacity {
-            queue.push_back(BytesMut::zeroed(N));
+            _tx.send(contiguous_buf.split_to(N))
+                .expect("chan has space for 'capacity' bufs");
         }
+        debug_assert!(contiguous_buf.is_empty());
 
-        PacketBufPool {
-            queue: Arc::new(Mutex::new(queue)),
-            capacity,
-        }
+        PacketBufPool { rx, _tx }
     }
 
     /// Get the configured capacity of this pool.
     pub fn capacity(&self) -> usize {
-        self.capacity
+        self.rx.capacity().expect("channel is bounded")
     }
 
     /// Try to re-use a [`Packet`] from the pool.
     fn re_use(&self) -> Option<Packet<[u8]>> {
-        while let Some(mut packet) = { self.queue.lock().unwrap().pop_front() } {
-            packet.clear();
-            if packet.try_reclaim(N) {
-                let mut buf = packet.split_off(0);
+        let mut buf = self.rx.try_recv().ok()?;
+        buf.clear();
+        debug_assert!(buf.try_reclaim(N));
+        // Safety: the buffer was created with BytesMut::zeroed(N) and its capacity is always
+        // maintained at N. All N bytes are initialized (originally zeroed; subsequent writes
+        // never exceed N bytes).
+        unsafe { buf.set_len(N) };
 
-                debug_assert!(buf.capacity() >= N);
+        let return_to_pool = ReturnToPool {
+            queue: self._tx.clone(),
+        };
 
-                // SAFETY:
-                // - buf was split from the BytesMut allocated below.
-                // - buf has not been mutated, and still points to the original allocation.
-                // - try_reclaim succeeded, so the capacity is at least `N`.
-                // - the allocation was created using `BytesMut::zeroed`, so the bytes are
-                //   initialized.
-                unsafe { buf.set_len(N) };
-
-                let return_to_pool = ReturnToPool {
-                    queue: self.queue.clone(),
-                };
-
-                return Some(Packet::new_from_pool(return_to_pool, buf));
-            } else {
-                // Backing buffer is still in use. Someone probably called split_* on it.
-                continue;
-            }
-        }
-
-        None
+        Some(Packet::new_from_pool(return_to_pool, buf))
     }
 
     /// Get a new [`Packet`] from the pool.
@@ -80,7 +62,7 @@ impl<const N: usize> PacketBufPool<N> {
         let buf = BytesMut::zeroed(N);
 
         let return_to_pool = ReturnToPool {
-            queue: self.queue.clone(),
+            queue: self._tx.clone(),
         };
 
         Packet::new_from_pool(return_to_pool, buf)
@@ -89,16 +71,12 @@ impl<const N: usize> PacketBufPool<N> {
 
 /// This sends a previously allocated [`BytesMut`] back to [`PacketBufPool`] when its dropped.
 pub struct ReturnToPool {
-    queue: Arc<Mutex<VecDeque<BytesMut>>>,
+    queue: crossbeam_channel::Sender<BytesMut>,
 }
 
 impl ReturnToPool {
     pub fn recycle(&mut self, buf: BytesMut) {
-        let mut queue_g = self.queue.lock().unwrap();
-        if queue_g.len() < queue_g.capacity() {
-            // Add the packet back to the pool unless we're at capacity
-            queue_g.push_back(buf);
-        }
+        let _ = self.queue.try_send(buf);
     }
 }
 
