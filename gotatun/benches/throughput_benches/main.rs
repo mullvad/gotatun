@@ -11,6 +11,72 @@ use std::hint::black_box;
 use std::net::Ipv4Addr;
 use zerocopy::FromBytes;
 
+fn bench_pool(c: &mut Criterion) {
+    const CAPACITY: usize = 4000;
+    let pool = gotatun::packet::PacketBufPool::<4096>::new(CAPACITY);
+
+    // Parameterized by how many packets are held alive simultaneously.
+    // Each batch acquires `num_concurrent` packets into a Vec (keeping them all live),
+    // then drops them all together at the end of the batch. This prevents the pool from
+    // reusing the same buffer slot on every iteration and exercises real concurrent holds.
+    let mut group = c.benchmark_group("pool_concurrent");
+    for &num_concurrent in &[1, 10, 100, 1000] {
+        group.throughput(criterion::Throughput::Elements(CAPACITY as u64));
+        group.bench_function(BenchmarkId::from_parameter(num_concurrent), |b| {
+            let mut packets = Vec::with_capacity(num_concurrent);
+            b.iter(|| {
+                for _ in 0..(CAPACITY / num_concurrent) {
+                    // Hold `num_concurrent` packets simultaneously so the pool can't
+                    // reuse any of them until the whole batch is dropped at once.
+                    packets.extend((0..num_concurrent).map(|_| pool.get()));
+                    // drain drops all packets (returning them to the pool) and resets len to 0,
+                    // leaving the Vec's allocation intact for the next batch.
+                    black_box(packets.drain(..));
+                }
+            })
+        });
+    }
+    group.finish();
+}
+
+fn bench_pool_reordered(c: &mut Criterion) {
+    const CAPACITY: usize = 4000;
+    let pool = gotatun::packet::PacketBufPool::<4096>::new(CAPACITY);
+
+    // Same as pool_concurrent, but packets within each batch are dropped in a pre-shuffled
+    // order rather than all at once. This models real usage where buffers are returned to
+    // the pool out of acquisition order (e.g. packets processed or forwarded at different
+    // rates). The drop order is fixed (same seed) so results are reproducible.
+    let mut group = c.benchmark_group("pool_reordered");
+    for &num_concurrent in &[1, 10, 100, 1000] {
+        group.throughput(criterion::Throughput::Elements(CAPACITY as u64));
+
+        // Pre-compute the shuffled drop order outside b.iter() so the RNG cost
+        // is not included in the measurement.
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut shuffled_indices: Vec<usize> = (0..num_concurrent).collect();
+        shuffled_indices.shuffle(&mut rng);
+
+        group.bench_function(BenchmarkId::from_parameter(num_concurrent), |b| {
+            let mut packets = Vec::with_capacity(num_concurrent);
+            b.iter(|| {
+                for _ in 0..(CAPACITY / num_concurrent) {
+                    // Wrap each packet in Option so we can drop them individually
+                    // via take() rather than all at once when the Vec is dropped.
+                    packets.extend((0..num_concurrent).map(|_| Some(pool.get())));
+                    for &i in &shuffled_indices {
+                        black_box(packets[i].take());
+                    }
+                    // All slots are already None; clear() just resets len to 0
+                    // without any drop cost, leaving the allocation intact.
+                    packets.clear();
+                }
+            })
+        });
+    }
+    group.finish();
+}
+
 fn fragment_ipv4_packet(identification: u16, payload: &[u8], mtu: usize) -> Vec<Packet<Ipv4>> {
     let ipv4_header_len = 20;
     let max_payload_per_fragment = ((mtu - ipv4_header_len) / 8) * 8; // must be multiple of 8
@@ -160,6 +226,8 @@ criterion_group!(
     benches,
     bench_assemble_ipv4_fragment,
     bench_assemble_ipv4_fragment_reverse_order,
-    bench_assemble_ipv4_fragment_interleaved
+    bench_assemble_ipv4_fragment_interleaved,
+    bench_pool,
+    bench_pool_reordered
 );
 criterion_main!(benches);
