@@ -24,7 +24,7 @@ impl<const N: usize> PacketBufPool<N> {
 
         // pre-allocate buffers
         for _ in 0..capacity {
-            queue.push_back(BytesMut::zeroed(N).split_to(0));
+            queue.push_back(BytesMut::zeroed(N));
         }
 
         PacketBufPool {
@@ -40,12 +40,10 @@ impl<const N: usize> PacketBufPool<N> {
 
     /// Try to re-use a [`Packet`] from the pool.
     fn re_use(&self) -> Option<Packet<[u8]>> {
-        while let Some(mut pointer_to_start_of_allocation) =
-            { self.queue.lock().unwrap().pop_front() }
-        {
-            debug_assert_eq!(pointer_to_start_of_allocation.len(), 0);
-            if pointer_to_start_of_allocation.try_reclaim(N) {
-                let mut buf = pointer_to_start_of_allocation.split_off(0);
+        while let Some(mut packet) = { self.queue.lock().unwrap().pop_front() } {
+            packet.clear();
+            if packet.try_reclaim(N) {
+                let mut buf = packet.split_off(0);
 
                 debug_assert!(buf.capacity() >= N);
 
@@ -58,7 +56,6 @@ impl<const N: usize> PacketBufPool<N> {
                 unsafe { buf.set_len(N) };
 
                 let return_to_pool = ReturnToPool {
-                    pointer_to_start_of_allocation: Some(pointer_to_start_of_allocation),
                     queue: self.queue.clone(),
                 };
 
@@ -80,14 +77,9 @@ impl<const N: usize> PacketBufPool<N> {
             return packet;
         }
 
-        let mut buf = BytesMut::zeroed(N);
-        let pointer_to_start_of_allocation = buf.split_to(0);
-
-        debug_assert_eq!(pointer_to_start_of_allocation.len(), 0);
-        debug_assert_eq!(buf.len(), N);
+        let buf = BytesMut::zeroed(N);
 
         let return_to_pool = ReturnToPool {
-            pointer_to_start_of_allocation: Some(pointer_to_start_of_allocation),
             queue: self.queue.clone(),
         };
 
@@ -97,24 +89,15 @@ impl<const N: usize> PacketBufPool<N> {
 
 /// This sends a previously allocated [`BytesMut`] back to [`PacketBufPool`] when its dropped.
 pub struct ReturnToPool {
-    /// This is a pointer to the allocation allocated by [`PacketBufPool::get`].
-    /// By making sure we never modify this (by calling reserve, etc), we can efficiently re-use
-    /// this allocation later.
-    ///
-    /// INVARIANT:
-    /// - Points to the start of an `N`-sized allocation.
-    // Note: Option is faster than mem::take
-    pointer_to_start_of_allocation: Option<BytesMut>,
     queue: Arc<Mutex<VecDeque<BytesMut>>>,
 }
 
-impl Drop for ReturnToPool {
-    fn drop(&mut self) {
-        let p = self.pointer_to_start_of_allocation.take().unwrap();
+impl ReturnToPool {
+    pub fn recycle(&mut self, buf: BytesMut) {
         let mut queue_g = self.queue.lock().unwrap();
         if queue_g.len() < queue_g.capacity() {
             // Add the packet back to the pool unless we're at capacity
-            queue_g.push_back(p);
+            queue_g.push_back(buf);
         }
     }
 }

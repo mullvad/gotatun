@@ -48,6 +48,7 @@
 use std::{
     fmt::{self, Debug},
     marker::PhantomData,
+    mem,
     ops::{Deref, DerefMut},
 };
 
@@ -115,6 +116,15 @@ struct PacketInner {
     // If the [BytesMut] was allocated by a [PacketBufPool], this will return the buffer to be
     // re-used later.
     _return_to_pool: Option<ReturnToPool>,
+}
+
+impl Drop for PacketInner {
+    fn drop(&mut self) {
+        if let Some(mut return_to_pool) = self._return_to_pool.take() {
+            // NOTE: Default for `BytesMut` has capacity 0, so is cheap make by `mem::take`.
+            return_to_pool.recycle(mem::take(&mut self.buf));
+        }
+    }
 }
 
 /// A marker trait that indicates that a [Packet] contains a valid payload of a specific type.
