@@ -208,7 +208,7 @@ pub struct Peer {
     #[builder(default)]
     pub allowed_ip: Vec<IpNetwork>,
 
-    /// DAITA settings for this peer, if the DAITA feature is enabled.
+    /// DAITA settings for this peer.
     #[cfg(feature = "daita-uapi")]
     #[builder(default, setter(strip_option, into))]
     pub daita_settings: Option<SetUnset<DaitaSettings>>,
