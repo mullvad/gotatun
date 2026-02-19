@@ -1,4 +1,4 @@
-/// Configuration and inspection interface for WireGuard devices.
+//! Configuration and inspection interface for WireGuard devices.
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use ipnetwork::IpNetwork;
