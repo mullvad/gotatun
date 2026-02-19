@@ -3,7 +3,8 @@
 
 //! Types to create, parse, and move network packets around in a zero-copy manner.
 //!
-//! See [`Packet`](crate::packet::Packet) for an implementation of a [`bytes`]-backed owned packet buffer.
+//! See [`Packet`](crate::packet::Packet) for an implementation of a [`bytes`]-backed owned packet
+//! buffer.
 //!
 //! Any of the <https://docs.rs/zerocopy>-enabled definitions such as [`Ipv4`](crate::packet::Ipv4) or [`Udp`](crate::packet::Udp) can be used to cheaply
 //! construct or parse packets:
@@ -111,7 +112,8 @@ pub struct Packet<Kind: ?Sized = [u8]> {
 struct PacketInner {
     buf: BytesMut,
 
-    // If the [BytesMut] was allocated by a [PacketBufPool], this will return the buffer to be re-used later.
+    // If the [BytesMut] was allocated by a [PacketBufPool], this will return the buffer to be
+    // re-used later.
     _return_to_pool: Option<ReturnToPool>,
 }
 
@@ -486,7 +488,8 @@ where
     }
 }
 
-// This clone implementation is only for tests, as the clone will cause an allocation and will not return the buffer to the pool.
+// This clone implementation is only for tests, as the clone will cause an allocation and will not
+// return the buffer to the pool.
 #[cfg(test)]
 impl<Kind: ?Sized> Clone for Packet<Kind> {
     fn clone(&self) -> Self {

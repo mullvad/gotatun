@@ -62,7 +62,8 @@ pub struct UapiServer {
 
 /// An API client to a gotatun [`Device`].
 ///
-/// Use [`UapiClient::send`] or [`UapiClient::send_sync`] to configure the [`Device`] by adding peers, etc.
+/// Use [`UapiClient::send`] or [`UapiClient::send_sync`] to configure the [`Device`] by adding
+/// peers, etc.
 ///
 /// [`Device`]: crate::device::Device
 #[derive(Clone)]

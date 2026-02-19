@@ -76,7 +76,8 @@ impl DeviceBuilder<Nul, Nul, Nul> {
 }
 
 impl<X, Y> DeviceBuilder<Nul, X, Y> {
-    /// Create a WireGuard device that reads/writes incoming/outgoing packets using a UDP socket. This is the conventional device kind.
+    /// Create a WireGuard device that reads/writes incoming/outgoing packets using a UDP socket.
+    /// This is the conventional device kind.
     pub fn with_default_udp(self) -> DeviceBuilder<UdpSocketFactory, X, Y> {
         self.with_udp(UdpSocketFactory)
     }
@@ -132,7 +133,8 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
         self.with_ip_pair(ip.clone(), ip)
     }
 
-    /// Like [`with_ip`](Self::with_ip), but with separate channels for sending and receiving IP packets.
+    /// Like [`with_ip`](Self::with_ip), but with separate channels for sending and receiving IP
+    /// packets.
     pub fn with_ip_pair<IpTx: IpSend, IpRx: IpRecv>(
         self,
         ip_tx: IpTx,

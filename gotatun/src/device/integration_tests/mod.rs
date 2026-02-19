@@ -116,7 +116,8 @@ mod tests {
 
             // The local endpoint port is the remote listen port
             let _ = writeln!(conf, "ListenPort = {}", self.endpoint.port());
-            // HACK: this should consume the key so it can't be reused instead of cloning and serializing
+            // HACK: this should consume the key so it can't be reused instead of cloning and
+            // serializing
             let _ = writeln!(
                 conf,
                 "PrivateKey = {}",

@@ -113,8 +113,8 @@ mod gro {
         pub(crate) gro_bufs: Box<[BytesMut; MAX_PACKET_COUNT]>,
     }
 
-    // SAFETY: MultiHeaders contains pointers, but we only ever mutate data in [Self::recv_many_from].
-    // This should be fine.
+    // SAFETY: MultiHeaders contains pointers, but we only ever mutate data in
+    // [Self::recv_many_from]. This should be fine.
     unsafe impl Send for RecvManyBuf {}
 
     impl Default for RecvManyBuf {
@@ -151,8 +151,9 @@ mod gro {
 
             self.inner
                 .async_io(Interest::READABLE, move || {
-                    // TODO: the CMSG space cannot be reused, so we must allocate new headers each time
-                    // [ControlMessageOwned::UdpGroSegments(i32)] contains the size of all smaller packets/segments
+                    // TODO: the CMSG space cannot be reused, so we must allocate new headers each
+                    // time [ControlMessageOwned::UdpGroSegments(i32)] contains
+                    // the size of all smaller packets/segments
                     let headers = &mut MultiHeaders::<SockaddrIn>::preallocate(
                         MAX_PACKET_COUNT,
                         Some(cmsg_space!(i32)),
