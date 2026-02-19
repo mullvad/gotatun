@@ -682,6 +682,9 @@ impl<T: DeviceTransports> DeviceState<T> {
 
                 let mut peer = peer.lock().await;
                 let Some(peer_addr) = peer.endpoint().addr else {
+                    // TODO: Implement the following error handling from section 3 of the whitepaper:
+                    // If [peer_addr] matches no peer, it is dropped, and the sender is informed by a standard
+                    // ICMP “no route to host” packet, as well as returning -ENOKEY to user space.
                     log::error!("No endpoint");
                     continue;
                 };
