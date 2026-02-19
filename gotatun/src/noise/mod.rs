@@ -11,6 +11,7 @@
 pub mod errors;
 /// WireGuard handshake implementation using the Noise protocol.
 pub mod handshake;
+/// A table of locally unique session IDs.
 pub mod index_table;
 /// Rate limiting for handshake initiation packets.
 pub mod rate_limiter;
