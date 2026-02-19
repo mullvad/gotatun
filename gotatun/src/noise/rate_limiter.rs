@@ -92,7 +92,8 @@ impl RateLimiter {
 
     /// Reset packet count (ideally should be called with a period of 1 second)
     pub fn try_reset_count(&self) {
-        // The rate limiter is not very accurate, but at the scale we care about it doesn't matter much
+        // The rate limiter is not very accurate, but at the scale we care about it doesn't matter
+        // much
         let current_time = Instant::now();
         let mut last_reset_time = self.last_reset.lock();
         if current_time.duration_since(*last_reset_time) >= RESET_PERIOD {
@@ -110,8 +111,9 @@ impl RateLimiter {
             IpAddr::V6(a) => addr_bytes[..].copy_from_slice(&a.octets()[..]),
         }
 
-        // The current cookie for a given IP is the MAC(responder.changing_secret_every_two_minutes, initiator.ip_address)
-        // First we derive the secret from the current time, the value of cur_counter would change with time.
+        // The current cookie for a given IP is the MAC(responder.changing_secret_every_two_minutes,
+        // initiator.ip_address) First we derive the secret from the current time, the value
+        // of cur_counter would change with time.
         let cur_counter = Instant::now().duration_since(self.start_time).as_secs() / COOKIE_REFRESH;
 
         // Next we derive the cookie

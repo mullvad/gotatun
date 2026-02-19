@@ -63,8 +63,8 @@ pub struct UdpChannelV6Rx {
 /// [`UdpRecv`] implementations that use channels to send and receive packets.
 ///
 /// Calling [`UdpChannelFactory::bind`] will claim exclusive access to the inner channels for the
-/// lifetime of the [`UdpChannelTx`], [`UdpChannelV6Rx`] and [`UdpChannelV4Rx`]. Another call to `bind`
-/// will *block* until those have been dropped.
+/// lifetime of the [`UdpChannelTx`], [`UdpChannelV6Rx`] and [`UdpChannelV4Rx`]. Another call to
+/// `bind` will *block* until those have been dropped.
 pub struct UdpChannelFactory {
     source_ip_v4: Ipv4Addr,
     source_ip_v6: Ipv6Addr,
@@ -76,9 +76,9 @@ pub struct UdpChannelFactory {
 
 /// Create a set of channel-based TUN and UDP endpoints for in-process device communication.
 ///
-/// This function returns a tuple of ([`TunChannelTx`], [`TunChannelRx`], [`UdpChannelFactory`]), which
-/// can be used, for example, to pipe arbitrary data into a wireguard device, or to implement multihop.
-/// Entirely in userspace.
+/// This function returns a tuple of ([`TunChannelTx`], [`TunChannelRx`], [`UdpChannelFactory`]),
+/// which can be used, for example, to pipe arbitrary data into a wireguard device, or to implement
+/// multihop. Entirely in userspace.
 ///
 /// # Arguments
 /// * `capacity` - The channel buffer size for each direction.

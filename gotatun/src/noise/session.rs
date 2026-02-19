@@ -247,7 +247,8 @@ impl Session {
 
         let counter = packet.header.counter.get();
 
-        // Don't reuse counters, in case this is a replay attack we want to quickly check the counter without running expensive decryption
+        // Don't reuse counters, in case this is a replay attack we want to quickly check the
+        // counter without running expensive decryption
         self.receiving_counter_quick_check(counter)?;
 
         let mut nonce = [0u8; 12];

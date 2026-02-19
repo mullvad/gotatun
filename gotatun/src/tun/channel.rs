@@ -30,8 +30,8 @@ pub struct TunChannelTx {
 
     /// A map of fragments, keyed by a tuple of (identification, source IP, destination IP).
     /// The value is a `BTreeMap` of fragment offsets to the corresponding fragments.
-    /// The `BTreeMap` is used to ensure that fragments are kept in order, even if they arrive out of
-    /// order. This is used to efficiently check if all fragments have been received.
+    /// The `BTreeMap` is used to ensure that fragments are kept in order, even if they arrive out
+    /// of order. This is used to efficiently check if all fragments have been received.
     pub(crate) fragments_v4: Ipv4Fragments,
     // TODO: Ipv6 fragments?
 }
@@ -242,8 +242,8 @@ mod fragmentation {
             }
 
             // Check if the IP packet can be reassembled.
-            // The fragments must be consecutive, i.e. each fragment must begin where the previous one ended.
-            // Note that fragment offset is given in units of 8 bytes.
+            // The fragments must be consecutive, i.e. each fragment must begin where the previous
+            // one ended. Note that fragment offset is given in units of 8 bytes.
             let fragment_offsets = fragments.iter().map(|f| f.header.fragment_offset());
             let fragment_ends = fragments
                 .iter()

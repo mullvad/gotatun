@@ -68,7 +68,8 @@ pub struct GetPeer {
     #[builder(default, setter(strip_option, into))]
     pub tx_bytes: Option<u64>,
 
-    /// Total padded bytes in sent data packets to the previously added peer due to constant-size padding.
+    /// Total padded bytes in sent data packets to the previously added peer due to constant-size
+    /// padding.
     #[builder(default, setter(strip_option, into))]
     pub tx_padding_bytes: Option<u64>,
 
@@ -76,7 +77,8 @@ pub struct GetPeer {
     #[builder(default, setter(strip_option, into))]
     pub tx_decoy_packet_bytes: Option<u64>,
 
-    /// Total padded bytes in received data packets from the previously added peer due to constant-size padding.
+    /// Total padded bytes in received data packets from the previously added peer due to
+    /// constant-size padding.
     #[builder(default, setter(strip_option, into))]
     pub rx_padding_bytes: Option<u64>,
 
@@ -113,8 +115,8 @@ pub struct GetResponse {
 #[derive(TypedBuilder, Default, Debug)]
 #[non_exhaustive]
 pub struct Set {
-    /// The private key of the interface. If this key is all zero, it indicates that the private key
-    /// should be removed.
+    /// The private key of the interface. If this key is all zero, it indicates that the private
+    /// key should be removed.
     #[builder(default, setter(strip_option, into))]
     pub private_key: Option<KeyBytes>,
 
@@ -157,7 +159,9 @@ pub struct SetPeer {
     #[builder(setter(strip_bool))]
     pub update_only: bool,
 
-    /// This key/value combo indicates that the allowed IPs (perhaps an empty list) should replace any existing ones of the previously added peer entry, rather than append to the existing allowed IPs list.
+    /// This key/value combo indicates that the allowed IPs (perhaps an empty list) should replace
+    /// any existing ones of the previously added peer entry, rather than append to the existing
+    /// allowed IPs list.
     #[builder(setter(strip_bool))]
     pub replace_allowed_ips: bool,
 }
@@ -198,7 +202,8 @@ pub struct Peer {
     #[builder(default, setter(strip_option, into))]
     pub endpoint: Option<SocketAddr>,
 
-    /// The persistent keepalive interval of the previously added peer entry. The value 0 disables it.
+    /// The persistent keepalive interval of the previously added peer entry. The value 0 disables
+    /// it.
     #[builder(default, setter(strip_option, into))]
     pub persistent_keepalive_interval: Option<u16>,
 

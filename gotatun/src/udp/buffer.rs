@@ -15,7 +15,8 @@ use crate::udp::{UdpRecv, UdpSend};
 /// A [`UdpSend`] that wraps another [`UdpSend`] to provide buffering.
 ///
 /// Packets sent on this [`UdpSend::send_to`] will be buffered on a channel, and asynchronously
-/// processed on another task. This means [`UdpSend::send_to`] won't block unless the channel is full.
+/// processed on another task. This means [`UdpSend::send_to`] won't block unless the channel is
+/// full.
 #[derive(Clone)]
 pub struct BufferedUdpSend {
     _send_task: Arc<Task>,
@@ -106,8 +107,9 @@ impl UdpSend for BufferedUdpSend {
 
 /// A [`UdpRecv`] that wraps another [`UdpRecv`] to provide buffering.
 ///
-/// This will spawn a background task that continuously calls [`UdpRecv::recv_from`] until the buffer is
-/// full. Any call to [`UdpRecv::recv_from`] on _this_ object will not block unless the buffer is empty.
+/// This will spawn a background task that continuously calls [`UdpRecv::recv_from`] until the
+/// buffer is full. Any call to [`UdpRecv::recv_from`] on _this_ object will not block unless the
+/// buffer is empty.
 pub struct BufferedUdpReceive {
     _recv_task: Arc<Task>,
     recv_rx: mpsc::Receiver<(Packet, SocketAddr)>,

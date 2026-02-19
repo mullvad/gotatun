@@ -448,7 +448,8 @@ pub struct WgCookieReply {
     /// Number only used once.
     pub nonce: [u8; 24],
 
-    /// An encrypted 16-byte value that identifies the [`WgHandshakeInit`] that this packet is in response to.
+    /// An encrypted 16-byte value that identifies the [`WgHandshakeInit`] that this packet is in
+    /// response to.
     pub encrypted_cookie: EncryptedWithTag<[u8; 16]>,
 }
 
