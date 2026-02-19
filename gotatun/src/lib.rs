@@ -7,9 +7,11 @@
 
 //! A library implementation of [WireGuard](https://www.wireguard.com/).
 
+// Warn on missing docs when running `cargo doc`
+#![cfg_attr(doc, warn(missing_docs))]
+
 #[cfg(feature = "device")]
 pub mod device;
-
 pub mod noise;
 pub mod packet;
 pub mod tun;

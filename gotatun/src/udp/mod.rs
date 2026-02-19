@@ -3,8 +3,8 @@
 
 //! Trait abstractions for UDP sockets.
 //!
-//! [socket] contains implementation for actual UDP sockets.
-//! [channel] contains implementation for tokio-based channels.
+//! [`socket`] contains implementation for actual UDP sockets.
+//! [`channel`] contains implementation for tokio-based channels.
 
 use std::{
     future::Future,
@@ -142,7 +142,6 @@ pub trait UdpSend: Send + Sync + Clone {
     /// # Cancel safety
     /// This method is not cancel safe, but cancellations must never result in a panic,
     /// or an error on a subsequent call.
-    //
     // TODO: consider splitting into send_many_to_ipv4 and send_many_to_ipv6
     fn send_many_to(
         &self,

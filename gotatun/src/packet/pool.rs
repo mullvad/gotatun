@@ -33,6 +33,7 @@ impl<const N: usize> PacketBufPool<N> {
         }
     }
 
+    /// Get the configured capacity of this pool.
     pub fn capacity(&self) -> usize {
         self.capacity
     }
@@ -52,7 +53,8 @@ impl<const N: usize> PacketBufPool<N> {
                 // - buf was split from the BytesMut allocated below.
                 // - buf has not been mutated, and still points to the original allocation.
                 // - try_reclaim succeeded, so the capacity is at least `N`.
-                // - the allocation was created using `BytesMut::zeroed`, so the bytes are initialized.
+                // - the allocation was created using `BytesMut::zeroed`, so the bytes are
+                //   initialized.
                 unsafe { buf.set_len(N) };
 
                 let return_to_pool = ReturnToPool {
@@ -96,7 +98,8 @@ impl<const N: usize> PacketBufPool<N> {
 /// This sends a previously allocated [`BytesMut`] back to [`PacketBufPool`] when its dropped.
 pub struct ReturnToPool {
     /// This is a pointer to the allocation allocated by [`PacketBufPool::get`].
-    /// By making sure we never modify this (by calling reserve, etc), we can efficiently re-use this allocation later.
+    /// By making sure we never modify this (by calling reserve, etc), we can efficiently re-use
+    /// this allocation later.
     ///
     /// INVARIANT:
     /// - Points to the start of an `N`-sized allocation.

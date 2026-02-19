@@ -117,7 +117,8 @@ where
 
     /// Send a decoy packet according to [`maybenot::TriggerAction::SendPadding`].
     ///
-    /// Note that we use the term "decoy packet" to refer to what `maybenot` calls "padding packets".
+    /// Note that we use the term "decoy packet" to refer to what `maybenot` calls "padding
+    /// packets".
     async fn handle_decoy(
         &mut self,
         machine: MachineId,
@@ -188,8 +189,9 @@ where
                     Ok(packet) => packets.push((packet.into(), addr)),
                     Err(TryRecvError::Empty) => {
                         // When the packet queue is empty, we can end the delay state.
-                        // To prevent new packets from sneaking into the queue before we set the state to Inactive,
-                        // we loop once more and flush any new packets that might have arrived.
+                        // To prevent new packets from sneaking into the queue before we set the
+                        // state to Inactive, we loop once more and flush any new packets that might
+                        // have arrived.
                         if delay {
                             *self.delay_watcher.delay_state.write().await = DelayState::Inactive;
                             self.send_event(TriggerEvent::BlockingEnd)?;
@@ -228,7 +230,8 @@ where
             .fetch_add(mtu as usize, atomic::Ordering::SeqCst);
         peer.tunnel
             .encapsulate_with_session(self.create_decoy_packet(mtu))
-            // Encapsulate can only fail when there is no session, just drop the decoy packet in that case
+            // Encapsulate can only fail when there is no session, just drop the decoy packet in
+            // that case
             .map_err(|_| ErrorAction::Ignore(IgnoreReason::NoSession))
     }
 

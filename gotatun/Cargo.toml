@@ -16,9 +16,15 @@ categories = ["network-programming", "asynchronous"]
 keywords = ["wireguard", "vpn"]
 readme = "../README.md"
 
+[package.metadata.docs.rs]
+all-features = true
+default-target = "x86_64-unknown-linux-gnu"
+targets = ["aarch64-apple-darwin", "x86_64-pc-windows-msvc", "aarch64-linux-android"]
+
 [features]
 default = []
 device = ["thiserror"]
+tun = ["dep:tun", "thiserror"]
 pcap = ["dep:pcap-file"]
 # UDP GRO appears to be broken on Windows.
 # In some cases it fails to return UDP_COALESCED_INFO

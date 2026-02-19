@@ -76,11 +76,15 @@ impl DeviceBuilder<Nul, Nul, Nul> {
 }
 
 impl<X, Y> DeviceBuilder<Nul, X, Y> {
-    /// Create a WireGuard device that reads/writes incoming/outgoing packets using a UDP socket. This is the conventional device kind.
+    /// Create a WireGuard device that reads/writes incoming/outgoing packets using a UDP socket.
+    /// This is the conventional device kind.
     pub fn with_default_udp(self) -> DeviceBuilder<UdpSocketFactory, X, Y> {
         self.with_udp(UdpSocketFactory)
     }
 
+    /// Create a WireGuard device with a custom [`UdpTransportFactory`].
+    ///
+    /// See also [`with_default_udp`](Self::with_default_udp).
     pub fn with_udp<Udp: UdpTransportFactory>(self, udp: Udp) -> DeviceBuilder<Udp, X, Y> {
         DeviceBuilder {
             udp,
@@ -118,13 +122,19 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
         Ok(self.with_ip(tun))
     }
 
-    /// Add a channel where the device will read and write IP packets. This is normally a a [`TunDevice`],
+    /// Set the channel where the device will read and write IP packets.
+    #[cfg_attr(feature = "tun", doc = "This is normally a [`TunDevice`], ")]
+    #[cfg_attr(
+        not(feature = "tun"),
+        doc = "This is normally a `TunDevice` (requires feature `tun`), "
+    )]
     /// but can be any type that implements both [`IpSend`] and [`IpRecv`].
     pub fn with_ip<Ip: IpSend + IpRecv + Clone>(self, ip: Ip) -> DeviceBuilder<X, Ip, Ip> {
         self.with_ip_pair(ip.clone(), ip)
     }
 
-    /// Add separate channels for sending and receiving IP packets.
+    /// Like [`with_ip`](Self::with_ip), but with separate channels for sending and receiving IP
+    /// packets.
     pub fn with_ip_pair<IpTx: IpSend, IpRx: IpRecv>(
         self,
         ip_tx: IpTx,
@@ -151,26 +161,41 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
         self
     }
 
+    /// Add an UAPI server to this WireGuard device.
+    ///
+    /// Calling this twice will overwrite the previous `uapi`.
     pub fn with_uapi(mut self, uapi: UapiServer) -> Self {
         self.uapi = Some(uapi);
         self
     }
 
+    /// Add a [`Peer`] to this WireGuard device. May be called multiple times.
+    ///
+    /// Peers can also be added using [`Device::write`].
     pub fn with_peer(mut self, peer: Peer) -> Self {
         self.peers.push(peer);
         self
     }
 
+    /// Add multiple [`Peer`] to this WireGuard device. May be called multiple times.
+    ///
+    /// Peers can also be added using [`Device::write`].
     pub fn with_peers(mut self, peers: impl IntoIterator<Item = Peer>) -> Self {
         self.peers.extend(peers);
         self
     }
 
+    /// Specify the port argument to the [`UdpTransportFactory`].
+    ///
+    /// You probably only want this when using [`with_default_udp`](Self::with_default_udp).
     pub const fn with_listen_port(mut self, port: u16) -> Self {
         self.port = port;
         self
     }
 
+    /// Specify the `SO_MARK` argument to the [`UdpTransportFactory`].
+    ///
+    /// You probably only want this when using [`with_default_udp`](Self::with_default_udp).
     #[cfg(target_os = "linux")]
     pub const fn with_fwmark(mut self, fwmark: u32) -> Self {
         self.fwmark = Some(fwmark);
@@ -179,6 +204,15 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
 }
 
 impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, TunTx, TunRx> {
+    /// Build the final [`Device`] from this builder.
+    ///
+    /// This will initialize the device state, add all configured peers, and optionally
+    /// start the UAPI server if one was provided via [`with_uapi`](Self::with_uapi).
+    ///
+    /// # Errors
+    ///
+    /// Errors if the UDP socket cannot be bound.
+    #[cfg_attr(feature = "daita", doc = "Errors if DAITA initialization fails.")]
     pub async fn build(self) -> Result<Device<(Udp, TunTx, TunRx)>, Error> {
         #[cfg(target_os = "linux")]
         let fwmark = self.fwmark;

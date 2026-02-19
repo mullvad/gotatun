@@ -18,7 +18,7 @@ pub struct Ipv6<Payload: ?Sized = [u8]> {
     /// IPv6 header.
     pub header: Ipv6Header,
     /// IPv6 payload. The type of this is `[u8]` by default, but it may be any zerocopy type,
-    /// e.g. a `Udp<WgData>`
+    /// e.g. a `Udp<WgData>`.
     pub payload: Payload,
 }
 
@@ -57,7 +57,6 @@ pub struct Ipv6VersionTrafficFlow {
 
 impl Ipv6Header {
     /// Length of an [`Ipv6Header`], in bytes.
-    #[allow(dead_code)]
     pub const LEN: usize = size_must_be::<Ipv6Header>(40);
 
     /// Get [`version`](Ipv6VersionTrafficFlow::version). This is expected to be `6`.

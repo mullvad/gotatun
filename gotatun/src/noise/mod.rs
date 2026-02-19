@@ -5,8 +5,13 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! Noise protocol implementation for WireGuard cryptographic handshakes and sessions.
+
+/// Error types for WireGuard protocol operations.
 pub mod errors;
+/// WireGuard handshake implementation using the Noise protocol.
 pub mod handshake;
+/// Rate limiting for handshake initiation packets.
 pub mod rate_limiter;
 
 mod session;
@@ -30,11 +35,16 @@ const MAX_QUEUE_DEPTH: usize = 256;
 /// number of sessions in the ring, better keep a PoT.
 const N_SESSIONS: usize = 8;
 
+/// Result of processing a WireGuard packet through the [`Tunn`].
 #[derive(Debug)]
 pub enum TunnResult {
+    /// Operation completed successfully with no further action needed.
     Done,
+    /// An error occurred during processing.
     Err(WireGuardError),
+    /// A packet should be written to the network (UDP).
     WriteToNetwork(WgKind),
+    /// A decrypted packet should be written to the tunnel (TUN).
     WriteToTunnel(Packet),
 }
 
@@ -63,6 +73,7 @@ pub struct Tunn {
 }
 
 impl Tunn {
+    /// Check if the tunnel handshake has expired.
     pub fn is_expired(&self) -> bool {
         self.handshake.is_expired()
     }
@@ -161,6 +172,9 @@ impl Tunn {
         }
     }
 
+    /// Process an incoming WireGuard packet from the network.
+    ///
+    /// This dispatches to the appropriate handler based on packet type.
     pub fn handle_incoming_packet(&mut self, packet: WgKind) -> TunnResult {
         match packet {
             WgKind::HandshakeInit(p) => self.handle_handshake_init(p),
@@ -250,7 +264,8 @@ impl Tunn {
         }
     }
 
-    /// Decrypt a data packet, and return a [`TunnResult::WriteToTunnel`] (`Ipv4` or `Ipv6`) if successful.
+    /// Decrypt a data packet, and return a [`TunnResult::WriteToTunnel`] (`Ipv4` or `Ipv6`) if
+    /// successful.
     fn handle_data(&mut self, packet: Packet<WgData>) -> Result<TunnResult, WireGuardError> {
         let decapsulated_packet = self.decapsulate_with_session(packet)?;
 
@@ -260,6 +275,11 @@ impl Tunn {
         Ok(TunnResult::WriteToTunnel(decapsulated_packet))
     }
 
+    /// Decrypt a WireGuard data packet using the current session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if decryption fails or no valid session exists.
     pub fn decapsulate_with_session(
         &mut self,
         packet: Packet<WgData>,

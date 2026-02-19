@@ -157,7 +157,9 @@ pub struct WgDataAndTag {
 #[derive(Clone, Copy, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 #[repr(C)]
 pub struct EncryptedWithTag<T: Sized> {
+    /// The encrypted value.
     pub encrypted: T,
+    /// The Poly1305 authentication tag attached to `encrypted`.
     pub tag: [u8; 16],
 }
 
@@ -467,7 +469,8 @@ pub struct WgCookieReply {
     /// Number only used once.
     pub nonce: [u8; 24],
 
-    /// An encrypted 16-byte value that identifies the [`WgHandshakeInit`] that this packet is in response to.
+    /// An encrypted 16-byte value that identifies the [`WgHandshakeInit`] that this packet is in
+    /// response to.
     pub encrypted_cookie: EncryptedWithTag<[u8; 16]>,
 }
 

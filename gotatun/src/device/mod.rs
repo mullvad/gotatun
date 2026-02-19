@@ -5,6 +5,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+//! WireGuard device implementation with support for peers, handshakes, and packet routing.
 pub(crate) mod allowed_ips;
 mod builder;
 pub mod configure;
@@ -60,27 +61,22 @@ const MAX_PACKET_BUFS: usize = 4000;
 
 /// Error of [`Device`]-related operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
+    /// I/O error
     #[error("i/o error: {0}")]
     IoError(#[from] io::Error),
 
+    /// Failed to bind UDP sockets
     #[error("Failed to bind UDP sockets (params={1:?}): {0}")]
     Bind(#[source] io::Error, UdpTransportFactoryParams),
 
-    #[error("Invalid tunnel name")]
-    InvalidTunnelName,
-
-    #[error("Failed to drop privileges: {0}")]
-    DropPrivileges(String),
-
+    /// TUN device error
+    #[error("TUN device error: {0}")]
     #[cfg(feature = "tun")]
-    #[error("Failed to open TUN device: {0}")]
-    OpenTun(#[source] tun::Error),
+    TunDevice(#[from] crate::tun::tun_async_device::Error),
 
-    #[cfg(feature = "tun")]
-    #[error("Failed to get TUN device name: {0}")]
-    GetTunName(#[source] tun::Error),
-
+    /// Failed to initialize DAITA hooks
     #[error("Failed to initialize DAITA hooks")]
     #[cfg(feature = "daita")]
     DaitaHooks(#[from] daita::Error),
@@ -248,6 +244,7 @@ impl<T: DeviceTransports> Connection<T> {
 }
 
 impl<T: DeviceTransports> Device<T> {
+    /// Stop tunneling traffic and shut down the [`Device`].
     pub async fn stop(self) {
         Self::stop_inner(self.inner.clone()).await
     }
@@ -702,6 +699,10 @@ impl<T: DeviceTransports> DeviceState<T> {
 
                 let mut peer = peer.lock().await;
                 let Some(peer_addr) = peer.endpoint().addr else {
+                    // TODO: Implement the following error handling from section 3 of the
+                    // whitepaper: If [peer_addr] matches no peer, it is dropped, and the sender is
+                    // informed by a standard ICMP “no route to host” packet, as well as returning
+                    // -ENOKEY to user space.
                     log::error!("No endpoint");
                     continue;
                 };

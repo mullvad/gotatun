@@ -20,25 +20,34 @@ use crate::serialization::KeyBytes;
 #[cfg(feature = "daita-uapi")]
 use crate::device::daita::DaitaSettings;
 
+/// A UAPI request to get or set device configuration.
 #[derive(Debug)]
 pub enum Request {
+    /// Request to read device configuration.
     Get(Get),
+    /// Request to modify device configuration.
     Set(Set),
 }
 
+/// A UAPI response containing device configuration or operation status.
 #[derive(Debug)]
 pub enum Response {
+    /// Response containing device configuration.
     Get(GetResponse),
+    /// Response indicating the result of a set operation.
     Set(SetResponse),
 }
 
+/// Request to read the current device configuration.
 #[derive(Default, Debug)]
 #[non_exhaustive]
 pub struct Get;
 
+/// Peer information in a device configuration response.
 #[derive(Debug, TypedBuilder)]
 #[non_exhaustive]
 pub struct GetPeer {
+    /// The peer configuration.
     pub peer: Peer,
 
     /// This and [`Self::last_handshake_time_nsec`] indicate in the number of seconds and
@@ -59,7 +68,8 @@ pub struct GetPeer {
     #[builder(default, setter(strip_option, into))]
     pub tx_bytes: Option<u64>,
 
-    /// Total padded bytes in sent data packets to the previously added peer due to constant-size padding.
+    /// Total padded bytes in sent data packets to the previously added peer due to constant-size
+    /// padding.
     #[builder(default, setter(strip_option, into))]
     pub tx_padding_bytes: Option<u64>,
 
@@ -67,7 +77,8 @@ pub struct GetPeer {
     #[builder(default, setter(strip_option, into))]
     pub tx_decoy_packet_bytes: Option<u64>,
 
-    /// Total padded bytes in received data packets from the previously added peer due to constant-size padding.
+    /// Total padded bytes in received data packets from the previously added peer due to
+    /// constant-size padding.
     #[builder(default, setter(strip_option, into))]
     pub rx_padding_bytes: Option<u64>,
 
@@ -76,6 +87,7 @@ pub struct GetPeer {
     pub rx_decoy_packet_bytes: Option<u64>,
 }
 
+/// Response containing the current device configuration.
 #[derive(TypedBuilder, Default, Debug)]
 #[non_exhaustive]
 pub struct GetResponse {
@@ -91,17 +103,20 @@ pub struct GetResponse {
     #[builder(default, setter(strip_option, into))]
     pub fwmark: Option<u32>,
 
+    /// List of peers and their statistics.
     #[builder(default, setter(skip))]
     pub peers: Vec<GetPeer>,
 
+    /// Error code (0 for success, or a standard errno value).
     pub errno: i32,
 }
 
+/// Request to modify device configuration.
 #[derive(TypedBuilder, Default, Debug)]
 #[non_exhaustive]
 pub struct Set {
-    /// The private key of the interface. If this key is all zero, it indicates that the private key
-    /// should be removed.
+    /// The private key of the interface. If this key is all zero, it indicates that the private
+    /// key should be removed.
     #[builder(default, setter(strip_option, into))]
     pub private_key: Option<KeyBytes>,
 
@@ -124,13 +139,16 @@ pub struct Set {
     #[builder(default, setter(strip_option, into))]
     pub protocol_version: Option<String>,
 
+    /// List of peers to add or modify.
     #[builder(default, setter(skip))]
     pub peers: Vec<SetPeer>,
 }
 
+/// Peer configuration in a device modification request.
 #[derive(TypedBuilder, Debug)]
 #[non_exhaustive]
 pub struct SetPeer {
+    /// The peer configuration.
     pub peer: Peer,
 
     /// Remove the peer instead of adding it.
@@ -141,19 +159,23 @@ pub struct SetPeer {
     #[builder(setter(strip_bool))]
     pub update_only: bool,
 
-    /// This key/value combo indicates that the allowed IPs (perhaps an empty list) should replace any existing ones of the previously added peer entry, rather than append to the existing allowed IPs list.
+    /// This key/value combo indicates that the allowed IPs (perhaps an empty list) should replace
+    /// any existing ones of the previously added peer entry, rather than append to the existing
+    /// allowed IPs list.
     #[builder(setter(strip_bool))]
     pub replace_allowed_ips: bool,
 }
 
+/// Response indicating the result of a set operation.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct SetResponse {
+    /// Error code (0 for success, or a standard errno value).
     pub errno: i32,
 }
 
+/// A configuration value which may be either set to something, or explicitly unset.
 #[derive(Debug)]
-/// A config value which may be either set to something, or to nothing.
 pub enum SetUnset<T> {
     /// Set the value to `T`
     Set(T),
@@ -162,6 +184,7 @@ pub enum SetUnset<T> {
     Unset,
 }
 
+/// Peer configuration for a WireGuard device.
 #[derive(TypedBuilder, Debug)]
 #[non_exhaustive]
 pub struct Peer {
@@ -179,7 +202,8 @@ pub struct Peer {
     #[builder(default, setter(strip_option, into))]
     pub endpoint: Option<SocketAddr>,
 
-    /// The persistent keepalive interval of the previously added peer entry. The value 0 disables it.
+    /// The persistent keepalive interval of the previously added peer entry. The value 0 disables
+    /// it.
     #[builder(default, setter(strip_option, into))]
     pub persistent_keepalive_interval: Option<u16>,
 
@@ -189,6 +213,7 @@ pub struct Peer {
     #[builder(default)]
     pub allowed_ip: Vec<IpNetwork>,
 
+    /// DAITA settings for this peer.
     #[cfg(feature = "daita-uapi")]
     #[builder(default, setter(strip_option, into))]
     pub daita_settings: Option<SetUnset<DaitaSettings>>,
@@ -207,6 +232,7 @@ impl From<Get> for Request {
 }
 
 impl Set {
+    /// Add a peer to this set request.
     pub fn peer(mut self, peer: SetPeer) -> Self {
         self.peers.push(peer);
         self
@@ -214,7 +240,7 @@ impl Set {
 }
 
 impl Peer {
-    /// Create a new [Peer] with only `public_key` set.
+    /// Create a new [`Peer`] with only `public_key` set.
     pub fn new(public_key: impl Into<KeyBytes>) -> Self {
         Self {
             public_key: public_key.into(),
@@ -227,6 +253,7 @@ impl Peer {
         }
     }
 
+    /// Set the endpoint address for this peer.
     pub fn with_endpoint(mut self, endpoint: impl Into<SocketAddr>) -> Self {
         self.endpoint = Some(endpoint.into());
         self
@@ -234,7 +261,7 @@ impl Peer {
 }
 
 impl SetPeer {
-    /// Create a new [`SetPeer`] with only `public_key` set.
+    /// Create a new [`SetPeer`] with only the peer's `public_key` set.
     pub fn new(public_key: impl Into<KeyBytes>) -> Self {
         Self {
             peer: Peer::new(public_key),
@@ -244,8 +271,21 @@ impl SetPeer {
         }
     }
 
+    /// Set the endpoint address for this peer.
     pub fn with_endpoint(mut self, endpoint: impl Into<SocketAddr>) -> Self {
         self.peer.endpoint = Some(endpoint.into());
+        self
+    }
+
+    /// Mark this peer for removal.
+    pub fn remove(mut self) -> Self {
+        self.remove = true;
+        self
+    }
+
+    /// Set this operation to only update existing peers (not add new ones).
+    pub fn update_only(mut self) -> Self {
+        self.update_only = true;
         self
     }
 }
@@ -268,9 +308,17 @@ impl GetPeer {
 }
 
 impl GetResponse {
+    /// Add a peer to this get response.
     pub fn peer(mut self, peer: GetPeer) -> Self {
         self.peers.push(peer);
         self
+    }
+}
+
+impl From<Peer> for GetPeer {
+    /// Create a new [`GetPeer`] with only the peer configuration set.
+    fn from(peer: Peer) -> Self {
+        Self::builder().peer(peer).build()
     }
 }
 
@@ -283,7 +331,7 @@ impl Display for Response {
     }
 }
 
-/// Convert an &Option<T> to Option<(&str, &dyn Display)>, turning the variable name into the str.
+/// Convert an `&Option<T>` to `Option<(&str, &dyn Display)>`, turning the variable name into the str.
 macro_rules! opt_to_key_and_display {
     ($i:ident) => {
         $i.as_ref().map(|r| (stringify!($i), r as &dyn Display))

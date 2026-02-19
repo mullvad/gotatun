@@ -7,13 +7,33 @@ use tokio::{sync::watch, time::sleep};
 use tun::AbstractDevice;
 
 use crate::{
-    device::Error,
     packet::{Ip, Packet, PacketBufPool},
     task::Task,
     tun::{IpRecv, IpSend, MtuWatcher},
 };
 
 use std::{convert::Infallible, io, iter, sync::Arc, time::Duration};
+
+/// Error from [`TunDevice`].
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    /// Failed to open TUN device
+    #[error("Failed to open TUN device: {0}")]
+    OpenTun(#[source] tun::Error),
+
+    /// Failed to get TUN device name
+    #[error("Failed to get TUN device name: {0}")]
+    GetTunName(#[source] tun::Error),
+
+    /// Unsupported TUN feature
+    #[error("Unsupported TUN feature: {0}")]
+    UnsupportedFeature(String),
+
+    /// Failed to get TUN device MTU
+    #[error("Failed to get TUN device MTU: {0}")]
+    GetMtu(#[source] tun::Error),
+}
 
 /// A kernel virtual network device; a TUN device.
 ///
@@ -53,19 +73,19 @@ impl TunDevice {
         });
         // TODO: for wintun, must set path or enable signature check
         // we should upstream to `tun`
-        let tun = tun::create_as_async(&tun_config).map_err(crate::device::Error::OpenTun)?;
+        let tun = tun::create_as_async(&tun_config).map_err(Error::OpenTun)?;
         let tun = TunDevice::from_tun_device(tun)?;
         Ok(tun)
     }
 
     /// Construct from a [`tun::AsyncDevice`].
-    pub fn from_tun_device(tun: tun::AsyncDevice) -> io::Result<Self> {
+    pub fn from_tun_device(tun: tun::AsyncDevice) -> Result<Self, Error> {
         #[cfg(target_os = "linux")]
         if tun.packet_information() {
-            return Err(io::Error::other("packet_information is not supported"));
+            return Err(Error::UnsupportedFeature("packet_information".to_string()));
         }
 
-        let mtu = tun.mtu()?;
+        let mtu = tun.mtu().map_err(Error::GetMtu)?;
         let (tx, rx) = watch::channel(mtu);
 
         let tun = Arc::new(tun);
@@ -99,6 +119,7 @@ impl TunDevice {
         })
     }
 
+    /// Get the name of the TUN device.
     pub fn name(&self) -> Result<String, Error> {
         self.tun.tun_name().map_err(Error::GetTunName)
     }

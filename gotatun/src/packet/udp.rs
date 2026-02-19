@@ -18,7 +18,7 @@ pub struct Udp<Payload: ?Sized = [u8]> {
     /// UDP header.
     pub header: UdpHeader,
     /// UDP payload. The type of this is `[u8]` by default, but it may be any zerocopy type,
-    /// e.g. a `WgData`
+    /// e.g. a `WgData`.
     pub payload: Payload,
 }
 
@@ -38,7 +38,6 @@ pub struct UdpHeader {
 
 impl UdpHeader {
     /// Length of a [`UdpHeader`], in bytes.
-    #[allow(dead_code)]
     pub const LEN: usize = size_must_be::<UdpHeader>(8);
 }
 

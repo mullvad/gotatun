@@ -300,11 +300,15 @@ enum HandshakeState {
     Expired,
 }
 
+/// WireGuard handshake state machine.
+///
+/// Manages the Noise protocol handshake for establishing secure sessions.
 pub struct Handshake {
     params: NoiseParams,
     /// Index of the next session
     next_index: u32,
-    /// Allow to have two outgoing handshakes in flight, because sometimes we may receive a delayed response to a handshake with bad networks
+    /// Allow to have two outgoing handshakes in flight, because sometimes we may receive a delayed
+    /// response to a handshake with bad networks
     previous: HandshakeState,
     /// Current handshake state
     state: HandshakeState,
@@ -324,11 +328,25 @@ struct Cookies {
 }
 
 #[derive(Debug)]
+/// Partial handshake information extracted from a handshake initiation packet.
+///
+/// This contains the peer's index and public key without requiring knowledge
+/// of which peer sent the packet.
 pub struct HalfHandshake {
+    /// The sender's session index.
     pub peer_index: u32,
+    /// The sender's static public key.
     pub peer_static_public: [u8; 32],
 }
 
+/// Parse a handshake initiation packet without prior knowledge of the sender.
+///
+/// This performs cryptographic validation to extract the peer's public key
+/// from the handshake initiation, allowing the receiver to identify the peer.
+///
+/// # Errors
+///
+/// Returns an error if the packet is malformed or cryptographic validation fails.
 pub fn parse_handshake_anon(
     static_private: &x25519::StaticSecret,
     static_public: &x25519::PublicKey,
@@ -468,7 +486,8 @@ impl Handshake {
         self.cookies.write_cookie = None;
     }
 
-    // The index used is 24 bits for peer index, allowing for 16M active peers per server and 8 bits for cyclic session index
+    // The index used is 24 bits for peer index, allowing for 16M active peers per server and 8 bits
+    // for cyclic session index
     fn inc_index(&mut self) -> u32 {
         let index = self.next_index;
         let idx8 = index as u8;
