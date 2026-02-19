@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Fix excessive rekey attempts.
 - Fix potential panic due to clocks not being truly monotonic.
+- Pad payload to multiple of 16 bytes before encryption in accordance with the WireGuard
+  specification.
 
 
 ## [0.2.0] - 2026-01-13
