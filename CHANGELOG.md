@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove unused `InvalidTunnelName` and `DropPrivileges` variants of `device::Error`.
 - Move `device::Error` variants specific to the `tun` feature into `tun::tun_async_device::Error`.
 - Rename DAITA-concept of "padding packets" to "decoy packets"
+- Remove dependency on `ring` as a crypto provider.
 
 
 ## [0.2.0] - 2026-01-13

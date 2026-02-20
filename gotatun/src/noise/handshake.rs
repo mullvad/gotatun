@@ -14,10 +14,9 @@ use crate::x25519;
 use aead::{Aead, Payload};
 use blake2::digest::{FixedOutput, KeyInit};
 use blake2::{Blake2s256, Blake2sMac, Digest};
-use chacha20poly1305::XChaCha20Poly1305;
+use chacha20poly1305::{AeadInPlace, ChaCha20Poly1305, Nonce, XChaCha20Poly1305};
 use constant_time_eq::constant_time_eq_n;
 use rand_core::OsRng;
-use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use std::convert::TryInto;
 use std::time::{Duration, SystemTime};
 use zerocopy::IntoBytes;
@@ -109,16 +108,14 @@ fn aead_chacha20_seal_inner(
     data: &[u8],
     aad: &[u8],
 ) {
-    let key = LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, key).unwrap());
+    // TODO: sus. Can we use Key/KeyInit explicitly?
+    let cipher = ChaCha20Poly1305::new_from_slice(key).unwrap();
+    let nonce = Nonce::from_slice(&nonce);
 
     ciphertext[..data.len()].copy_from_slice(data);
 
-    let tag = key
-        .seal_in_place_separate_tag(
-            Nonce::assume_unique_for_key(nonce),
-            Aad::from(aad),
-            &mut ciphertext[..data.len()],
-        )
+    let tag = cipher
+        .encrypt_in_place_detached(nonce, aad, &mut ciphertext[..data.len()])
         .unwrap();
 
     ciphertext[data.len()..].copy_from_slice(tag.as_ref());
@@ -148,18 +145,18 @@ fn aead_chacha20_open_inner(
     nonce: [u8; 12],
     data: &[u8],
     aad: &[u8],
-) -> Result<(), ring::error::Unspecified> {
-    let key = LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, key).unwrap());
+) -> Result<(), chacha20poly1305::Error> {
+    // TODO: sus. Can we use Key/KeyInit explicitly?
+    let key = key.into(); // KeyInit::new_from_slice(key).unwrap();
+    let cipher = ChaCha20Poly1305::new(key);
+    let nonce = Nonce::from_slice(&nonce);
 
     let mut inner_buffer = data.to_owned();
 
-    let plaintext = key.open_in_place(
-        Nonce::assume_unique_for_key(nonce),
-        Aad::from(aad),
-        &mut inner_buffer,
-    )?;
+    cipher.decrypt_in_place(nonce, aad, &mut inner_buffer)?;
+    let plaintext = inner_buffer;
 
-    buffer.copy_from_slice(plaintext);
+    buffer.copy_from_slice(&plaintext);
 
     Ok(())
 }
