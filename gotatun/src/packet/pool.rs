@@ -26,11 +26,11 @@ impl<const N: usize> PacketBufPool<N> {
         //let (_tx, rx) = crossbeam_channel::bounded(capacity);
         let queue = crossbeam::queue::ArrayQueue::new(capacity);
 
-        //let mut contiguous_buf = BytesMut::zeroed(N * capacity);
+        let mut contiguous_buf = BytesMut::zeroed(N * capacity);
         // pre-allocate buffers
         for _ in 0..capacity {
-            //_tx.send(contiguous_buf.split_to(N))
-            queue.push(BytesMut::zeroed(N)).expect("we have enough capacity");
+            queue.push(contiguous_buf.split_to(N)).unwrap();
+            //queue.push(BytesMut::zeroed(N)).expect("we have enough capacity");
         }
         //debug_assert!(contiguous_buf.is_empty());
 
