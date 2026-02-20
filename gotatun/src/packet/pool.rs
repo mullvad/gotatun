@@ -41,12 +41,8 @@ impl<const N: usize> PacketBufPool<N> {
     /// Try to re-use a [`Packet`] from the pool.
     fn re_use(&self) -> Option<Packet<[u8]>> {
         let mut buf = self.rx.try_recv().ok()?;
-        buf.clear();
-        debug_assert!(buf.try_reclaim(N));
-        // Safety: the buffer was created with BytesMut::zeroed(N) and its capacity is always
-        // maintained at N. All N bytes are initialized (originally zeroed; subsequent writes
-        // never exceed N bytes).
-        unsafe { buf.set_len(N) };
+        debug_assert!(buf.capacity() == N);
+        buf.resize(N, 0);
 
         Some(Packet::new_from_pool(self._tx.clone(), buf))
     }
