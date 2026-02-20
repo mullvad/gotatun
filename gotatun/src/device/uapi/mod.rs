@@ -505,17 +505,16 @@ async fn on_api_set(
             continue;
         }
 
-        let (mut new_peer, index) = match device.remove_peer(&public_key).await {
+        let mut new_peer = match device.remove_peer(&public_key).await {
             None => {
                 // New peer
-                (crate::device::Peer::new(public_key), device.next_index())
+                crate::device::Peer::new(public_key)
             }
             Some(old_peer) => {
                 // Take existing peer
                 let peer = old_peer.lock().await;
-                let index = peer.index();
 
-                let new_peer = crate::device::Peer {
+                crate::device::Peer {
                     public_key,
                     preshared_key: peer.preshared_key,
                     endpoint: peer.endpoint().addr,
@@ -528,9 +527,7 @@ async fn on_api_set(
                     },
                     #[cfg(feature = "daita")]
                     daita_settings: peer.daita_settings().cloned(),
-                };
-
-                (new_peer, index)
+                }
             }
         };
 
@@ -567,7 +564,7 @@ async fn on_api_set(
 
         new_peer.allowed_ips.extend(allowed_ip);
 
-        device.add_peer(new_peer, index);
+        device.add_peer(new_peer);
     }
 
     // If there is no key pair, we cannot reconfigure the connection

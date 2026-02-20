@@ -22,6 +22,7 @@ use zerocopy::IntoBytes;
 
 use crate::{
     device::{Device, DeviceBuilder, Peer},
+    noise::index_table::IndexTable,
     packet::{
         Ip, IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Packet, PacketBufPool, Udp, WgData,
         WgHandshakeInit, WgHandshakeResp, WgKind,
@@ -29,6 +30,12 @@ use crate::{
     tun::{IpRecv, IpSend, MtuWatcher},
     udp::channel::{UdpChannelFactory, UdpChannelV4, UdpChannelV6},
 };
+
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+
+pub const ALICE_INDEX_SEED: u64 = 1;
+pub const BOB_INDEX_SEED: u64 = 2;
 
 pub const TUN_MTU: u16 = 1360;
 
@@ -98,6 +105,9 @@ pub async fn device_pair() -> (MockDevice, MockDevice, MockEavesdropper) {
         .with_udp(udp_alice)
         .with_listen_port(port) // TODO: is this necessary?
         .with_peer(peer_b)
+        .with_index_table(IndexTable::from_rng(StdRng::seed_from_u64(
+            ALICE_INDEX_SEED,
+        )))
         .build()
         .await
         .expect("create mock device");
@@ -108,6 +118,7 @@ pub async fn device_pair() -> (MockDevice, MockDevice, MockEavesdropper) {
         .with_udp(udp_bob)
         .with_listen_port(port) // TODO: is this necessary?
         .with_peer(peer_a)
+        .with_index_table(IndexTable::from_rng(StdRng::seed_from_u64(BOB_INDEX_SEED)))
         .build()
         .await
         .expect("create mock device");

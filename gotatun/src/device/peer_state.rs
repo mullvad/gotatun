@@ -30,8 +30,6 @@ pub struct Endpoint {
 pub struct PeerState {
     /// The associated tunnel struct
     pub(crate) tunnel: Tunn,
-    /// The index the tunnel uses
-    index: u32,
     pub(crate) endpoint: Endpoint,
     pub(crate) allowed_ips: AllowedIps<()>,
     pub(crate) preshared_key: Option<[u8; 32]>,
@@ -45,7 +43,6 @@ pub struct PeerState {
 impl PeerState {
     pub fn new(
         tunnel: Tunn,
-        index: u32,
         endpoint: Option<SocketAddr>,
         allowed_ips: &[IpNetwork],
         preshared_key: Option<[u8; 32]>,
@@ -53,7 +50,6 @@ impl PeerState {
     ) -> PeerState {
         Self {
             tunnel,
-            index,
             endpoint: Endpoint { addr: endpoint },
             allowed_ips: allowed_ips.iter().map(|ip| (ip, ())).collect(),
             preshared_key,
@@ -126,9 +122,5 @@ impl PeerState {
 
     pub fn persistent_keepalive(&self) -> Option<u16> {
         self.tunnel.persistent_keepalive()
-    }
-
-    pub fn index(&self) -> u32 {
-        self.index
     }
 }
