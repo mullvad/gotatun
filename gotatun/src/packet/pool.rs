@@ -1,53 +1,52 @@
 // Copyright (c) 2025 Mullvad VPN AB. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::sync::Arc;
+
 use bytes::BytesMut;
+//use crossbeam_deque::Steal;
 
 use crate::packet::Packet;
 
 /// Used to send a previously allocated [`BytesMut`] back to [`PacketBufPool`] when its dropped.
-pub type ReturnToPool = crossbeam_channel::Sender<BytesMut>;
-type GetFromPool = crossbeam_channel::Receiver<BytesMut>;
+//pub type Bla = crossbeam_deque::Injector<BytesMut>;
+pub type Bla = crossbeam::queue::ArrayQueue<BytesMut>;
+//type GetFromPool = crossbeam_channel::Receiver<BytesMut>;
 
 /// A pool of packet buffers.
 #[derive(Clone)]
 pub struct PacketBufPool<const N: usize = 4096> {
-    rx: GetFromPool,
-    _tx: ReturnToPool,
+    queue: Arc<Bla>,
 }
 
 impl<const N: usize> PacketBufPool<N> {
     /// Create a new [`PacketBufPool`] with space for at least `capacity` packets,
     /// each allocated with a capacity of `N` bytes.
     pub fn new(capacity: usize) -> Self {
-        let (_tx, rx) = crossbeam_channel::bounded(capacity);
+        //let (_tx, rx) = crossbeam_channel::bounded(capacity);
+        let queue = crossbeam::queue::ArrayQueue::new(capacity);
 
         //let mut contiguous_buf = BytesMut::zeroed(N * capacity);
         // pre-allocate buffers
         for _ in 0..capacity {
             //_tx.send(contiguous_buf.split_to(N))
-            _tx.send(BytesMut::zeroed(N))
-                .expect("chan has space for 'capacity' bufs");
+            queue.push(BytesMut::zeroed(N)).expect("we have enough capacity");
         }
         //debug_assert!(contiguous_buf.is_empty());
 
-        PacketBufPool { rx, _tx }
-    }
-
-    /// Get the configured capacity of this pool.
-    pub fn capacity(&self) -> usize {
-        self.rx.capacity().expect("channel is bounded")
+        PacketBufPool { queue: Arc::new(queue) }
     }
 
     /// Try to re-use a [`Packet`] from the pool.
     fn re_use(&self) -> Option<Packet<[u8]>> {
-        let mut buf = self.rx.try_recv().ok()?;
+        let mut buf = self.queue.pop()?;
+        //let mut buf = self.rx.try_recv().ok()?;
         //debug_assert!(buf.capacity() == N);
         //assert!(buf.capacity() == N);
         buf.resize(N, 0);
         //unsafe { buf.set_len(N) };
 
-        Some(Packet::new_from_pool(self._tx.clone(), buf))
+        Some(Packet::new_from_pool(self.queue.clone(), buf))
     }
 
     /// Get a new [`Packet`] from the pool.

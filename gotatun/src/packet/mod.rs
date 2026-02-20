@@ -49,7 +49,7 @@ use std::{
     fmt::{self, Debug},
     marker::PhantomData,
     mem,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut}, sync::Arc,
 };
 
 use bytes::{Buf, BytesMut};
@@ -114,14 +114,15 @@ struct PacketInner {
     buf: BytesMut,
 
     // If the [BytesMut] was allocated by a [PacketBufPool], this channel is used to return the buffer.
-    _return_to_pool: Option<ReturnToPool>,
+    _return_to_pool: Option<Arc<Bla>>,
 }
 
 impl Drop for PacketInner {
     fn drop(&mut self) {
         if let Some(return_to_pool) = self._return_to_pool.take() {
             // NOTE: Default for `BytesMut` has capacity 0, so it's cheap to make by `mem::take`.
-            let res = return_to_pool.try_send(mem::take(&mut self.buf));
+            //let res = return_to_pool.try_send(mem::take(&mut self.buf));
+            let res = return_to_pool.push(mem::take(&mut self.buf));
             debug_assert!(
                 res.is_ok(),
                 "Pool channel should never be full since we only send back buffers that were allocated by the pool"
@@ -235,7 +236,7 @@ impl Packet<[u8]> {
     ///
     /// This is used internally by [`PacketBufPool`] to create packets that are
     /// automatically returned to the pool when dropped.
-    pub fn new_from_pool(return_to_pool: ReturnToPool, bytes: BytesMut) -> Self {
+    pub fn new_from_pool(return_to_pool: Arc<Bla>, bytes: BytesMut) -> Self {
         Self {
             inner: PacketInner {
                 buf: bytes,
