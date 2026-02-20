@@ -37,6 +37,7 @@ pub struct DeviceBuilder<Udp, TunTx, TunRx> {
 
     // TODO: consider turning this into a typestate, and adding a special case for single peer
     peers: Vec<Peer>,
+    index_table: Option<IndexTable>,
 
     #[cfg(target_os = "linux")]
     fwmark: Option<u32>,
@@ -70,6 +71,7 @@ impl DeviceBuilder<Nul, Nul, Nul> {
             uapi: None,
             port: 0,
             peers: Vec::new(),
+            index_table: None,
             #[cfg(target_os = "linux")]
             fwmark: None,
         }
@@ -95,6 +97,7 @@ impl<X, Y> DeviceBuilder<Nul, X, Y> {
             uapi: self.uapi,
             port: self.port,
             peers: self.peers,
+            index_table: self.index_table,
             #[cfg(target_os = "linux")]
             fwmark: self.fwmark,
         }
@@ -149,6 +152,7 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
             uapi: self.uapi,
             port: self.port,
             peers: self.peers,
+            index_table: self.index_table,
             #[cfg(target_os = "linux")]
             fwmark: self.fwmark,
         }
@@ -194,6 +198,14 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
         self
     }
 
+    /// Set the [`IndexTable`] to use for this device.
+    ///
+    /// By default, the device uses [IndexTable::from_os_rng].
+    pub fn with_index_table(mut self, index_table: IndexTable) -> Self {
+        self.index_table = Some(index_table);
+        self
+    }
+
     /// Specify the `SO_MARK` argument to the [`UdpTransportFactory`].
     ///
     /// You probably only want this when using [`with_default_udp`](Self::with_default_udp).
@@ -228,7 +240,7 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             tun_rx: Arc::new(Mutex::new(self.tun_rx)),
             fwmark,
             key_pair: None,
-            index_table: IndexTable::from_os_rng(),
+            index_table: self.index_table.unwrap_or_else(IndexTable::from_os_rng),
             peers: Default::default(),
             peers_by_idx: parking_lot::Mutex::new(Default::default()),
             peers_by_ip: AllowedIps::new(),
