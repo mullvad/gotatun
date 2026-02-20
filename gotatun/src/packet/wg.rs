@@ -178,7 +178,9 @@ impl WgData {
     }
 
     /// Strip the tag from the encapsulated packet.
-    fn split_encapsulated_packet_and_tag_mut(&mut self) -> (&mut [u8], &mut [u8; WgData::TAG_LEN]) {
+    pub fn split_encapsulated_packet_and_tag_mut(
+        &mut self,
+    ) -> (&mut [u8], &mut [u8; WgData::TAG_LEN]) {
         self.encrypted_encapsulated_packet_and_tag
             .split_last_chunk_mut::<{ WgData::TAG_LEN }>()
             .expect("WgDataAndTag is at least TAG_LEN bytes long")

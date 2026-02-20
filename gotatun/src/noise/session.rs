@@ -10,16 +10,16 @@ use crate::{
     packet::{Packet, WgData, WgDataHeader, WgKind},
 };
 use bytes::{Buf, BytesMut};
+use chacha20poly1305::{AeadInPlace, ChaCha20Poly1305, KeyInit, Nonce, Tag};
 use parking_lot::Mutex;
-use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use zerocopy::FromBytes;
 
 pub struct Session {
     pub(crate) receiving_index: u32,
     sending_index: u32,
-    receiver: LessSafeKey,
-    sender: LessSafeKey,
+    receiver: ChaCha20Poly1305,
+    sender: ChaCha20Poly1305,
     sending_key_counter: AtomicUsize,
     receiving_key_counter: Mutex<ReceivingKeyCounterValidator>,
 }
@@ -164,10 +164,8 @@ impl Session {
         Session {
             receiving_index: local_index,
             sending_index: peer_index,
-            receiver: LessSafeKey::new(
-                UnboundKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
-            ),
-            sender: LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &sending_key).unwrap()),
+            receiver: ChaCha20Poly1305::new_from_slice(&receiving_key).unwrap(),
+            sender: ChaCha20Poly1305::new_from_slice(&sending_key).unwrap(),
             sending_key_counter: AtomicUsize::new(0),
             receiving_key_counter: Mutex::new(Default::default()),
         }
@@ -219,15 +217,12 @@ impl Session {
 
         let mut nonce = [0u8; 12];
         nonce[4..12].copy_from_slice(&sending_key_counter.to_le_bytes());
+        let nonce = Nonce::from_slice(&nonce);
 
         // Encrypt the inner packet+padding in-place.
         let tag = self
             .sender
-            .seal_in_place_separate_tag(
-                Nonce::assume_unique_for_key(nonce),
-                Aad::from(&[]),
-                data.encrypted_encapsulated_packet_mut(),
-            )
+            .encrypt_in_place_detached(nonce, &[], data.encrypted_encapsulated_packet_mut())
             .expect("encryption must succeed");
 
         data.tag_mut().copy_from_slice(tag.as_ref());
@@ -258,17 +253,15 @@ impl Session {
 
         let mut nonce = [0u8; 12];
         nonce[4..12].copy_from_slice(&packet.header.counter.to_bytes());
+        let nonce = Nonce::from_slice(&nonce);
 
         // decrypt the data in-place
-        let decrypted_len = self
-            .receiver
-            .open_in_place(
-                Nonce::assume_unique_for_key(nonce),
-                Aad::from(&[]),
-                &mut packet.encrypted_encapsulated_packet_and_tag,
-            )
-            .map_err(|_| WireGuardError::InvalidAeadTag)?
-            .len();
+        let (buffer, tag) = packet.split_encapsulated_packet_and_tag_mut();
+        let tag = Tag::from_slice(tag);
+        self.receiver
+            .decrypt_in_place_detached(nonce, &[], buffer, tag)
+            .map_err(|_| WireGuardError::InvalidAeadTag)?;
+        let decrypted_len = buffer.len();
 
         // shift the packet buffer slice onto the decrypted data
         let mut packet = packet.into_bytes();
