@@ -113,16 +113,15 @@ pub struct Packet<Kind: ?Sized = [u8]> {
 struct PacketInner {
     buf: BytesMut,
 
-    // If the [BytesMut] was allocated by a [PacketBufPool], this will return the buffer to be
-    // re-used later.
+    // If the [BytesMut] was allocated by a [PacketBufPool], this channel is used to return the buffer.
     _return_to_pool: Option<ReturnToPool>,
 }
 
 impl Drop for PacketInner {
     fn drop(&mut self) {
-        if let Some(mut return_to_pool) = self._return_to_pool.take() {
-            // NOTE: Default for `BytesMut` has capacity 0, so is cheap make by `mem::take`.
-            return_to_pool.recycle(mem::take(&mut self.buf));
+        if let Some(return_to_pool) = self._return_to_pool.take() {
+            // NOTE: Default for `BytesMut` has capacity 0, so it's cheap to make by `mem::take`.
+            let _ = return_to_pool.try_send(mem::take(&mut self.buf));
         }
     }
 }

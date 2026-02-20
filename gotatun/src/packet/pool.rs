@@ -5,11 +5,15 @@ use bytes::BytesMut;
 
 use crate::packet::Packet;
 
+/// Used to send a previously allocated [`BytesMut`] back to [`PacketBufPool`] when its dropped.
+pub type ReturnToPool = crossbeam_channel::Sender<BytesMut>;
+type GetFromPool = crossbeam_channel::Receiver<BytesMut>;
+
 /// A pool of packet buffers.
 #[derive(Clone)]
 pub struct PacketBufPool<const N: usize = 4096> {
-    rx: crossbeam_channel::Receiver<BytesMut>,
-    _tx: crossbeam_channel::Sender<BytesMut>,
+    rx: GetFromPool,
+    _tx: ReturnToPool,
 }
 
 impl<const N: usize> PacketBufPool<N> {
@@ -44,11 +48,7 @@ impl<const N: usize> PacketBufPool<N> {
         // never exceed N bytes).
         unsafe { buf.set_len(N) };
 
-        let return_to_pool = ReturnToPool {
-            queue: self._tx.clone(),
-        };
-
-        Some(Packet::new_from_pool(return_to_pool, buf))
+        Some(Packet::new_from_pool(self._tx.clone(), buf))
     }
 
     /// Get a new [`Packet`] from the pool.
@@ -61,22 +61,7 @@ impl<const N: usize> PacketBufPool<N> {
 
         let buf = BytesMut::zeroed(N);
 
-        let return_to_pool = ReturnToPool {
-            queue: self._tx.clone(),
-        };
-
-        Packet::new_from_pool(return_to_pool, buf)
-    }
-}
-
-/// This sends a previously allocated [`BytesMut`] back to [`PacketBufPool`] when its dropped.
-pub struct ReturnToPool {
-    queue: crossbeam_channel::Sender<BytesMut>,
-}
-
-impl ReturnToPool {
-    pub fn recycle(&mut self, buf: BytesMut) {
-        let _ = self.queue.try_send(buf);
+        Packet::new_from_pool(self._tx.clone(), buf)
     }
 }
 
