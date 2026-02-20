@@ -38,7 +38,7 @@ where
         // https://github.com/torvalds/linux/blob/e81dd54f62c753dd423d1a9b62481a1c599fb975/drivers/net/wireguard/peerlookup.c#L95-L117
         // Even if the table contained 2^31 entries, you'd usually only need 1-2 attempts.
         loop {
-            let idx = g.0.next_u32();
+            let idx = Self::next_id(&mut g.0);
             if g.1.insert(idx) {
                 return Index {
                     value: idx,
@@ -46,6 +46,11 @@ where
                 };
             }
         }
+    }
+
+    /// Naively generate the next session ID. This index is not guaranteed to be locally unique.
+    pub(crate) fn next_id(rng: &mut Rng) -> u32 {
+        rng.next_u32()
     }
 
     /// Create a new [`IndexTable`] using the given [`RngCore`].
