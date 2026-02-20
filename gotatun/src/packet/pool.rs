@@ -22,13 +22,14 @@ impl<const N: usize> PacketBufPool<N> {
     pub fn new(capacity: usize) -> Self {
         let (_tx, rx) = crossbeam_channel::bounded(capacity);
 
-        let mut contiguous_buf = BytesMut::zeroed(N * capacity);
+        //let mut contiguous_buf = BytesMut::zeroed(N * capacity);
         // pre-allocate buffers
         for _ in 0..capacity {
-            _tx.send(contiguous_buf.split_to(N))
+            //_tx.send(contiguous_buf.split_to(N))
+            _tx.send(BytesMut::zeroed(N))
                 .expect("chan has space for 'capacity' bufs");
         }
-        debug_assert!(contiguous_buf.is_empty());
+        //debug_assert!(contiguous_buf.is_empty());
 
         PacketBufPool { rx, _tx }
     }
