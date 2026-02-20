@@ -2,6 +2,7 @@ use std::{future::ready, time::Duration};
 
 use futures::{StreamExt, future::pending};
 use mock::MockEavesdropper;
+use rand::{RngCore, SeedableRng, rngs::StdRng};
 use tokio::{join, select, time::sleep};
 use zerocopy::IntoBytes;
 
@@ -87,6 +88,48 @@ async fn wg_data_length_is_x16() {
         assert!(dbg!(wg_data_count) >= packet_count());
     })
     .await
+}
+
+/// Test that indices work as expected.
+#[tokio::test]
+#[test_log::test]
+async fn test_indices() {
+    // Compute the expected first index from each seeded RNG.
+    let expected_alice_idx = StdRng::seed_from_u64(mock::ALICE_INDEX_SEED).next_u32();
+    let expected_bob_idx = StdRng::seed_from_u64(mock::BOB_INDEX_SEED).next_u32();
+
+    test_device_pair(async |eve| {
+        let check_init = async {
+            let indices: Vec<_> = eve
+                .wg_handshake_init()
+                .map(|p| p.sender_idx.get())
+                .collect()
+                .await;
+            assert_eq!(indices, [expected_alice_idx]);
+        };
+        let check_alice_data = async {
+            let wg_data_count = eve
+                .wg_data()
+                .map(|p| {
+                    // Every data packet is sent to Bob
+                    assert_eq!(p.header.receiver_idx, expected_bob_idx);
+                    p
+                })
+                .count()
+                .await;
+            assert!(dbg!(wg_data_count) >= packet_count());
+        };
+        let check_resp = async {
+            let indices: Vec<_> = eve
+                .wg_handshake_resp()
+                .map(|p| p.sender_idx.get())
+                .collect()
+                .await;
+            assert_eq!(indices, [expected_bob_idx]);
+        };
+        join!(check_init, check_resp, check_alice_data);
+    })
+    .await;
 }
 
 /// The number of packets we send through the tunnel
