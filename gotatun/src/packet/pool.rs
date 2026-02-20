@@ -49,7 +49,9 @@ impl<const N: usize> PacketBufPool<N> {
 
     /// Get a new [`Packet`] from the pool.
     ///
-    /// This will try to re-use an already allocated packet if possible, or allocate one otherwise.
+    /// This will try to re-use an already allocated packet if possible.
+    /// If the pool is empty, a new packet will be allocated. This packet
+    /// will not be returned to the pool when dropped.
     pub fn get(&self) -> Packet<[u8]> {
         if let Some(packet) = self.re_use() {
             return packet;
