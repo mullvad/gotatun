@@ -43,6 +43,7 @@ impl<const N: usize> PacketBufPool<N> {
     fn re_use(&self) -> Option<Packet<[u8]>> {
         let mut buf = self.rx.try_recv().ok()?;
         //debug_assert!(buf.capacity() == N);
+        assert!(buf.capacity() == N);
         //buf.resize(N, 0);
         unsafe { buf.set_len(N) };
 
