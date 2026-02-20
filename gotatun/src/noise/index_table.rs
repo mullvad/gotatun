@@ -96,3 +96,46 @@ impl std::fmt::Display for Index {
         self.value.fmt(f)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct ModCounter(u32);
+
+    impl RngCore for ModCounter {
+        fn next_u32(&mut self) -> u32 {
+            let v = self.0 % 3;
+            self.0 += 1;
+            v
+        }
+
+        fn next_u64(&mut self) -> u64 {
+            unimplemented!()
+        }
+
+        fn fill_bytes(&mut self, _: &mut [u8]) {
+            unimplemented!()
+        }
+    }
+
+    /// Test that indices are freed when dropped.
+    #[test]
+    fn test_reuse_on_drop() {
+        let table = IndexTable::from_rng(ModCounter::default());
+
+        let a = table.new_index();
+        let b = table.new_index();
+        let c = table.new_index();
+
+        assert_eq!(a.value, 0);
+        assert_eq!(b.value, 1);
+        assert_eq!(c.value, 2);
+
+        // 1 should be the only free value
+        drop(b);
+        let d = table.new_index();
+        assert_eq!(d.value, 1);
+    }
+}
