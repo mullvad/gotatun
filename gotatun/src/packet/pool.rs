@@ -68,9 +68,10 @@ impl<const N: usize> PacketBufPool<N> {
 
 #[cfg(test)]
 mod tests {
-    use std::{hint::black_box, thread};
-
     use super::PacketBufPool;
+    use crate::packet::Packet;
+    use bytes::BytesMut;
+    use std::{hint::black_box, thread};
 
     /// Test pre-allocation semantics of [PacketBufPool].
     #[test]
@@ -137,5 +138,31 @@ mod tests {
 
             drop((packet2, packet3));
         }
+    }
+
+    /// Make sure recycling doesn't break horribly if we do something cheeky with [`Packet::buf_mut`].
+    ///
+    /// This relies on us having debug assertions for all the invariants we want to uphold.
+    #[test]
+    fn mutate_packet_buf() {
+        const N: usize = 1024;
+        // use capacity 1, so that the same buffer is recycled each time we call .get()
+        let pool = PacketBufPool::<N>::new(1);
+
+        let mut packet: Packet = pool.get();
+        packet.buf_mut().extend(&[0x77u8; N + 1]);
+        drop(packet);
+
+        let mut packet: Packet = pool.get();
+        *packet.buf_mut() = BytesMut::new();
+        drop(packet);
+
+        let mut packet: Packet = pool.get();
+        *packet.buf_mut() = BytesMut::new();
+        packet.buf_mut().extend(&[0u8]);
+        drop(packet);
+
+        let packet: Packet = pool.get();
+        drop(packet);
     }
 }
