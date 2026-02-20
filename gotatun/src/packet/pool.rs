@@ -56,9 +56,8 @@ impl<const N: usize> PacketBufPool<N> {
             return packet;
         }
 
-        let buf = BytesMut::zeroed(N);
-
-        Packet::new_from_pool(self._tx.clone(), buf)
+        log::trace!("Pool is empty, allocating new packet");
+        Packet::from_bytes(BytesMut::zeroed(N))
     }
 }
 

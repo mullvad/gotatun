@@ -121,7 +121,11 @@ impl Drop for PacketInner {
     fn drop(&mut self) {
         if let Some(return_to_pool) = self._return_to_pool.take() {
             // NOTE: Default for `BytesMut` has capacity 0, so it's cheap to make by `mem::take`.
-            let _ = return_to_pool.try_send(mem::take(&mut self.buf));
+            let res = return_to_pool.try_send(mem::take(&mut self.buf));
+            debug_assert!(
+                res.is_ok(),
+                "Pool channel should never be full since we only send back buffers that were allocated by the pool"
+            );
         }
     }
 }
