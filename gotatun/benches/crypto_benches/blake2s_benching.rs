@@ -1,7 +1,7 @@
 use blake2::digest::{FixedOutput, KeyInit};
 use blake2::{Blake2s256, Blake2sMac, Digest};
 use criterion::{BenchmarkId, Criterion, Throughput};
-use ring::rand::{SecureRandom, SystemRandom};
+use rand_core::{OsRng, RngCore};
 
 pub fn bench_blake2s_hash(c: &mut Criterion) {
     let mut group = c.benchmark_group("blake2s_hash");
@@ -35,12 +35,10 @@ pub fn bench_blake2s_hmac(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("blake2s_crate", size), &size, |b, _| {
             let buf_in = vec![0u8; size];
-            let rng = SystemRandom::new();
-
             b.iter_batched(
                 || {
                     let mut key = [0u8; 32];
-                    rng.fill(&mut key).unwrap();
+                    OsRng.fill_bytes(&mut key);
                     key
                 },
                 |key| {
@@ -68,12 +66,10 @@ pub fn bench_blake2s_keyed(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("blake2s_crate", size), &size, |b, _| {
             let buf_in = vec![0u8; size];
-            let rng = SystemRandom::new();
-
             b.iter_batched(
                 || {
                     let mut key = [0u8; 16];
-                    rng.fill(&mut key).unwrap();
+                    OsRng.fill_bytes(&mut key);
                     key
                 },
                 |key| -> [u8; 16] {
