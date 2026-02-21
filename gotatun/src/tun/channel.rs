@@ -276,10 +276,10 @@ mod fragmentation {
                 .expect("At least one fragment exists");
 
             let mut bytes = first_packet.into_bytes();
-            let additional_bytes_needed = len.saturating_sub(bytes.buf_mut().len());
-            bytes.buf_mut().reserve(additional_bytes_needed);
+            let additional_bytes_needed = len.saturating_sub(bytes.len());
+            bytes.reserve(additional_bytes_needed);
             for frag in remaining_fragments {
-                bytes.buf_mut().extend_from_slice(&frag.payload);
+                bytes.extend_from_slice(&frag.payload);
             }
 
             // The header of the first packet is updated to reflect that the packet is no

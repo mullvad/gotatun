@@ -426,7 +426,7 @@ fn pad_to_x16(mut packet: Packet, tun_mtu: &mut MtuWatcher) -> Packet {
     };
 
     debug_assert!(padded_packet_len >= packet.len());
-    packet.buf_mut().resize(padded_packet_len, 0);
+    packet.resize(padded_packet_len, 0);
 
     packet
 }

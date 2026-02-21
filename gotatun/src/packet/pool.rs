@@ -41,12 +41,7 @@ impl<const N: usize> PacketBufPool<N> {
     /// Try to re-use a [`Packet`] from the pool.
     fn re_use(&self) -> Option<Packet<[u8]>> {
         let mut buf = self.rx.try_recv().ok()?;
-        buf.clear();
-        debug_assert!(buf.try_reclaim(N));
-        // Safety: the buffer was created with BytesMut::zeroed(N) and its capacity is always
-        // maintained at N. All N bytes are initialized (originally zeroed; subsequent writes
-        // never exceed N bytes).
-        unsafe { buf.set_len(N) };
+        buf.resize(N, 0);
 
         Some(Packet::new_from_pool(self._tx.clone(), buf))
     }
@@ -70,7 +65,7 @@ impl<const N: usize> PacketBufPool<N> {
 mod tests {
     use super::PacketBufPool;
     use crate::packet::Packet;
-    use bytes::BytesMut;
+
     use std::{hint::black_box, thread};
 
     /// Test pre-allocation semantics of [PacketBufPool].
@@ -140,7 +135,7 @@ mod tests {
         }
     }
 
-    /// Make sure recycling doesn't break horribly if we do something cheeky with [`Packet::buf_mut`].
+    /// Make sure recycling doesn't break horribly if we mutate a packet's buffer in unusual ways.
     ///
     /// This relies on us having debug assertions for all the invariants we want to uphold.
     #[test]
@@ -149,17 +144,20 @@ mod tests {
         // use capacity 1, so that the same buffer is recycled each time we call .get()
         let pool = PacketBufPool::<N>::new(1);
 
+        // Extend beyond N, forcing a reallocation. The oversized buffer is returned to the pool.
         let mut packet: Packet = pool.get();
-        packet.buf_mut().extend(&[0x77u8; N + 1]);
+        packet.extend_from_slice(&[0x77u8; N + 1]);
         drop(packet);
 
+        // Clear the buffer entirely and return it to the pool.
         let mut packet: Packet = pool.get();
-        *packet.buf_mut() = BytesMut::new();
+        packet.clear();
         drop(packet);
 
+        // Clear and then write a single byte, then return to the pool.
         let mut packet: Packet = pool.get();
-        *packet.buf_mut() = BytesMut::new();
-        packet.buf_mut().extend(&[0u8]);
+        packet.clear();
+        packet.extend_from_slice(&[0u8]);
         drop(packet);
 
         let packet: Packet = pool.get();

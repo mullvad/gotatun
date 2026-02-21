@@ -47,6 +47,7 @@
 
 use std::{
     fmt::{self, Debug},
+    io::Cursor,
     marker::PhantomData,
     mem,
     ops::{Deref, DerefMut},
@@ -111,7 +112,7 @@ pub struct Packet<Kind: ?Sized = [u8]> {
 }
 
 struct PacketInner {
-    buf: BytesMut,
+    buf: Cursor<BytesMut>,
 
     // If the [BytesMut] was allocated by a [PacketBufPool], this channel is used to return the buffer.
     _return_to_pool: Option<ReturnToPool>,
@@ -121,7 +122,7 @@ impl Drop for PacketInner {
     fn drop(&mut self) {
         if let Some(return_to_pool) = self._return_to_pool.take() {
             // NOTE: Default for `BytesMut` has capacity 0, so it's cheap to make by `mem::take`.
-            let res = return_to_pool.try_send(mem::take(&mut self.buf));
+            let res = return_to_pool.try_send(mem::take(&mut self.buf).into_inner());
             debug_assert!(
                 res.is_ok(),
                 "Pool channel should never be full since we only send back buffers that were allocated by the pool"
@@ -165,14 +166,15 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
     }
 
     fn buf(&self) -> &[u8] {
-        &self.inner.buf
+        let pos = self.inner.buf.position() as usize;
+        &self.inner.buf.get_ref()[pos..]
     }
 
     /// Create a `Packet<T>` from a `&T`.
     pub fn copy_from(payload: &T) -> Self {
         Self {
             inner: PacketInner {
-                buf: BytesMut::from(payload.as_bytes()),
+                buf: Cursor::new(BytesMut::from(payload.as_bytes())),
                 _return_to_pool: None,
             },
             _kind: PhantomData::<T>,
@@ -185,8 +187,12 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
     /// If the `Y` won't fit into the backing buffer, this call will allocate, and effectively
     /// devolves into [`Packet::copy_from`].
     pub fn overwrite_with<Y: CheckedPayload>(mut self, payload: &Y) -> Packet<Y> {
-        self.inner.buf.clear();
-        self.inner.buf.extend_from_slice(payload.as_bytes());
+        self.inner.buf.set_position(0);
+        self.inner.buf.get_mut().clear();
+        self.inner
+            .buf
+            .get_mut()
+            .extend_from_slice(payload.as_bytes());
         self.cast()
     }
 }
@@ -222,7 +228,7 @@ impl Default for Packet<[u8]> {
     fn default() -> Self {
         Self {
             inner: PacketInner {
-                buf: BytesMut::default(),
+                buf: Cursor::new(BytesMut::default()),
                 _return_to_pool: None,
             },
             _kind: PhantomData,
@@ -238,7 +244,7 @@ impl Packet<[u8]> {
     pub fn new_from_pool(return_to_pool: ReturnToPool, bytes: BytesMut) -> Self {
         Self {
             inner: PacketInner {
-                buf: bytes,
+                buf: Cursor::new(bytes),
                 _return_to_pool: Some(return_to_pool),
             },
             _kind: PhantomData::<[u8]>,
@@ -249,7 +255,7 @@ impl Packet<[u8]> {
     pub fn from_bytes(bytes: BytesMut) -> Self {
         Self {
             inner: PacketInner {
-                buf: bytes,
+                buf: Cursor::new(bytes),
                 _return_to_pool: None,
             },
             _kind: PhantomData::<[u8]>,
@@ -258,12 +264,53 @@ impl Packet<[u8]> {
 
     /// See [`BytesMut::truncate`].
     pub fn truncate(&mut self, new_len: usize) {
-        self.inner.buf.truncate(new_len);
+        let pos = self.inner.buf.position() as usize;
+        self.inner.buf.get_mut().truncate(pos + new_len);
     }
 
-    /// Get direct mutable access to the backing buffer.
-    pub fn buf_mut(&mut self) -> &mut BytesMut {
-        &mut self.inner.buf
+    /// Advance the start of the packet buffer by `n` bytes, without freeing the memory.
+    ///
+    /// This moves the cursor position rather than the [`BytesMut`] internal pointer, preserving
+    /// the full allocation so it can be recycled by [`PacketBufPool`].
+    pub fn advance(&mut self, n: usize) {
+        let new_pos = self.inner.buf.position() as usize + n;
+        self.inner.buf.set_position(new_pos as u64);
+    }
+
+    /// Get a mutable view of the packet bytes from the current cursor position.
+    ///
+    /// This is a plain `&mut [u8]` slice — it cannot be used to call [`bytes::Buf::advance`],
+    /// which would move the [`BytesMut`] internal pointer and break pool recycling.
+    /// Use [`Self::advance`] to move the start of the packet forward instead.
+    pub fn buf_mut(&mut self) -> &mut [u8] {
+        let pos = self.inner.buf.position() as usize;
+        &mut self.inner.buf.get_mut()[pos..]
+    }
+
+    /// Resize the packet to `new_len` bytes from the cursor position, filling any
+    /// additional bytes with `fill`.
+    ///
+    /// Equivalent to [`BytesMut::resize`] but expressed relative to the cursor position,
+    /// so `new_len` is the desired packet length as seen by callers (i.e. via [`Deref`]).
+    pub fn resize(&mut self, new_len: usize, fill: u8) {
+        let pos = self.inner.buf.position() as usize;
+        self.inner.buf.get_mut().resize(pos + new_len, fill);
+    }
+
+    /// Append `data` to the end of the packet buffer.
+    pub fn extend_from_slice(&mut self, data: &[u8]) {
+        self.inner.buf.get_mut().extend_from_slice(data);
+    }
+
+    /// Reserve capacity for at least `additional` more bytes beyond the current length.
+    pub fn reserve(&mut self, additional: usize) {
+        self.inner.buf.get_mut().reserve(additional);
+    }
+
+    /// Clear the packet, discarding all content and resetting the cursor to zero.
+    pub fn clear(&mut self) {
+        self.inner.buf.set_position(0);
+        self.inner.buf.get_mut().clear();
     }
 
     /// Try to cast this untyped packet into an [`Ip`].
@@ -333,7 +380,8 @@ impl Packet<Ip> {
                     );
                 }
 
-                self.inner.buf.truncate(ip_len);
+                let pos = self.inner.buf.position() as usize;
+                self.inner.buf.get_mut().truncate(pos + ip_len);
 
                 // TODO: validate checksum
 
@@ -353,7 +401,11 @@ impl Packet<Ip> {
                     );
                 }
 
-                self.inner.buf.truncate(payload_len + Ipv6Header::LEN);
+                let pos = self.inner.buf.position() as usize;
+                self.inner
+                    .buf
+                    .get_mut()
+                    .truncate(pos + payload_len + Ipv6Header::LEN);
 
                 // TODO: validate checksum
 
@@ -486,7 +538,8 @@ where
     type Target = Kind;
 
     fn deref(&self) -> &Self::Target {
-        Self::Target::ref_from_bytes(&self.inner.buf)
+        let pos = self.inner.buf.position() as usize;
+        Self::Target::ref_from_bytes(&self.inner.buf.get_ref()[pos..])
             .expect("We have previously checked that the payload is valid")
     }
 }
@@ -496,7 +549,8 @@ where
     Kind: CheckedPayload + ?Sized,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        Self::Target::mut_from_bytes(&mut self.inner.buf)
+        let pos = self.inner.buf.position() as usize;
+        Self::Target::mut_from_bytes(&mut self.inner.buf.get_mut()[pos..])
             .expect("We have previously checked that the payload is valid")
     }
 }
