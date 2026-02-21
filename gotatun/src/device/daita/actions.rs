@@ -238,11 +238,9 @@ where
     pub(crate) fn create_decoy_packet(&self, mtu: u16) -> Packet {
         let decoy_packet_header = DecoyHeader::new(mtu.into());
         let mut decoy_packet_buf = self.packet_pool.get();
-        decoy_packet_buf.buf_mut().clear();
-        decoy_packet_buf
-            .buf_mut()
-            .extend_from_slice(decoy_packet_header.as_bytes());
-        decoy_packet_buf.buf_mut().resize(mtu.into(), 0);
+        decoy_packet_buf.clear();
+        decoy_packet_buf.extend_from_slice(decoy_packet_header.as_bytes());
+        decoy_packet_buf.resize(mtu.into(), 0);
         decoy_packet_buf
     }
 

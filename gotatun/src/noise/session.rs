@@ -9,7 +9,7 @@ use crate::{
     noise::errors::WireGuardError,
     packet::{Packet, WgData, WgDataHeader, WgKind},
 };
-use bytes::{Buf, BytesMut};
+use bytes::BytesMut;
 use parking_lot::Mutex;
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -272,9 +272,8 @@ impl Session {
 
         // shift the packet buffer slice onto the decrypted data
         let mut packet = packet.into_bytes();
-        let buf = packet.buf_mut();
-        buf.advance(WgDataHeader::LEN);
-        buf.truncate(decrypted_len);
+        packet.advance(WgDataHeader::LEN);
+        packet.truncate(decrypted_len);
 
         // After decryption is done, check counter again, and mark as received
         self.receiving_counter_mark(counter)?;

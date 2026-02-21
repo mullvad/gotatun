@@ -263,7 +263,7 @@ fn pad_to_constant_size(packet: &mut Packet, mtu: usize) -> Result<usize, ()> {
         }
         return Err(());
     }
-    packet.buf_mut().resize(mtu, 0);
+    packet.resize(mtu, 0);
     let padding_bytes = mtu - start_len;
     Ok(padding_bytes)
 }

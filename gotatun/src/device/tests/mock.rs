@@ -153,7 +153,7 @@ pub fn packet(payload: impl AsRef<[u8]>) -> Packet<Ip> {
     );
 
     let mut packet = Packet::copy_from(packet.as_bytes());
-    packet.buf_mut().extend_from_slice(payload);
+    packet.extend_from_slice(payload);
     packet.try_into_ip().unwrap()
 }
 

@@ -73,6 +73,7 @@ constant_time_eq = "0.4.2"
 futures = "0.3.31"
 maybenot = "2.2.2"
 rand_chacha = "0.9.0"
+crossbeam-channel = "0.5.15"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = ">=0.60, <=0.61", features = [

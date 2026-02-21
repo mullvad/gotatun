@@ -871,6 +871,7 @@ dependencies = [
  "chacha20poly1305",
  "constant_time_eq",
  "criterion",
+ "crossbeam-channel",
  "duplicate",
  "either",
  "etherparse",
