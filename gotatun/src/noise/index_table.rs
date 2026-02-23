@@ -102,12 +102,15 @@ mod tests {
     use super::*;
 
     #[derive(Default)]
-    struct ModCounter(u32);
+    struct ModCounter {
+        dividend: u32,
+        divisor: u32,
+    }
 
     impl RngCore for ModCounter {
         fn next_u32(&mut self) -> u32 {
-            let v = self.0 % 3;
-            self.0 += 1;
+            let v = self.dividend % self.divisor;
+            self.dividend += 1;
             v
         }
 
@@ -123,7 +126,10 @@ mod tests {
     /// Test that indices are freed when dropped.
     #[test]
     fn test_reuse_on_drop() {
-        let table = IndexTable::from_rng(ModCounter::default());
+        let table = IndexTable::from_rng(ModCounter {
+            dividend: 0,
+            divisor: 3,
+        });
 
         let a = table.new_index();
         let b = table.new_index();
