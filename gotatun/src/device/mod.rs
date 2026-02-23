@@ -533,6 +533,7 @@ impl<T: DeviceTransports> DeviceState<T> {
             let parsed_packet = match rate_limiter.verify_packet(addr.ip(), src_buf) {
                 Ok(packet) => packet,
                 Err(TunnResult::WriteToNetwork(WgKind::CookieReply(cookie))) => {
+                    // Note: Cookies should not affect counters.
                     if let Err(_err) = udp_tx.send_to(cookie.into(), addr).await {
                         log::trace!("udp.send_to failed");
                         break;
