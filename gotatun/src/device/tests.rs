@@ -2,9 +2,11 @@ use std::{future::ready, time::Duration};
 
 use futures::{StreamExt, future::pending};
 use mock::MockEavesdropper;
-use rand::{RngCore, SeedableRng, rngs::StdRng};
+use rand::{SeedableRng, rngs::StdRng};
 use tokio::{join, select, time::sleep};
 use zerocopy::IntoBytes;
+
+use crate::noise::index_table::IndexTable;
 
 pub mod mock;
 
@@ -95,8 +97,9 @@ async fn wg_data_length_is_x16() {
 #[test_log::test]
 async fn test_indices() {
     // Compute the expected first index from each seeded RNG.
-    let expected_alice_idx = StdRng::seed_from_u64(mock::ALICE_INDEX_SEED).next_u32();
-    let expected_bob_idx = StdRng::seed_from_u64(mock::BOB_INDEX_SEED).next_u32();
+    let expected_alice_idx =
+        IndexTable::next_id(&mut StdRng::seed_from_u64(mock::ALICE_INDEX_SEED));
+    let expected_bob_idx = IndexTable::next_id(&mut StdRng::seed_from_u64(mock::BOB_INDEX_SEED));
 
     test_device_pair(async |eve| {
         let check_init = async {
