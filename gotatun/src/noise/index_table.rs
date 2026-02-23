@@ -145,8 +145,10 @@ mod tests {
         assert_eq!(c.value, 2);
 
         // 1 should be the only free value
+        let recycled = b.value;
         drop(b);
-        let d = table.new_index();
-        assert_eq!(d.value, 1);
+        for _ in 0..10 {
+            assert_eq!(table.new_index().value, recycled);
+        }
     }
 }
