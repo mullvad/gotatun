@@ -117,6 +117,57 @@ async fn test_indices() {
     .await;
 }
 
+/// Test that device handles roaming (changes to endpoint) for data packets.
+#[tokio::test]
+#[test_log::test]
+async fn test_endpoint_roaming() {
+    let (mut alice, mut bob, eve) = mock::device_pair().await;
+    let packet = mock::packet(b"Hello!");
+
+    let mut ping_pong = async |alice_ip| {
+        *alice.source_ipv4_override.lock().await = Some(alice_ip);
+
+        alice.app_tx.send(packet.clone()).await;
+        assert_eq!(bob.app_rx.recv().await.as_bytes(), packet.as_bytes());
+
+        let peers = bob.device.peers().await;
+        assert_eq!(peers.len(), 1);
+        let stats = &peers[0];
+
+        // Bob's device's peer should point to Alice's last known endpoint
+        assert_eq!(
+            stats.peer.endpoint.map(|addr| addr.ip()),
+            Some(alice_ip.into()),
+        );
+
+        // Bob's sent packets should use the new endpoint
+        let ip_stream = eve.ip();
+        tokio::pin!(ip_stream);
+
+        let next_packet = async {
+            tokio::time::timeout(Duration::from_secs(5), ip_stream.next())
+                .await
+                .expect("did not see sent packet")
+        };
+
+        let (_, sniffed_packet) = join! {
+            bob.app_tx.send(packet.clone()),
+            next_packet,
+        };
+        alice.app_rx.recv().await;
+
+        assert_eq!(
+            sniffed_packet.and_then(|ip| ip.destination()),
+            Some(alice_ip.into())
+        );
+    };
+
+    // Simulate roaming by changing Alice's source IP
+    ping_pong("1.2.3.4".parse().unwrap()).await;
+    ping_pong("1.3.3.7".parse().unwrap()).await;
+    ping_pong("1.2.3.4".parse().unwrap()).await;
+}
+
 /// The number of packets we send through the tunnel
 fn packet_count() -> usize {
     mock::packets_of_every_size().len()

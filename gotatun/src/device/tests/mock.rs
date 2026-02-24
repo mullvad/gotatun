@@ -56,12 +56,43 @@ pub async fn device_pair() -> (MockDevice, MockDevice, MockEavesdropper) {
     let (eve_tx, eve_rx) = broadcast::channel(1000);
     let eve = MockEavesdropper { rx: eve_rx };
 
+    let alice_source_ip: Arc<Mutex<Option<Ipv4Addr>>> = Arc::default();
+    let bob_source_ip: Arc<Mutex<Option<Ipv4Addr>>> = Arc::default();
+
+    duplicate! {
+        [
+            from to src_override;
+            [alice_eve_v4] [bob_eve_v4] [alice_source_ip];
+            [bob_eve_v4] [alice_eve_v4] [bob_source_ip];
+        ]
+        {
+            let eve_tx = eve_tx.clone();
+            let src_override = src_override.clone();
+            tokio::spawn(async move {
+                loop {
+                    let Some(mut packet) = from.rx.recv().await else {
+                        break
+                    };
+
+                    // Note: The checksum is not recomputed because it's not checked anyway.
+                    if let Some(src) = &*src_override.lock().await {
+                        packet.header.source_address = src.to_bits().into();
+                    }
+
+                    let _ = eve_tx.send(Packet::copy_from(&*packet).into());
+
+                    if to.tx.send(packet).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+    };
+
     duplicate! {
         [
             from to;
-            [alice_eve_v4] [bob_eve_v4];
             [alice_eve_v6] [bob_eve_v6];
-            [bob_eve_v4] [alice_eve_v4];
             [bob_eve_v6] [alice_eve_v6];
         ]
         {
@@ -127,12 +158,14 @@ pub async fn device_pair() -> (MockDevice, MockDevice, MockEavesdropper) {
         device: device_a,
         app_tx: mock_app_tx_a,
         app_rx: mock_app_rx_a,
+        source_ipv4_override: alice_source_ip,
     };
 
     let bob = MockDevice {
         device: device_b,
         app_tx: mock_app_tx_b,
         app_rx: mock_app_rx_b,
+        source_ipv4_override: bob_source_ip,
     };
 
     (alice, bob, eve)
@@ -192,10 +225,10 @@ pub fn packets_of_every_size() -> impl ExactSizeIterator<Item = Packet<Ip>> + Cl
 }
 
 pub struct MockDevice {
-    #[expect(dead_code)]
     pub device: Device<(UdpChannelFactory, MockTun, MockTun)>,
     pub app_tx: MockAppTx,
     pub app_rx: MockAppRx,
+    pub source_ipv4_override: Arc<Mutex<Option<Ipv4Addr>>>,
 }
 
 pub struct MockEavesdropper {
