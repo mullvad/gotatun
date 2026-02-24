@@ -492,6 +492,7 @@ impl<T: DeviceTransports> Device<T> {
         self.write(async |device| device.add_peer(peer)).await
     }
 
+    /// Return all peers and peer stats for this [`Device`].
     pub async fn peers(&self) -> Vec<PeerStats> {
         self.read(async |device| device.peers().await).await
     }
