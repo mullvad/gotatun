@@ -576,11 +576,17 @@ impl<T: DeviceTransports> DeviceState<T> {
 
                     peer
                 }
-                WgKind::HandshakeResp(p) => device_guard
-                    .peers_by_idx
-                    .lock()
-                    .get(&p.receiver_idx.get())
-                    .cloned(),
+                WgKind::HandshakeResp(p) => {
+                    let peer = device_guard
+                        .peers_by_idx
+                        .lock()
+                        .get(&p.receiver_idx.get())
+                        .cloned();
+                    if let Some(peer) = &peer {
+                        peer.lock().await.set_endpoint(addr);
+                    }
+                    peer
+                }
                 WgKind::CookieReply(p) => device_guard
                     .peers_by_idx
                     .lock()
@@ -641,6 +647,9 @@ impl<T: DeviceTransports> DeviceState<T> {
                             None => continue,
                         }
                     }
+
+                    // Update the peer endpoint if we received an authenticated data/keepalive packet
+                    peer.set_endpoint(addr);
 
                     // keepalive
                     if packet.is_empty() {
