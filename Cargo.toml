@@ -8,6 +8,9 @@ edition = "2024"
 repository = "https://github.com/mullvad/gotatun"
 license = "BSD-3-Clause"
 
+[workspace.dependencies]
+gotatun = { version = "0.3.0", path = "./gotatun" }
+
 [profile.release]
 lto = true        # Enable full link-time optimization.
 codegen-units = 1 # Use only 1 codegen-unit to enable full optimizations.
@@ -21,6 +24,3 @@ strip = false
 [profile.bench]
 lto = true        # Enable full link-time optimization.
 codegen-units = 1 # Use only 1 codegen-unit to enable full optimizations.
-
-[workspace.dependencies]
-gotatun = { path = "./gotatun" }
