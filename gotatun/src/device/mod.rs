@@ -563,30 +563,15 @@ impl<T: DeviceTransports> DeviceState<T> {
             let device_guard = device.read().await;
             let peers = &device_guard.peers;
             let peer = match &parsed_packet {
-                WgKind::HandshakeInit(p) => {
-                    let peer = parse_handshake_anon(&private_key, &public_key, p)
-                        .ok()
-                        .and_then(|hh| peers.get(&x25519::PublicKey::from(hh.peer_static_public)))
-                        .cloned();
-
-                    if let Some(peer) = &peer {
-                        // Remember peer endpoint
-                        peer.lock().await.set_endpoint(addr);
-                    }
-
-                    peer
-                }
-                WgKind::HandshakeResp(p) => {
-                    let peer = device_guard
-                        .peers_by_idx
-                        .lock()
-                        .get(&p.receiver_idx.get())
-                        .cloned();
-                    if let Some(peer) = &peer {
-                        peer.lock().await.set_endpoint(addr);
-                    }
-                    peer
-                }
+                WgKind::HandshakeInit(p) => parse_handshake_anon(&private_key, &public_key, p)
+                    .ok()
+                    .and_then(|hh| peers.get(&x25519::PublicKey::from(hh.peer_static_public)))
+                    .cloned(),
+                WgKind::HandshakeResp(p) => device_guard
+                    .peers_by_idx
+                    .lock()
+                    .get(&p.receiver_idx.get())
+                    .cloned(),
                 WgKind::CookieReply(p) => device_guard
                     .peers_by_idx
                     .lock()
@@ -614,7 +599,10 @@ impl<T: DeviceTransports> DeviceState<T> {
             }
 
             match tunnel.handle_incoming_packet(parsed_packet) {
-                TunnResult::Done => (),
+                TunnResult::Done => {
+                    // Update the peer endpoint if we received any authenticated packet
+                    peer.set_endpoint(addr);
+                }
                 TunnResult::Err(_) => continue,
                 // Flush pending queue
                 TunnResult::WriteToNetwork(packet) => {
@@ -637,6 +625,9 @@ impl<T: DeviceTransports> DeviceState<T> {
                             break;
                         }
                     }
+
+                    // Update the peer endpoint if we received any authenticated packet
+                    peer.set_endpoint(addr);
                 }
                 #[cfg_attr(not(feature = "daita"), expect(unused_mut))]
                 TunnResult::WriteToTunnel(mut packet) => {
@@ -648,7 +639,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                         }
                     }
 
-                    // Update the peer endpoint if we received an authenticated data/keepalive packet
+                    // Update the peer endpoint if we received any authenticated packet
                     peer.set_endpoint(addr);
 
                     // keepalive
