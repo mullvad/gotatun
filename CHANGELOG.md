@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [0.3.1] - 2026-02-24
+### Fixed
+- Fix bug in docstring that caused docs.rs to fail.
+
+
 ## [0.3.0] - 2026-02-24
 ### Added
 - Add `daita-uapi` feature for configuring DAITA using the UAPI socket. This is disabled by default.
