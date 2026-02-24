@@ -49,7 +49,7 @@ where
     }
 
     /// Naively generate the next session ID. This index is not guaranteed to be locally unique.
-    pub fn next_id(rng: &mut Rng) -> u32 {
+    pub(crate) fn next_id(rng: &mut Rng) -> u32 {
         rng.next_u32()
     }
 
