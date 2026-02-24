@@ -307,19 +307,16 @@ impl Tunn {
     ) -> Result<Packet, WireGuardError> {
         let r_idx = packet.header.receiver_idx.get();
 
-        // Search for the matching session.
-        // Is this ever not `self.current`?
+        // Search for the matching session. Almost always self.current, but older
+        // sessions may still receive packets during a key transition.
         let (slot, session) = self
             .sessions
             .iter()
             .enumerate()
-            .cycle()
-            .skip(self.current)
-            .take(N_SESSIONS)
             .filter_map(|(i, s)| s.as_ref().map(|s| (i, s)))
             .find(|(_, s)| s.receiving_index.value() == r_idx)
             .ok_or_else(|| {
-                log::trace!("No current session available: {r_idx}");
+                log::trace!("No session available: {r_idx}");
                 WireGuardError::NoCurrentSession
             })?;
 
