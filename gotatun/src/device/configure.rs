@@ -492,6 +492,10 @@ impl<T: DeviceTransports> Device<T> {
         self.write(async |device| device.add_peer(peer)).await
     }
 
+    pub async fn peers(&self) -> Vec<PeerStats> {
+        self.read(async |device| device.peers().await).await
+    }
+
     /// Add multiple new peers to this [`Device`].
     ///
     /// If _any_ new peer has the same public key as an existing peer, no new peers are added
