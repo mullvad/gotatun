@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::noise::errors::WireGuardError;
+use crate::noise::index_table::{Index, IndexTable};
 use crate::noise::session::Session;
 use crate::packet::{Packet, WgCookieReply, WgHandshakeBase, WgHandshakeInit, WgHandshakeResp};
 #[cfg(not(feature = "mock_instant"))]
@@ -264,7 +265,7 @@ impl std::fmt::Debug for NoiseParams {
 }
 
 struct HandshakeInitSentState {
-    local_index: u32,
+    local_index: Index,
     hash: [u8; KEY_LEN],
     chaining_key: [u8; KEY_LEN],
     ephemeral_private: x25519::ReusableSecret,
@@ -305,8 +306,8 @@ enum HandshakeState {
 /// Manages the Noise protocol handshake for establishing secure sessions.
 pub struct Handshake {
     params: NoiseParams,
-    /// Index of the next session
-    next_index: u32,
+    /// Shared table for session indices.
+    index_table: IndexTable,
     /// Allow to have two outgoing handshakes in flight, because sometimes we may receive a delayed
     /// response to a handshake with bad networks
     previous: HandshakeState,
@@ -436,7 +437,7 @@ impl Handshake {
         static_private: x25519::StaticSecret,
         static_public: x25519::PublicKey,
         peer_static_public: x25519::PublicKey,
-        global_idx: u32,
+        index_table: IndexTable,
         preshared_key: Option<[u8; 32]>,
     ) -> Handshake {
         let params = NoiseParams::new(
@@ -448,7 +449,7 @@ impl Handshake {
 
         Handshake {
             params,
-            next_index: global_idx,
+            index_table,
             previous: HandshakeState::None,
             state: HandshakeState::None,
             last_handshake_timestamp: Tai64N::zero(),
@@ -484,15 +485,6 @@ impl Handshake {
 
     pub(crate) fn clear_cookie(&mut self) {
         self.cookies.write_cookie = None;
-    }
-
-    // The index used is 24 bits for peer index, allowing for 16M active peers per server and 8 bits
-    // for cyclic session index
-    fn inc_index(&mut self) -> u32 {
-        let index = self.next_index;
-        let idx8 = index as u8;
-        self.next_index = (index & !0xff) | u32::from(idx8.wrapping_add(1));
-        self.next_index
     }
 
     pub(crate) fn set_static_private(
@@ -591,19 +583,15 @@ impl Handshake {
         &mut self,
         packet: &WgHandshakeResp,
     ) -> Result<Session, WireGuardError> {
-        // Check if there is a handshake awaiting a response and return the correct one
-        let (state, is_previous) = match (&self.state, &self.previous) {
-            (HandshakeState::InitSent(s), _) if s.local_index == packet.receiver_idx.get() => {
-                (s, false)
-            }
-            (_, HandshakeState::InitSent(s)) if s.local_index == packet.receiver_idx.get() => {
-                (s, true)
-            }
+        // Check if there is a handshake awaiting a response and take the correct one
+        let expected =
+            |s: &HandshakeInitSentState| s.local_index.value() == packet.receiver_idx.get();
+        let state = match (&self.state, &self.previous) {
+            (HandshakeState::InitSent(s), _) | (_, HandshakeState::InitSent(s)) if expected(s) => s,
             _ => return Err(WireGuardError::UnexpectedPacket),
         };
 
-        let peer_index = packet.sender_idx;
-        let local_index = state.local_index;
+        let sender_index = packet.sender_idx;
 
         let unencrypted_ephemeral = x25519::PublicKey::from(packet.unencrypted_ephemeral);
         // msg.unencrypted_ephemeral = DH_PUBKEY(responder.ephemeral_private)
@@ -665,12 +653,30 @@ impl Handshake {
         let rtt_time = Instant::now().duration_since(state.time_sent);
         self.last_rtt = Some(rtt_time.as_millis() as u32);
 
-        if is_previous {
-            self.previous = HandshakeState::None;
+        // Remove handshake state at the very end so it's kept in case of an error
+        let is_current = matches!(&self.state, HandshakeState::InitSent(state) if expected(state));
+        let state = if is_current {
+            let HandshakeState::InitSent(state) =
+                std::mem::replace(&mut self.state, HandshakeState::None)
+            else {
+                unreachable!("self.state was HandshakeState::InitSent")
+            };
+            state
         } else {
-            self.state = HandshakeState::None;
-        }
-        Ok(Session::new(local_index, peer_index.get(), temp3, temp2))
+            let HandshakeState::InitSent(state) =
+                std::mem::replace(&mut self.previous, HandshakeState::None)
+            else {
+                unreachable!("self.previous was HandshakeState::InitSent")
+            };
+            state
+        };
+
+        Ok(Session::new(
+            state.local_index,
+            sender_index.get(),
+            temp3,
+            temp2,
+        ))
     }
 
     pub(super) fn receive_cookie_reply(
@@ -726,7 +732,8 @@ impl Handshake {
     pub(super) fn format_handshake_initiation(&mut self) -> crate::packet::Packet<WgHandshakeInit> {
         let mut handshake = WgHandshakeInit::new();
 
-        let local_index = self.inc_index();
+        let local_index = self.index_table.new_index();
+        let local_index_val = local_index.value();
 
         // initiator.chaining_key = HASH(CONSTRUCTION)
         let mut chaining_key = INITIAL_CHAIN_KEY;
@@ -738,7 +745,7 @@ impl Handshake {
         // msg.message_type = 1
         // msg.reserved_zero = { 0, 0, 0 }
         // msg.sender_index = little_endian(initiator.sender_index)
-        handshake.sender_idx.set(local_index);
+        handshake.sender_idx.set(local_index_val);
         // msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
         handshake
             .unencrypted_ephemeral
@@ -798,7 +805,7 @@ impl Handshake {
             }),
         );
 
-        self.init_mac1_and_mac2(&mut handshake, local_index);
+        self.init_mac1_and_mac2(&mut handshake, local_index_val);
 
         Packet::copy_from(&handshake)
     }
@@ -822,11 +829,12 @@ impl Handshake {
 
         // responder.ephemeral_private = DH_GENERATE()
         let ephemeral_private = x25519::ReusableSecret::random_from_rng(OsRng);
-        let local_index = self.inc_index();
+        let local_index = self.index_table.new_index();
+        let local_index_val = local_index.value();
         // msg.message_type = 2
         // msg.reserved_zero = { 0, 0, 0 }
         let mut resp = WgHandshakeResp::new(
-            local_index,
+            local_index_val,
             peer_index,
             *x25519::PublicKey::from(&ephemeral_private).as_bytes(),
         );
@@ -881,7 +889,7 @@ impl Handshake {
         let temp2 = b2s_hmac(&temp1, &[0x01]);
         let temp3 = b2s_hmac2(&temp1, &temp2, &[0x02]);
 
-        self.init_mac1_and_mac2(&mut resp, local_index);
+        self.init_mac1_and_mac2(&mut resp, local_index_val);
 
         let packet = buf.overwrite_with(&resp);
 
