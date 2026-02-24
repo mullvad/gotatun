@@ -9,7 +9,7 @@ repository = "https://github.com/mullvad/gotatun"
 license = "BSD-3-Clause"
 
 [workspace.dependencies]
-gotatun = { version = "0.3.1", path = "./gotatun" }
+gotatun = { version = "0.3.2", path = "./gotatun" }
 
 [profile.release]
 lto = true        # Enable full link-time optimization.

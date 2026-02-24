@@ -861,7 +861,7 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "gotatun"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aead",
  "base64",
@@ -907,7 +907,7 @@ dependencies = [
 
 [[package]]
 name = "gotatun-cli"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "clap 3.2.25",
  "daemonize",
