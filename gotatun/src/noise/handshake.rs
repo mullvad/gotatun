@@ -584,26 +584,16 @@ impl Handshake {
         packet: &WgHandshakeResp,
     ) -> Result<Session, WireGuardError> {
         // Check if there is a handshake awaiting a response and take the correct one
-        let state = match (&self.state, &self.previous) {
+        let (state, is_previous) = match (&self.state, &self.previous) {
             (HandshakeState::InitSent(s), _)
                 if s.local_index.value() == packet.receiver_idx.get() =>
             {
-                let HandshakeState::InitSent(state) =
-                    std::mem::replace(&mut self.state, HandshakeState::None)
-                else {
-                    unreachable!("self.state was HandshakeState::InitSent")
-                };
-                state
+                (s, false)
             }
             (_, HandshakeState::InitSent(s))
                 if s.local_index.value() == packet.receiver_idx.get() =>
             {
-                let HandshakeState::InitSent(state) =
-                    std::mem::replace(&mut self.previous, HandshakeState::None)
-                else {
-                    unreachable!("self.previous was HandshakeState::InitSent")
-                };
-                state
+                (s, true)
             }
             _ => return Err(WireGuardError::UnexpectedPacket),
         };
@@ -669,6 +659,23 @@ impl Handshake {
 
         let rtt_time = Instant::now().duration_since(state.time_sent);
         self.last_rtt = Some(rtt_time.as_millis() as u32);
+
+        // Remove handshake state at the very end so it's kept in case of an error
+        let state = if is_previous {
+            let HandshakeState::InitSent(state) =
+                std::mem::replace(&mut self.previous, HandshakeState::None)
+            else {
+                unreachable!("self.previous was HandshakeState::InitSent")
+            };
+            state
+        } else {
+            let HandshakeState::InitSent(state) =
+                std::mem::replace(&mut self.state, HandshakeState::None)
+            else {
+                unreachable!("self.state was HandshakeState::InitSent")
+            };
+            state
+        };
 
         Ok(Session::new(
             state.local_index,
