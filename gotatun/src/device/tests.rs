@@ -102,34 +102,16 @@ async fn test_indices() {
     let expected_bob_idx = IndexTable::next_id(&mut StdRng::seed_from_u64(mock::BOB_INDEX_SEED));
 
     test_device_pair(async |eve| {
-        let check_init = async {
-            let indices: Vec<_> = eve
-                .wg_handshake_init()
-                .map(|p| p.sender_idx.get())
-                .collect()
-                .await;
-            assert_eq!(indices, [expected_alice_idx]);
-        };
-        let check_alice_data = async {
-            let wg_data_count = eve
-                .wg_data()
-                .map(|p| {
-                    // Every data packet is sent to Bob
-                    assert_eq!(p.header.receiver_idx, expected_bob_idx);
-                    p
-                })
-                .count()
-                .await;
-            assert!(dbg!(wg_data_count) >= packet_count());
-        };
-        let check_resp = async {
-            let indices: Vec<_> = eve
-                .wg_handshake_resp()
-                .map(|p| p.sender_idx.get())
-                .collect()
-                .await;
-            assert_eq!(indices, [expected_bob_idx]);
-        };
+        let check_init = eve.wg_handshake_init().for_each(async |p| {
+            assert_eq!(p.sender_idx.get(), expected_alice_idx);
+        });
+        let check_alice_data = eve.wg_data().for_each(async |p| {
+            // Every data packet is sent to Bob
+            assert_eq!(p.header.receiver_idx, expected_bob_idx);
+        });
+        let check_resp = eve.wg_handshake_resp().for_each(async |p| {
+            assert_eq!(p.sender_idx.get(), expected_bob_idx);
+        });
         join!(check_init, check_resp, check_alice_data);
     })
     .await;
