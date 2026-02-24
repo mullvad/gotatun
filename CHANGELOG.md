@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [0.3.2] - 2026-02-24
+### Fixed
+- Downgrade lower version bound for `zerocopy` to `0.8.27` to allow dependents
+  to circumvent <https://github.com/google/zerocopy/issues/2880>.
+
+
 ## [0.3.1] - 2026-02-24
 ### Fixed
 - Fix bug in docstring that caused docs.rs to fail.
