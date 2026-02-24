@@ -228,8 +228,15 @@ impl DaitaHooks {
             }
         };
 
-        // Add bytes padded due to constant-size. Use `next_multiple_of(16)` to avoid counting
-        // WireGuard's default behaviour of rounding packet lengths up to a multiple of 16.
+        // Add bytes padded by the peer to ensure constant packets sizes for DAITA.
+        // The peer will padd the inner IP packet to its tunnel MTU, without updating the
+        // length field of the IP header, so we subtract the difference between the actual
+        // length and the header length.
+        // NOTE: WireGuard's default behaviour of rounding packet lengths up to multiples
+        // of 16 should not be counted here, so we perform the same rounding on the header
+        // length before subtraction. This padding is clamped to the tunnel MTU of the peer,
+        // see `crate::noise::pad_to_x16`, which is just `packet.len()` here. Hence it will
+        // be equal to the clamping done by `saturating_sub`.
         self.daita_overhead.rx_padding_bytes +=
             packet.len().saturating_sub(ip_len.next_multiple_of(16));
 
