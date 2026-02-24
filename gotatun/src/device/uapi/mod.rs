@@ -26,7 +26,6 @@
 //!
 //! [configuration protocol]: https://www.wireguard.com/xplatform/#configuration-protocol
 //! [`DeviceBuilder::with_uapi`]: crate::device::builder::DeviceBuilder::with_uapi
-#![doc = include_str!("../../../../UAPI.md")]
 
 /// Command types for the WireGuard userspace API.
 pub mod command;
