@@ -10,9 +10,9 @@ use crate::{
     noise::index_table::Index,
     packet::{Packet, WgData, WgDataHeader, WgKind},
 };
+use aws_lc_rs::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use bytes::{Buf, BytesMut};
 use parking_lot::Mutex;
-use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use zerocopy::FromBytes;
 

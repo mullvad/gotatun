@@ -13,12 +13,12 @@ use crate::packet::{Packet, WgCookieReply, WgHandshakeBase, WgHandshakeInit, WgH
 use crate::sleepyinstant::Instant;
 use crate::x25519;
 use aead::{Aead, Payload};
+use aws_lc_rs::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use blake2::digest::{FixedOutput, KeyInit};
 use blake2::{Blake2s256, Blake2sMac, Digest};
 use chacha20poly1305::XChaCha20Poly1305;
 use constant_time_eq::constant_time_eq_n;
 use rand_core::OsRng;
-use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use std::convert::TryInto;
 use std::time::{Duration, SystemTime};
 use zerocopy::IntoBytes;
@@ -149,7 +149,7 @@ fn aead_chacha20_open_inner(
     nonce: [u8; 12],
     data: &[u8],
     aad: &[u8],
-) -> Result<(), ring::error::Unspecified> {
+) -> Result<(), aws_lc_rs::error::Unspecified> {
     let key = LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, key).unwrap());
 
     let mut inner_buffer = data.to_owned();
