@@ -13,7 +13,7 @@ mod types;
 
 use std::num::NonZeroUsize;
 
-pub use hooks::DaitaHooks;
+pub(crate) use hooks::DaitaHooks;
 pub use maybenot;
 pub use maybenot::Error;
 pub use maybenot::Machine;
