@@ -7,7 +7,7 @@ use crate::device::daita::actions::ActionHandler;
 use crate::device::daita::events::handle_events;
 use crate::device::daita::types::{self, DecoyMarker, DelayWatcher};
 use crate::device::peer_state::PeerState;
-use crate::packet::{self, Ip, WgData, WgKind};
+use crate::packet::{self, Ip, WgKind};
 use crate::task::Task;
 use crate::udp::UdpSend;
 use crate::{packet::Packet, tun::MtuWatcher};
@@ -142,7 +142,7 @@ impl DaitaHooks {
     /// Note:
     /// Should not be called on keepalive packets (0-length data packets).
     /// They do not contain an IP header, thus they would become malformed if padded.
-    pub fn before_data_encapsulate(&mut self, packet: Packet<Ip>) -> Packet {
+    pub fn on_normal_sent(&mut self, packet: Packet<Ip>) -> Packet {
         let _ = self.event_tx.send(TriggerEvent::NormalSent);
         self.packet_count.inc(1);
 
@@ -159,7 +159,7 @@ impl DaitaHooks {
     ///
     /// Returns `None` to drop/ignore the packet, e.g. when it was queued for delay.
     /// Returns `Some(packet)` to send the packet.
-    pub fn after_data_encapsulate(&self, packet: WgKind) -> Option<WgKind> {
+    pub fn on_tunnel_sent(&self, packet: WgKind) -> Option<WgKind> {
         // DAITA only cares about data packets.
         let data_packet = match packet {
             WgKind::Data(packet) if packet.is_keepalive() => {
@@ -178,19 +178,21 @@ impl DaitaHooks {
             })
     }
 
-    /// Inspect an incoming encapsulated data packet.
-    pub fn before_data_decapsulate(&self, packet: &Packet<WgData>) {
-        if !packet.is_keepalive() {
-            let _ = self.event_tx.send(TriggerEvent::TunnelRecv);
-        }
-    }
-
-    /// Should be called on incoming decapsulated *data* packets.
-    pub fn after_data_decapsulate(&mut self, packet: Packet) -> Option<Packet> {
+    /// Map an incoming decapsulated data packet, before it is sent to the tunnel device.
+    ///
+    /// NOTE: This hook currently registers both [`TriggerEvent::TunnelRecv`] and
+    /// [`TriggerEvent::NormalRecv`]/[`TriggerEvent::PaddingRecv`]. Ideally, `TunnelRecv`
+    /// should be triggered as early as possible for valid incoming data, i.e. before
+    /// decapsulating the data packet, but after validating the tag/MAC field. The current
+    /// API in [`ring`] does not allow us to separate these steps, so we trigger both
+    /// after decapsulation. This loses some timing information, but the order of the
+    /// events is preserved.
+    pub fn on_data_recv(&mut self, packet: Packet) -> Option<Packet> {
         if packet.is_empty() {
             // this is a keepalive packet, ignore it.
             return Some(packet);
         }
+        let _ = self.event_tx.send(TriggerEvent::TunnelRecv);
 
         // Check whether this is a DAITA decoy-packet.
         if let Ok(packet) = DecoyPacket::try_ref_from_bytes(packet.as_bytes()) {
