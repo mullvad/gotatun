@@ -591,13 +591,6 @@ impl<T: DeviceTransports> DeviceState<T> {
             #[cfg(not(feature = "daita"))]
             let PeerState { tunnel, .. } = &mut *peer;
 
-            #[cfg(feature = "daita")]
-            if let Some(daita) = daita
-                && let WgKind::Data(packet) = &parsed_packet
-            {
-                daita.before_data_decapsulate(packet);
-            }
-
             match tunnel.handle_incoming_packet(parsed_packet) {
                 TunnResult::Done => {
                     // Update the peer endpoint if we received any authenticated packet
@@ -615,7 +608,7 @@ impl<T: DeviceTransports> DeviceState<T> {
 
                     #[cfg(feature = "daita")]
                     let packets = packets.filter_map(|p| match daita {
-                        Some(daita) => daita.after_data_encapsulate(p),
+                        Some(daita) => daita.on_tunnel_sent(p),
                         None => Some(p),
                     });
 
@@ -633,7 +626,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                 TunnResult::WriteToTunnel(mut packet) => {
                     #[cfg(feature = "daita")]
                     if let Some(daita) = daita {
-                        match daita.after_data_decapsulate(packet) {
+                        match daita.on_data_recv(packet) {
                             Some(new) => packet = new,
                             None => continue,
                         }
@@ -741,7 +734,7 @@ impl<T: DeviceTransports> DeviceState<T> {
 
                 #[cfg(feature = "daita")]
                 let packet = match daita {
-                    Some(daita) => daita.before_data_encapsulate(packet),
+                    Some(daita) => daita.on_normal_sent(packet),
                     None => packet.into(),
                 };
                 #[cfg(not(feature = "daita"))]
@@ -757,7 +750,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                 #[cfg(feature = "daita")]
                 let packet = match daita {
                     None => packet.into(),
-                    Some(daita) => match daita.after_data_encapsulate(packet) {
+                    Some(daita) => match daita.on_tunnel_sent(packet) {
                         Some(packet) => packet.into(),
                         None => continue,
                     },

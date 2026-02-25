@@ -6,16 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+
+## [0.3.2] - 2026-02-25
 ### Fixed
 - Update WireGuard peer endpoint when any authenticated packet is received, not just handshake
   initiation.
-
-
-## [0.3.2] - 2026-02-24
-### Fixed
 - Downgrade lower version bound for `zerocopy` to `0.8.27` to allow dependents
   to circumvent <https://github.com/google/zerocopy/issues/2880>.
 
+### Security
+- Register `maybenot` `TriggerEvent::TunnelRecv` after decapsulation, to prevent
+  injection of `TunnelRecv` events on unauthenticated data.
 
 ## [0.3.1] - 2026-02-24
 ### Fixed
