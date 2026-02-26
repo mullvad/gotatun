@@ -7,9 +7,11 @@ mod linux;
 mod tso;
 mod virtio;
 
+use bytes::BytesMut;
 use tokio::{sync::watch, time::sleep};
 use tso::try_enable_tso;
 use tun::AbstractDevice;
+use zerocopy::IntoBytes;
 
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
@@ -138,8 +140,25 @@ impl TunDevice {
     }
 }
 
+// TODO
+const VNET_HDR: bool = true;
 impl IpSend for TunDevice {
     async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
+        let mut packet = packet.into_bytes();
+        if VNET_HDR {
+            let header = virtio::VirtioNetHeader {
+                flags: virtio::Flags::new(),
+                gso_type: virtio::GsoType::VIRTIO_NET_HDR_GSO_NONE,
+                hdr_len: 0,
+                gso_size: 0,
+                csum_start: 0,
+                csum_offset: 0,
+            };
+            let mut buf = BytesMut::new();
+            buf.extend_from_slice(header.as_bytes());
+            buf.extend_from_slice(packet.as_bytes());
+            *packet.buf_mut() = buf;
+        }
         self.tun.send(&packet.into_bytes()).await?;
         Ok(())
     }
