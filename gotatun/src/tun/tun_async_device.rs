@@ -8,6 +8,7 @@ mod tso;
 mod virtio;
 
 use tokio::{sync::watch, time::sleep};
+use tso::try_enable_tso;
 use tun::AbstractDevice;
 
 use crate::{
@@ -16,7 +17,7 @@ use crate::{
     tun::{IpRecv, IpSend, MtuWatcher},
 };
 
-use std::{convert::Infallible, io, iter, sync::Arc, time::Duration};
+use std::{convert::Infallible, io, iter, ops::Deref, sync::Arc, time::Duration};
 
 /// Error from [`TunDevice`].
 #[derive(Debug, thiserror::Error)]
@@ -75,10 +76,18 @@ impl TunDevice {
         tun_config.platform_config(|p| {
             p.enable_routing(false);
         });
+
+        #[cfg(target_os = "linux")]
+        tun_config.platform_config(|p| {
+            p.vnet_hdr(true);
+        });
+
         // TODO: for wintun, must set path or enable signature check
         // we should upstream to `tun`
         let tun = tun::create_as_async(&tun_config).map_err(Error::OpenTun)?;
+        try_enable_tso(tun.deref()).unwrap();
         let tun = TunDevice::from_tun_device(tun)?;
+
         Ok(tun)
     }
 
