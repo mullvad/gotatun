@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Security
+- Fix session nonce reuse issue on 32 bit platforms. Always use 64 bit counter for nonce
+  instead of a counter with the platforms' pointer width.
 
 
 ## [0.4.0] - 2026-02-25
@@ -21,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Register `maybenot` `TriggerEvent::TunnelRecv` after decapsulation, to prevent
   injection of `TunnelRecv` events on unauthenticated data.
+
 
 ## [0.3.1] - 2026-02-24
 ### Fixed

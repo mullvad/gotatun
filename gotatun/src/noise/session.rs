@@ -13,7 +13,7 @@ use crate::{
 use bytes::{Buf, BytesMut};
 use parking_lot::Mutex;
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use zerocopy::FromBytes;
 
 pub struct Session {
@@ -21,7 +21,7 @@ pub struct Session {
     sending_index: u32,
     receiver: LessSafeKey,
     sender: LessSafeKey,
-    sending_key_counter: AtomicUsize,
+    sending_key_counter: AtomicU64,
     receiving_key_counter: Mutex<ReceivingKeyCounterValidator>,
 }
 
@@ -169,7 +169,7 @@ impl Session {
                 UnboundKey::new(&CHACHA20_POLY1305, &receiving_key).unwrap(),
             ),
             sender: LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &sending_key).unwrap()),
-            sending_key_counter: AtomicUsize::new(0),
+            sending_key_counter: AtomicU64::new(0),
             receiving_key_counter: Mutex::new(Default::default()),
         }
     }
@@ -192,7 +192,7 @@ impl Session {
 
     /// Encapsulate `packet` into a [`WgData`].
     pub(super) fn format_packet_data(&self, packet: Packet) -> Packet<WgData> {
-        let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed) as u64;
+        let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed);
 
         let len = WgData::OVERHEAD + packet.len();
 
