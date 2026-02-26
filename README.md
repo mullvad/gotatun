@@ -71,6 +71,11 @@ See [UAPI](./UAPI.md) for extensions to the `wg` configuration protocol.
 
 ---
 
+## Audits
+
+Independent security audits have been conducted on the project.
+See the [audit](./audits/README.md) directory.
+
 ## License
 
 The project is licensed under the [3-Clause BSD License](https://opensource.org/licenses/BSD-3-Clause).
