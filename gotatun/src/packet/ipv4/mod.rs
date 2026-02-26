@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use bitfield_struct::bitfield;
-use eyre::eyre;
+use eyre::{Context, eyre};
 use std::{fmt::Debug, net::Ipv4Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
@@ -199,6 +199,29 @@ impl Ipv4Header {
 impl Ipv4 {
     /// Maximum possible length of an IPv4 packet.
     pub const MAX_LEN: usize = 65535;
+}
+
+impl<P: ?Sized> Ipv4<P> {
+    pub fn update_ip_checksum(&mut self) {
+        // TODO: handle IP options
+        debug_assert!(self.assert_no_ip_options().is_ok());
+
+        let checksum = pnet_packet::util::checksum(self.header.as_bytes(), 5);
+        self.header.header_checksum.set(checksum);
+    }
+
+    /// Assert that [`Ipv4Header::ihl`] is 5, which means that the IPv4 header does not contain
+    /// any optional values.
+    pub(crate) fn assert_no_ip_options(&self) -> eyre::Result<()> {
+        match self.header.ihl() {
+            5 => Ok(()),
+            6.. => Err(eyre!("IP header: {:?}", self.header))
+                .wrap_err(eyre!("IPv4 packets with options are not supported")),
+            ihl @ ..5 => {
+                Err(eyre!("IP header: {:?}", self.header)).wrap_err(eyre!("Bad IHL value: {ihl}"))
+            }
+        }
+    }
 }
 
 impl<P: ?Sized> Ipv4<P>

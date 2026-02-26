@@ -439,19 +439,6 @@ impl Packet<Ipv4> {
         // update `_kind` to reflect this.
         Ok(self.cast::<Ipv4<Tcp>>())
     }
-
-    /// Assert that [`Ipv4Header::ihl`] is 5, which means that the IPv4 header does not contain
-    /// any optional values.
-    fn assert_no_ip_options(&self) -> eyre::Result<()> {
-        match self.header.ihl() {
-            5 => Ok(()),
-            6.. => Err(eyre!("IP header: {:?}", self.header))
-                .wrap_err(eyre!("IPv4 packets with options are not supported")),
-            ihl @ ..5 => {
-                Err(eyre!("IP header: {:?}", self.header)).wrap_err(eyre!("Bad IHL value: {ihl}"))
-            }
-        }
-    }
 }
 
 impl Packet<Ipv6> {
