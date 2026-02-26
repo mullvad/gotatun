@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use bitfield_struct::bitfield;
+use eyre::eyre;
 use std::{fmt::Debug, net::Ipv4Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
@@ -198,6 +199,20 @@ impl Ipv4Header {
 impl Ipv4 {
     /// Maximum possible length of an IPv4 packet.
     pub const MAX_LEN: usize = 65535;
+}
+
+impl<P: ?Sized> Ipv4<P>
+where
+    Self: IntoBytes + Immutable,
+{
+    pub fn try_update_ip_len(&mut self) -> eyre::Result<()> {
+        self.header.total_len = self
+            .as_bytes()
+            .len()
+            .try_into()
+            .map_err(|_| eyre!("IPv4 packet was larger than {}", u16::MAX))?;
+        Ok(())
+    }
 }
 
 impl Debug for Ipv4Header {
