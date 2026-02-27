@@ -17,7 +17,7 @@ pub mod packet;
 pub mod tun;
 pub mod udp;
 
-mod task;
+pub mod task;
 
 #[cfg(not(feature = "mock_instant"))]
 pub(crate) mod sleepyinstant;
