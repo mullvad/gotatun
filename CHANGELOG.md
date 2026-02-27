@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ring` can opt in by building with `--no-default-features --features ring`.
 - Make the `ring` dependency optional, gated behind the new `ring` feature.
 
+### Security
+- Include source port in cookie MAC input. The WireGuard whitepaper states that the cookie
+  should be computed using the remote endpoint's address, being both the IP and port.
+  But the cookie was only using the sender's IP address. This weakened the built in DoS
+  mitigation by allowing for example multiple clients behind NAT to reuse a cookie issued
+  to a different source port.
+
 
 ## [0.5.1] - 2026-04-02
 ### Fixed
