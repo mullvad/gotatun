@@ -13,6 +13,7 @@ use crate::packet::{Packet, WgCookieReply, WgHandshakeBase, WgKind};
 use constant_time_eq::constant_time_eq;
 #[cfg(feature = "mock_instant")]
 use mock_instant::thread_local::Instant;
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -35,6 +36,11 @@ const RESET_PERIOD: Duration = Duration::from_secs(1);
 
 type Cookie = [u8; COOKIE_SIZE];
 
+struct IpCounts {
+    counts: HashMap<IpAddr, u64>,
+    last_reset: Instant,
+}
+
 /// There are two places where WireGuard requires "randomness" for cookies
 /// * The 24 byte nonce in the cookie massage - here the only goal is to avoid nonce reuse
 /// * A secret value that changes every two minutes
@@ -55,10 +61,8 @@ pub struct RateLimiter {
     mac1_key: [u8; 32],
     cookie_key: Key,
     limit: u64,
-    /// The counter since last reset
-    count: AtomicU64,
-    /// The time last reset was performed on this rate limiter
-    last_reset: Mutex<Instant>,
+    /// Per-source-IP packet counts, reset every `RESET_PERIOD`
+    ip_counts: Mutex<IpCounts>,
 }
 
 impl RateLimiter {
@@ -79,8 +83,10 @@ impl RateLimiter {
             mac1_key: b2s_hash(LABEL_MAC1, public_key.as_bytes()),
             cookie_key: b2s_hash(LABEL_COOKIE, public_key.as_bytes()).into(),
             limit,
-            count: AtomicU64::new(0),
-            last_reset: Mutex::new(Instant::now()),
+            ip_counts: Mutex::new(IpCounts {
+                counts: HashMap::new(),
+                last_reset: Instant::now(),
+            }),
         }
     }
 
@@ -90,15 +96,13 @@ impl RateLimiter {
         key
     }
 
-    /// Reset packet count (ideally should be called with a period of 1 second)
+    /// Reset packet counts (ideally should be called with a period of 1 second)
     pub fn try_reset_count(&self) {
-        // The rate limiter is not very accurate, but at the scale we care about it doesn't matter
-        // much
         let current_time = Instant::now();
-        let mut last_reset_time = self.last_reset.lock();
-        if current_time.duration_since(*last_reset_time) >= RESET_PERIOD {
-            self.count.store(0, Ordering::SeqCst);
-            *last_reset_time = current_time;
+        let mut ip_counts = self.ip_counts.lock();
+        if current_time.duration_since(ip_counts.last_reset) >= RESET_PERIOD {
+            ip_counts.counts.clear();
+            ip_counts.last_reset = current_time;
         }
     }
 
@@ -126,8 +130,15 @@ impl RateLimiter {
         b2s_mac_24(&self.nonce_key, &ctr.to_le_bytes())
     }
 
-    fn is_under_load(&self) -> bool {
-        self.count.fetch_add(1, Ordering::SeqCst) >= self.limit
+    /// Increment the per-source-IP handshake counter and return whether it exceeds `self.limit`.
+    ///
+    /// Counters are cleared every `RESET_PERIOD` by [`try_reset_count`](Self::try_reset_count),
+    /// so each IP is independently allowed `limit` handshakes per period.
+    fn is_under_load(&self, src_addr: IpAddr) -> bool {
+        let mut ip_counts = self.ip_counts.lock();
+        let count = ip_counts.counts.entry(src_addr).or_insert(0);
+        *count += 1;
+        *count > self.limit
     }
 
     pub(crate) fn format_cookie_reply(
@@ -191,7 +202,7 @@ impl RateLimiter {
             return Err(TunnResult::Err(WireGuardError::InvalidMac));
         }
 
-        if self.is_under_load() {
+        if self.is_under_load(src_addr) {
             let cookie = self.current_cookie(src_addr);
             let computed_mac2 = b2s_keyed_mac_16_2(&cookie, handshake.until_mac1(), mac1);
 
