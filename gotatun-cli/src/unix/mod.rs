@@ -126,7 +126,9 @@ fn run_daemon_child(args: Args, child_sock: UnixDatagram) -> Result<()> {
 
 fn wait_for_child(sock: UnixDatagram) -> Result<()> {
     let mut buf = [0u8; 1];
-    if sock.recv(&mut buf).is_ok() && buf == CHILD_OK {
+    sock.recv(&mut buf)?;
+
+    if buf == CHILD_OK {
         Ok(())
     } else {
         bail!("Child process failed to initialize")

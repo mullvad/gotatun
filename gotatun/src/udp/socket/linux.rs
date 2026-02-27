@@ -53,23 +53,29 @@ impl UdpSend for super::UdpSocket {
 
         let len = buf.targets.len();
         let pkts = &packets_buf[..len];
-
-        self.inner
-            .async_io(Interest::WRITABLE, || {
-                let mut multiheaders = MultiHeaders::preallocate(pkts.len(), None);
-                nix::sys::socket::sendmmsg(
-                    fd,
-                    &mut multiheaders,
-                    pkts,
-                    &buf.targets[..],
-                    [],
-                    MsgFlags::MSG_DONTWAIT,
-                )?;
-
-                Ok(())
-            })
-            .await?;
-
+        let mut packet_buf_start = 0;
+        while packet_buf_start < len {
+            let result = self
+                .inner
+                .async_io(Interest::WRITABLE, || {
+                    let mut multiheaders =
+                        MultiHeaders::preallocate(pkts[packet_buf_start..].len(), None);
+                    let multiresult = nix::sys::socket::sendmmsg(
+                        fd,
+                        &mut multiheaders,
+                        &pkts[packet_buf_start..],
+                        &buf.targets[packet_buf_start..],
+                        [],
+                        MsgFlags::MSG_DONTWAIT,
+                    )?;
+                    let n = multiresult.count();
+                    Ok(n)
+                })
+                .await;
+            let n = result?;
+            packet_buf_start += n;
+        }
+        assert!(packet_buf_start == len, "all packets should be sent");
         packets.clear();
 
         Ok(())
