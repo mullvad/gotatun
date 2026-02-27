@@ -223,8 +223,8 @@ mod gro {
             if msg.gro_size == 0 {
                 // Single packet
                 let mut buf = pool.get();
-                buf.buf_mut().clear();
-                buf.buf_mut().extend_from_slice(&recv_buf.gro_buf);
+                buf.clear();
+                buf.extend_from_slice(&recv_buf.gro_buf);
                 packets.push((buf, msg.source_addr));
                 return Ok(());
             }
@@ -236,8 +236,8 @@ mod gro {
                 .chunks(usize::try_from(msg.gro_size).unwrap())
             {
                 let mut buf = pool.get();
-                buf.buf_mut().clear();
-                buf.buf_mut().extend_from_slice(segment);
+                buf.clear();
+                buf.extend_from_slice(segment);
                 packets.push((buf, msg.source_addr));
             }
 
