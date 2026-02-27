@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Fix session nonce reuse issue on 32 bit platforms. Always use 64 bit counter for nonce
   instead of a counter with the platforms' pointer width.
+- Replace global handshake rate limiter with per-source-IP counters. The rate limiter used a single
+  global counter for all handshake packets. When any combination of sources exceeded the limit,
+  cookie mode was triggered for all peers. This meant a single attacker flooding handshake
+  initiations forced every legitimate peer into cookie mode, amplifying DoS rather than isolating
+  it.
 
 
 ## [0.4.0] - 2026-02-25
