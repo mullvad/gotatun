@@ -17,6 +17,7 @@ use blake2::digest::{FixedOutput, KeyInit};
 use blake2::{Blake2s256, Blake2sMac, Digest};
 use chacha20poly1305::XChaCha20Poly1305;
 use constant_time_eq::constant_time_eq_n;
+use rand::Rng;
 use rand_core::OsRng;
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use std::convert::TryInto;
@@ -270,6 +271,7 @@ struct HandshakeInitSentState {
     chaining_key: [u8; KEY_LEN],
     ephemeral_private: x25519::ReusableSecret,
     time_sent: Instant,
+    rekey_jitter: Duration,
 }
 
 impl std::fmt::Debug for HandshakeInitSentState {
@@ -280,6 +282,7 @@ impl std::fmt::Debug for HandshakeInitSentState {
             .field("chaining_key", &self.chaining_key)
             .field("ephemeral_private", &"<redacted>")
             .field("time_sent", &self.time_sent)
+            .field("rekey_jitter", &self.rekey_jitter)
             .finish()
     }
 }
@@ -463,9 +466,16 @@ impl Handshake {
         !matches!(self.state, HandshakeState::None | HandshakeState::Expired)
     }
 
-    pub(crate) fn timer(&self) -> Option<Instant> {
+    /// Returns the time the current handshake initiation was sent and the
+    /// timeout after which it should be retransmitted (`REKEY_TIMEOUT` + jitter),
+    /// or `None` if no initiation is currently in flight.
+    pub(crate) fn rekey_timeout(&self) -> Option<(Instant, Duration)> {
         match self.state {
-            HandshakeState::InitSent(HandshakeInitSentState { time_sent, .. }) => Some(time_sent),
+            HandshakeState::InitSent(HandshakeInitSentState {
+                time_sent,
+                rekey_jitter,
+                ..
+            }) => Some((time_sent, super::timers::REKEY_TIMEOUT + rekey_jitter)),
             _ => None,
         }
     }
@@ -802,6 +812,9 @@ impl Handshake {
                 hash,
                 ephemeral_private,
                 time_sent: time_now,
+                rekey_jitter: Duration::from_millis(
+                    rand::rng().random_range(0..super::timers::REKEY_TIMEOUT_JITTER_MAX_MS),
+                ),
             }),
         );
 

@@ -26,6 +26,11 @@ pub(crate) const REKEY_AFTER_TIME: Duration = Duration::from_secs(120);
 const REJECT_AFTER_TIME: Duration = Duration::from_secs(180);
 const REKEY_ATTEMPT_TIME: Duration = Duration::from_secs(90);
 pub(crate) const REKEY_TIMEOUT: Duration = Duration::from_secs(5);
+/// Upper bound (exclusive) for the random jitter added to `REKEY_TIMEOUT` when
+/// retransmitting handshake initiations. The WireGuard specification requires
+/// jitter in [0, 333] ms to prevent two peers from repeatedly colliding when
+/// both retry simultaneously (thundering herd).
+pub(crate) const REKEY_TIMEOUT_JITTER_MAX_MS: u64 = 334;
 const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 const COOKIE_EXPIRATION_TIME: Duration = Duration::from_secs(120);
 
@@ -227,7 +232,7 @@ impl Tunn {
                 return Err(WireGuardError::ConnectionExpired);
             }
 
-            if let Some(time_init_sent) = self.handshake.timer() {
+            if let Some((time_init_sent, rekey_timeout)) = self.handshake.rekey_timeout() {
                 // Handshake Initiation Retransmission
                 if now - handshake_started >= REKEY_ATTEMPT_TIME {
                     // After REKEY_ATTEMPT_TIME ms of trying to initiate a new handshake,
@@ -240,9 +245,7 @@ impl Tunn {
                     return Err(WireGuardError::ConnectionExpired);
                 }
 
-                if time_init_sent.elapsed() >= REKEY_TIMEOUT {
-                    // We avoid using `time` here, because it can be earlier than `time_init_sent`.
-                    // Once `checked_duration_since` is stable we can use that.
+                if time_init_sent.elapsed() >= rekey_timeout {
                     // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
                     // if a response has not been received, where jitter is some random
                     // value between 0 and 333 ms.
