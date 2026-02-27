@@ -61,6 +61,7 @@ mod ip;
 mod ipv4;
 mod ipv6;
 mod pool;
+mod tcp;
 mod udp;
 mod util;
 mod wg;
@@ -69,6 +70,7 @@ pub use ip::*;
 pub use ipv4::*;
 pub use ipv6::*;
 pub use pool::*;
+pub use tcp::*;
 pub use udp::*;
 pub use wg::*;
 
@@ -129,6 +131,7 @@ impl CheckedPayload for Ip {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv6<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv4<P> {}
 impl<P: CheckedPayload + ?Sized> CheckedPayload for Udp<P> {}
+impl CheckedPayload for Tcp {}
 impl CheckedPayload for WgHandshakeInit {}
 impl CheckedPayload for WgHandshakeResp {}
 impl CheckedPayload for WgCookieReply {}
@@ -183,14 +186,20 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
     FromType ToType;
     [Ipv4<Udp>]             [Ipv4];
     [Ipv6<Udp>]             [Ipv6];
+    [Ipv4<Tcp>]             [Ipv4];
+    [Ipv6<Tcp>]             [Ipv6];
 
     [Ipv4<Udp>]             [Ip];
     [Ipv6<Udp>]             [Ip];
+    [Ipv4<Tcp>]             [Ip];
+    [Ipv6<Tcp>]             [Ip];
     [Ipv4]                  [Ip];
     [Ipv6]                  [Ip];
 
     [Ipv4<Udp>]             [[u8]];
     [Ipv6<Udp>]             [[u8]];
+    [Ipv4<Tcp>]             [[u8]];
+    [Ipv6<Tcp>]             [[u8]];
     [Ipv4]                  [[u8]];
     [Ipv6]                  [[u8]];
     [Ip]                    [[u8]];
@@ -202,6 +211,26 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
 impl From<Packet<FromType>> for Packet<ToType> {
     fn from(value: Packet<FromType>) -> Packet<ToType> {
         value.cast()
+    }
+}
+
+#[duplicate_item(
+    FromType ToType either_fn;
+     [[u8]]  [Ipv4] [ left];
+     [[u8]]  [Ipv6] [right];
+     [ Ip ]  [Ipv4] [ left];
+     [ Ip ]  [Ipv6] [right];
+)]
+impl TryFrom<Packet<FromType>> for Packet<ToType> {
+    type Error = eyre::Report;
+
+    fn try_from(packet: Packet<FromType>) -> Result<Self, Self::Error> {
+        packet.try_into_ipvx()?.either_fn().ok_or_else(|| {
+            eyre!(
+                "Expected {} but found another IP version",
+                stringify!(ToType)
+            )
+        })
     }
 }
 
@@ -371,17 +400,7 @@ impl Packet<Ipv4> {
         // because there we can still parse the part of the Ipv4 header that is always present
         // and ignore the options. To parse the UDP packet, we must know that the IHL is 5,
         // otherwise it will not start at the right offset.
-        match ip.header.ihl() {
-            5 => {}
-            6.. => {
-                return Err(eyre!("IP header: {:?}", ip.header))
-                    .wrap_err(eyre!("IPv4 packets with options are not supported"));
-            }
-            ihl @ ..5 => {
-                return Err(eyre!("IP header: {:?}", ip.header))
-                    .wrap_err(eyre!("Bad IHL value: {ihl}"));
-            }
-        }
+        self.assert_no_ip_options()?;
 
         if ip.header.fragment_offset() != 0 || ip.header.more_fragments() {
             eyre::bail!("IPv4 packet is a fragment: {:?}", ip.header);
@@ -393,6 +412,32 @@ impl Packet<Ipv4> {
         // we have asserted that the packet is a valid IPv4 UDP packet.
         // update `_kind` to reflect this.
         Ok(self.cast::<Ipv4<Udp>>())
+    }
+
+    /// Try to cast this [`Ipv4`] packet into an [`Tcp`] packet.
+    ///
+    /// Returns `Packet<Ipv4<Tcp>>` if the packet is a valid,
+    /// non-fragmented IPv4 TCP packet with no options (IHL == `5`).
+    ///
+    /// # Errors
+    /// Returns an error if
+    /// - the packet is a fragment
+    /// - the IHL is not `5`
+    /// - TCP validation fails
+    pub fn try_into_tcp(self) -> eyre::Result<Packet<Ipv4<Tcp>>> {
+        // We validate the IHL here, instead of in the `try_into_ipvx` method,
+        // because there we can still parse the part of the Ipv4 header that is always present
+        // and ignore the options. To parse the TCP packet, we must know that the IHL is 5,
+        // otherwise it will not start at the right offset.
+        self.assert_no_ip_options()?;
+
+        let ip = self.deref();
+        validate_tcp(ip.header.next_protocol(), &ip.payload)
+            .wrap_err_with(|| eyre!("IP header: {:?}", ip.header))?;
+
+        // we have asserted that the packet is a valid IPv4 TCP packet.
+        // update `_kind` to reflect this.
+        Ok(self.cast::<Ipv4<Tcp>>())
     }
 }
 
@@ -412,6 +457,22 @@ impl Packet<Ipv6> {
         // we have asserted that the packet is a valid IPv6 UDP packet.
         // update `_kind` to reflect this.
         Ok(self.cast::<Ipv6<Udp>>())
+    }
+
+    /// Try to cast this [`Ipv6`] packet into an [`Tcp`] packet.
+    ///
+    /// Returns `Packet<Ipv6<Tcp>>` if the packet is a valid IPv6 TCP packet.
+    ///
+    /// # Errors
+    /// Returns an error if TCP validation fails
+    pub fn try_into_tcp(self) -> eyre::Result<Packet<Ipv6<Tcp>>> {
+        let ip = self.deref();
+        validate_tcp(ip.header.next_protocol(), &ip.payload)
+            .wrap_err_with(|| eyre!("IP header: {:?}", ip.header))?;
+
+        // we have asserted that the packet is a valid IPv6 TCP packet.
+        // update `_kind` to reflect this.
+        Ok(self.cast::<Ipv6<Tcp>>())
     }
 }
 
@@ -460,6 +521,23 @@ fn validate_udp(next_protocol: IpNextProtocol, payload: &[u8]) -> eyre::Result<(
             )
         });
     }
+
+    // TODO: validate checksum?
+
+    Ok(())
+}
+
+fn validate_tcp(next_protocol: IpNextProtocol, payload: &[u8]) -> eyre::Result<()> {
+    let IpNextProtocol::Tcp = next_protocol else {
+        bail!("Expected TCP, but packet was {next_protocol:?}");
+    };
+
+    let tcp = Tcp::ref_from_bytes(payload).map_err(|_| eyre!("Too small to be a TCP packet"))?;
+
+    // Check that `data_offset` is correct by trying to look at the payload.
+    tcp.payload()
+        .ok_or(eyre!("{:?}", tcp.header))
+        .wrap_err_with(|| eyre!("Bad TCP packet"))?;
 
     // TODO: validate checksum?
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use bitfield_struct::bitfield;
+use eyre::eyre;
 use std::{fmt::Debug, net::Ipv6Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
@@ -111,6 +112,21 @@ impl Ipv6Header {
     /// This is a [`usize`] because the length might exceed [`u16::MAX`].
     pub const fn total_length(&self) -> usize {
         self.payload_length.get() as usize + Ipv6Header::LEN
+    }
+}
+
+impl<P: ?Sized> Ipv6<P>
+where
+    P: IntoBytes + Immutable,
+{
+    pub fn try_update_ip_len(&mut self) -> eyre::Result<()> {
+        self.header.payload_length = self
+            .payload
+            .as_bytes()
+            .len()
+            .try_into()
+            .map_err(|_| eyre!("IPv6 payload was larger than {}", u16::MAX))?;
+        Ok(())
     }
 }
 
