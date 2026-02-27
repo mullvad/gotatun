@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Fix session nonce reuse issue on 32 bit platforms. Always use 64 bit counter for nonce
   instead of a counter with the platforms' pointer width.
+- Include source port in cookie MAC input. The WireGuard whitepaper states that the cookie
+  should be computed using the remote endpoint's address, being both the IP and port.
+  But the cookie was only using the sender's IP address. This weakened the built in DoS
+  mitigation by allowing for example multiple clients behind NAT to reuse a cookie issued
+  to a different source port.
 
 
 ## [0.4.0] - 2026-02-25
