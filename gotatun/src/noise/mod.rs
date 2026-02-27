@@ -820,6 +820,49 @@ mod tests {
         );
     }
 
+    /// Verify that one IP hitting the rate limit does not affect a different IP.
+    #[test]
+    #[cfg(feature = "mock_instant")]
+    fn per_ip_rate_limiting_isolation() {
+        let (mut my_tun, their_tun) = create_two_tuns();
+
+        let attacker_ip = Ipv4Addr::new(10, 0, 0, 1);
+        let legit_ip = Ipv4Addr::new(10, 0, 0, 2);
+
+        // Exhaust the rate limit for the attacker IP
+        for _ in 0..HANDSHAKE_RATE_LIMIT {
+            let init = my_tun
+                .format_handshake_initiation(true)
+                .expect("expected handshake init");
+            their_tun
+                .rate_limiter
+                .verify_handshake(attacker_ip.into(), init)
+                .expect("should be under limit");
+            MockClock::advance(Duration::from_micros(1));
+        }
+
+        // Attacker's next handshake should be rate limited
+        let init = my_tun
+            .format_handshake_initiation(true)
+            .expect("expected handshake init");
+        assert!(
+            their_tun
+                .rate_limiter
+                .verify_handshake(attacker_ip.into(), init)
+                .is_err(),
+            "attacker IP should be rate limited"
+        );
+
+        // Legitimate IP should still be accepted (not affected by attacker)
+        let init = my_tun
+            .format_handshake_initiation(true)
+            .expect("expected handshake init");
+        their_tun
+            .rate_limiter
+            .verify_handshake(legit_ip.into(), init)
+            .expect("legitimate IP should not be rate limited");
+    }
+
     /// Test that timers "freeze" if clock jumps back.
     #[test]
     #[cfg(feature = "mock_instant")]
