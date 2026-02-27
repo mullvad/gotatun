@@ -464,7 +464,7 @@ fn pad_to_x16(mut packet: Packet, tun_mtu: &mut MtuWatcher) -> Packet {
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv4Addr;
+    use std::net::{Ipv4Addr, SocketAddr};
 
     #[cfg(feature = "mock_instant")]
     use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT, TimerName};
@@ -608,12 +608,12 @@ mod tests {
 
         their_tun
             .rate_limiter
-            .verify_handshake(Ipv4Addr::LOCALHOST.into(), init)
+            .verify_handshake(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 12345), init)
             .expect("Handshake init to be valid");
 
         my_tun
             .rate_limiter
-            .verify_handshake(Ipv4Addr::LOCALHOST.into(), resp)
+            .verify_handshake(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 12345), resp)
             .expect("Handshake response to be valid");
     }
 
@@ -633,7 +633,7 @@ mod tests {
             let init = forced_handshake_init(&mut my_tun);
             their_tun
                 .rate_limiter
-                .verify_handshake(Ipv4Addr::LOCALHOST.into(), init)
+                .verify_handshake(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 12345), init)
                 .expect("Handshake init to be valid");
 
             MockClock::advance(Duration::from_micros(1));
@@ -643,7 +643,7 @@ mod tests {
         let init = forced_handshake_init(&mut my_tun);
         let Err(TunnResult::WriteToNetwork(WgKind::CookieReply(cookie_resp))) = their_tun
             .rate_limiter
-            .verify_handshake(Ipv4Addr::LOCALHOST.into(), init)
+            .verify_handshake(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 12345), init)
         else {
             panic!("expected cookie reply due to rate limiting");
         };
@@ -657,7 +657,7 @@ mod tests {
         let init = forced_handshake_init(&mut my_tun);
         their_tun
             .rate_limiter
-            .verify_handshake(Ipv4Addr::LOCALHOST.into(), init)
+            .verify_handshake(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 12345), init)
             .expect("should accept handshake with cookie");
     }
 
@@ -673,13 +673,16 @@ mod tests {
 
         their_tun
             .rate_limiter
-            .verify_handshake(Ipv4Addr::LOCALHOST.into(), init.clone())
+            .verify_handshake(
+                SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 12345),
+                init.clone(),
+            )
             .map(|packet| packet.mac1)
             .expect_err("Handshake init to be invalid");
 
         my_tun
             .rate_limiter
-            .verify_handshake(Ipv4Addr::LOCALHOST.into(), resp)
+            .verify_handshake(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 12345), resp)
             .map(|packet| packet.mac1)
             .expect_err("Handshake response to be invalid");
     }
