@@ -846,10 +846,12 @@ mod tests {
             .format_handshake_initiation(true)
             .expect("expected handshake init");
         assert!(
-            their_tun
-                .rate_limiter
-                .verify_handshake(attacker_ip.into(), init)
-                .is_err(),
+            matches!(
+                their_tun
+                    .rate_limiter
+                    .verify_handshake(attacker_ip.into(), init),
+                Err(TunnResult::WriteToNetwork(WgKind::CookieReply(_)))
+            ),
             "attacker IP should be rate limited"
         );
 
