@@ -322,7 +322,11 @@ impl Packet<Ip> {
 
                 self.inner.buf.truncate(ip_len);
 
-                // TODO: validate checksum
+                // NOTE: We do not validate the checksum here due to the fact that the Poly1305 tag
+                // already proves that the packet was not modified in transit. Assuming that the
+                // transport and IP checksums were valid at the point of encapsulation, then the
+                // checksums are still valid after decapsulation.
+                // See https://github.com/torvalds/linux/blob/af4e9ef3d78420feb8fe58cd9a1ab80c501b3c08/drivers/net/wireguard/receive.c#L376-L382
 
                 // we have asserted that the packet is a valid IPv4 packet.
                 // update `_kind` to reflect this.
@@ -342,7 +346,7 @@ impl Packet<Ip> {
 
                 self.inner.buf.truncate(payload_len + Ipv6Header::LEN);
 
-                // TODO: validate checksum
+                // We do not validate the checksum. See reasoning above.
 
                 // we have asserted that the packet is a valid IPv6 packet.
                 // update `_kind` to reflect this.
@@ -461,7 +465,11 @@ fn validate_udp(next_protocol: IpNextProtocol, payload: &[u8]) -> eyre::Result<(
         });
     }
 
-    // TODO: validate checksum?
+    // NOTE: We do not validate the checksum here due to the fact that the Poly1305 tag
+    // already proves that the packet was not modified in transit. Assuming that the
+    // transport and IP checksums were valid at the point of encapsulation, then the
+    // checksums are still valid after decapsulation.
+    // See https://github.com/torvalds/linux/blob/af4e9ef3d78420feb8fe58cd9a1ab80c501b3c08/drivers/net/wireguard/receive.c#L376-L382
 
     Ok(())
 }
