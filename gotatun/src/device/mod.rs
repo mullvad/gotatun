@@ -249,7 +249,7 @@ impl<T: DeviceTransports> Device<T> {
     }
 
     async fn stop_inner(device: Arc<RwLock<DeviceState<T>>>) {
-        log::debug!("Stopping gotatun device");
+        log::debug!("Stopping device");
 
         let mut device = device.write().await;
 
@@ -265,16 +265,10 @@ impl<T: DeviceTransports> Device<T> {
 
 impl<T: DeviceTransports> Drop for Device<T> {
     fn drop(&mut self) {
-        log::debug!("Dropping gotatun device");
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
             log::warn!("Failed to get tokio runtime handle");
             return;
         };
-        log::debug!(
-            "DeviceHandle strong count: {}",
-            Arc::strong_count(&self.inner)
-        );
-        log::debug!("DeviceHandle weak count: {}", Arc::weak_count(&self.inner));
         let device = self.inner.clone();
         handle.spawn(async move {
             Self::stop_inner(device).await;
@@ -793,11 +787,5 @@ impl<T: DeviceTransports> Connection<T> {
             timers.stop(),
             outgoing.stop(),
         );
-    }
-}
-
-impl<T: DeviceTransports> Drop for DeviceState<T> {
-    fn drop(&mut self) {
-        log::info!("Stopping Device");
     }
 }
