@@ -249,8 +249,6 @@ impl Tunn {
         self.timer_tick(TimerName::TimeLastPacketReceived);
         self.timer_tick(TimerName::TimeCookieReceived);
 
-        log::debug!("Did set cookie");
-
         Ok(TunnResult::Done)
     }
 
@@ -266,7 +264,7 @@ impl Tunn {
                 >= self.timers.session_timers[cur_slot % N_SESSIONS]
         {
             self.current = new_slot;
-            log::debug!("New session slot: {new_slot}");
+            log::trace!("New session slot: {new_slot}");
         }
     }
 
