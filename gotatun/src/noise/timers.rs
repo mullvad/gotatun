@@ -235,7 +235,7 @@ impl Tunn {
                     // the retries give up and cease, and clear all existing packets queued
                     // up to be sent. If a packet is explicitly queued up to be sent, then
                     // this timer is reset.
-                    log::error!("CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
+                    log::debug!("CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
                     self.handshake.set_expired();
                     self.clear_all();
                     return Err(WireGuardError::ConnectionExpired);
@@ -247,7 +247,7 @@ impl Tunn {
                     // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
                     // if a response has not been received, where jitter is some random
                     // value between 0 and 333 ms.
-                    log::warn!("HANDSHAKE(REKEY_TIMEOUT)");
+                    log::debug!("HANDSHAKE(REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
                 }
             } else {
