@@ -299,7 +299,7 @@ impl Tunn {
                         && now - aut_packet_sent >= KEEPALIVE_TIMEOUT
                         && mem::replace(&mut self.timers.want_keepalive, false)
                     {
-                        log::debug!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
+                        log::trace!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
                         keepalive_required = true;
                     }
 
@@ -308,7 +308,7 @@ impl Tunn {
                         && (now - self.timers[TimePersistentKeepalive]
                             >= Duration::from_secs(persistent_keepalive as _))
                     {
-                        log::debug!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
+                        log::trace!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
                         self.timer_tick(TimePersistentKeepalive);
                         keepalive_required = true;
                     }
