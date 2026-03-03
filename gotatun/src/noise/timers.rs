@@ -170,8 +170,9 @@ impl Tunn {
 
         for (i, t) in timers.session_timers.iter_mut().enumerate() {
             if time_now - *t > REJECT_AFTER_TIME {
+                // Forget about expired sesssions
                 if let Some(session) = self.sessions[i].take() {
-                    log::debug!(
+                    log::trace!(
                         "SESSION_EXPIRED(REJECT_AFTER_TIME): {}",
                         session.receiving_index
                     );
@@ -221,7 +222,7 @@ impl Tunn {
             // All ephemeral private keys and symmetric session keys are zeroed out after
             // (REJECT_AFTER_TIME * 3) ms if no new keys have been exchanged.
             if now - session_established >= REJECT_AFTER_TIME * 3 {
-                log::error!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
+                log::trace!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
                 self.handshake.set_expired();
                 self.clear_all();
                 return Err(WireGuardError::ConnectionExpired);
@@ -259,7 +260,7 @@ impl Tunn {
                     if session_established < data_packet_sent
                         && now - session_established >= REKEY_AFTER_TIME
                     {
-                        log::debug!("HANDSHAKE(REKEY_AFTER_TIME (on send))");
+                        log::trace!("HANDSHAKE(REKEY_AFTER_TIME (on send))");
                         handshake_initiation_required = true;
                     }
 
@@ -271,7 +272,7 @@ impl Tunn {
                         && now - session_established
                             >= REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT
                     {
-                        log::warn!(
+                        log::trace!(
                             "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - \
                         REKEY_TIMEOUT \
                         (on receive))"
@@ -286,7 +287,7 @@ impl Tunn {
                 if let Some(since) = self.timers.want_handshake
                     && now.saturating_sub(since) >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
                 {
-                    log::warn!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
+                    log::trace!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
                     self.timers.want_handshake = None;
                 }
