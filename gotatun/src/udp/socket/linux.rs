@@ -75,7 +75,7 @@ impl UdpSend for super::UdpSocket {
             let n = result?;
             packet_buf_start += n;
         }
-        assert!(packet_buf_start == len, "all packets should be sent");
+        debug_assert!(packet_buf_start == len, "all packets should be sent");
         packets.clear();
 
         Ok(())
