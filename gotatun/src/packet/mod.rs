@@ -70,6 +70,7 @@ pub use ipv4::*;
 pub use ipv6::*;
 pub use pool::*;
 pub use udp::*;
+pub use util::*;
 pub use wg::*;
 
 /// An owned packet of some type.
