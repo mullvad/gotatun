@@ -1,9 +1,13 @@
-// Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
-// Modified by Mullvad VPN.
-// Copyright (c) 2025 Mullvad VPN.
+// This file incorporates work covered by the following copyright and
+// permission notice:
 //
-// SPDX-License-Identifier: BSD-3-Clause
+//   Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
+//
+// SPDX-License-Identifier: MPL-2.0
 
 //! Userspace API.
 //!
