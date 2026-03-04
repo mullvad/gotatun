@@ -15,7 +15,6 @@
 
 use bytes::BytesMut;
 use duplicate::duplicate_item;
-use pnet_packet::ip::IpNextHeaderProtocols;
 use rand_core::RngCore;
 use std::{
     io,
@@ -27,7 +26,8 @@ use zerocopy::{FromBytes, IntoBytes};
 
 use crate::{
     packet::{
-        IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Ipv6Header, Packet, PacketBufPool, Udp, UdpHeader,
+        IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Ipv6Header, Packet, PacketBufPool, PseudoHeaderV4,
+        PseudoHeaderV6, Udp, UdpHeader, checksum, checksum_udp,
     },
     tun::{
         MtuWatcher,
@@ -299,6 +299,27 @@ fn create_ipv4_payload(
     destination_port: u16,
     udp_payload: &[u8],
 ) -> Packet<Ipv4<Udp>> {
+    static NEXT_ID: AtomicU16 = AtomicU16::new(1);
+    let identification = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+    create_ipv4_payload_inner(
+        source_ip,
+        source_port,
+        destination_ip,
+        destination_port,
+        udp_payload,
+        identification,
+    )
+}
+
+fn create_ipv4_payload_inner(
+    source_ip: Ipv4Addr,
+    source_port: u16,
+    destination_ip: Ipv4Addr,
+    destination_port: u16,
+    udp_payload: &[u8],
+    identification: u16,
+) -> Packet<Ipv4<Udp>> {
     let udp_len: u16 = (UdpHeader::LEN + udp_payload.len()).try_into().unwrap();
     let total_len = u16::try_from(Ipv4Header::LEN).unwrap() + udp_len;
 
@@ -308,14 +329,8 @@ fn create_ipv4_payload(
     ipv4.header =
         Ipv4Header::new_for_length(source_ip, destination_ip, IpNextProtocol::Udp, udp_len);
 
-    static NEXT_ID: AtomicU16 = AtomicU16::new(1);
-    ipv4.header.identification = NEXT_ID
-        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-        .into();
-
-    // TODO: Remove dependency on pnet_packet
-    let ipv4_checksum = pnet_packet::util::checksum(ipv4.header.as_bytes(), 5);
-    ipv4.header.header_checksum = ipv4_checksum.into();
+    ipv4.header.identification = identification.into();
+    ipv4.header.header_checksum = checksum(&[ipv4.header.as_bytes()]).into();
 
     let udp = &mut ipv4.payload;
     udp.header.source_port = source_port.into();
@@ -323,15 +338,15 @@ fn create_ipv4_payload(
     udp.header.length = udp_len.into();
     udp.payload.copy_from_slice(udp_payload);
 
-    // TODO: Remove dependency on pnet_packet
-    let csum = pnet_packet::util::ipv4_checksum(
+    let csum = checksum_udp(
+        PseudoHeaderV4::from_udp(
+            source_ip.octets().into(),
+            destination_ip.octets().into(),
+            udp,
+        ),
         udp.as_bytes(),
-        3,
-        &[],
-        &source_ip,
-        &destination_ip,
-        IpNextHeaderProtocols::Udp,
     );
+
     udp.header.checksum = csum.into();
 
     Packet::from_bytes(packet)
@@ -359,6 +374,7 @@ fn create_ipv6_payload(
     let ipv6 = Ipv6::<Udp>::mut_from_bytes(&mut packet).expect("bad IP packet buffer");
     ipv6.header.set_version(6);
     ipv6.header.set_flow_label(connection_id);
+    ipv6.header.payload_length = udp_len.into();
     ipv6.header.next_header = IpNextProtocol::Udp;
     ipv6.header.source_address = source_ip.to_bits().into();
     ipv6.header.destination_address = destination_ip.to_bits().into();
@@ -370,14 +386,13 @@ fn create_ipv6_payload(
     udp.header.length = udp_len.into();
     udp.payload.copy_from_slice(udp_payload);
 
-    // TODO: Remove dependency on pnet_packet
-    let csum = pnet_packet::util::ipv6_checksum(
+    let csum = checksum_udp(
+        PseudoHeaderV6::from_udp(
+            source_ip.octets().into(),
+            destination_ip.octets().into(),
+            udp,
+        ),
         udp.as_bytes(),
-        3,
-        &[],
-        source_ip,
-        destination_ip,
-        IpNextHeaderProtocols::Udp,
     );
     udp.header.checksum = csum.into();
 
@@ -388,4 +403,72 @@ fn create_ipv6_payload(
         .expect_right("packet is ipv6")
         .try_into_udp()
         .expect("packet is udp")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        net::{Ipv4Addr, Ipv6Addr},
+        str::FromStr,
+    };
+
+    #[test]
+    fn test_create_ipv4_payload_checksum() {
+        let src_ip = Ipv4Addr::new(10, 0, 0, 1);
+        let dst_ip = Ipv4Addr::new(192, 168, 1, 1);
+        let src_port = 12345u16;
+        let dst_port = 51820u16;
+        let payload = b"hello wireguard";
+
+        let packet = create_ipv4_payload(src_ip, src_port, dst_ip, dst_port, payload);
+
+        assert_eq!(
+            packet.payload.header.checksum.get(),
+            0xDEC6,
+            "UDP checksum invalid"
+        );
+    }
+
+    #[test]
+    fn test_create_ipv6_payload_checksum() {
+        let src_ip = Ipv6Addr::from_str("fc00::1").unwrap();
+        let dst_ip = Ipv6Addr::from_str("2606:4700:4700::1111").unwrap();
+        let src_port = 12345u16;
+        let dst_port = 51820u16;
+        let connection_id = 0xABCDE;
+        let payload = b"hello wireguard ipv6";
+
+        let packet =
+            create_ipv6_payload(&src_ip, src_port, &dst_ip, dst_port, payload, connection_id);
+
+        assert_eq!(
+            packet.payload.header.checksum.get(),
+            0x0987,
+            "UDP checksum invalid"
+        );
+    }
+
+    #[test]
+    fn test_create_ipv4_payload_checksum_zero() {
+        let src_ip = Ipv4Addr::new(10, 0, 0, 1);
+        let dst_ip = Ipv4Addr::new(192, 168, 1, 1);
+        let src_port = 12345u16;
+        let dst_port = 51820u16;
+        let mut payload = *b"\0\0";
+
+        // Checksum a packet
+        let packet = create_ipv4_payload(src_ip, src_port, dst_ip, dst_port, &payload);
+
+        // Change the payload such that the output of the checksum function would be 0
+        payload = *packet.payload.header.checksum.as_ref();
+        let packet = create_ipv4_payload(src_ip, src_port, dst_ip, dst_port, &payload);
+
+        // Assert that the checksum of `0` is represented as `0xffff`
+        assert_eq!(
+            packet.payload.header.checksum.get(),
+            0xffff,
+            "UDP checksum invalid"
+        );
+    }
 }
