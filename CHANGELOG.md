@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed
+#### Linux
+- Fix packet loss when sending on the UDP socket using `sendmmsg`.
+
 ### Security
 - Fix session nonce reuse issue on 32 bit platforms. Always use 64 bit counter for nonce
   instead of a counter with the platforms' pointer width.
