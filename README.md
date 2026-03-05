@@ -8,6 +8,10 @@ All source code in this repository is subject to the terms of the Mozilla Public
 
 Contributions made prior to Jan 31, 2025 are licensed under the old BSD 3-clause license. A copy of this license can be found in the file "LICENSE-CLOUDFLARE".
 
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the MPL-2.0 License, shall be licensed as above, without any additional terms or conditions.
+
 ### Building
 
 - Library only: `cargo build --lib --no-default-features --release [--target $(TARGET_TRIPLE)]`
@@ -81,10 +85,6 @@ See [UAPI](./UAPI.md) for extensions to the `wg` configuration protocol.
 
 Independent security audits have been conducted on the project.
 See the [audit](./audits/README.md) directory.
-
-### Contribution
-
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the 3-Clause BSD License, shall be licensed as above, without any additional terms or conditions.
 
 ---
 <sub><sub><sub><sub>WireGuard is a registered trademark of Jason A. Donenfeld. GotaTun is not sponsored or endorsed by Jason A. Donenfeld.</sub></sub></sub></sub>
