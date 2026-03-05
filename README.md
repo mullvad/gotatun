@@ -12,20 +12,20 @@ Contributions made prior to Jan 31, 2025 are licensed under the old BSD 3-clause
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the MPL-2.0 License, shall be licensed as above, without any additional terms or conditions.
 
-### Building
+## Building
 
 - Library only: `cargo build --lib --no-default-features --release [--target $(TARGET_TRIPLE)]`
 - Executable: `cargo build --bin gotatun --release [--target $(TARGET_TRIPLE)]`
 
-#### Installation
+### Installation
 
 By default the executable is placed in the `./target/release` folder. You can copy it to a desired location manually, or install it using `cargo install --bin gotatun --path .`.
 
-#### Nix
+### Nix
 
 To build the executable, simply run `nix build .#gotatun`. The final binary will be located in `result/bin/gotatun`.
 
-### Running
+## Running
 
 As per the specification, to start a tunnel use:
 
@@ -39,7 +39,7 @@ It is also possible to use with [wg-quick](https://git.zx2c4.com/WireGuard/about
 
 *Please note that `wg-quick` will ignore `WG_QUICK_USERSPACE_IMPLEMENTATION` on Linux if you have the wireguard kernel module installed.*
 
-### Testing
+## Testing
 
 Testing this project has a few requirements:
 
@@ -63,7 +63,7 @@ aarch64-apple-ios             |      | ✓    |
 
 <sub>Other targets may work, but we only test for these</sub>
 
-#### Linux
+### Linux
 
 `x86-64`, and `aarch64` architectures are supported. The behaviour should be identical to that of [wireguard-go](https://git.zx2c4.com/wireguard-go/about/), with the following difference:
 
@@ -71,7 +71,7 @@ aarch64-apple-ios             |      | ✓    |
 
 You will need to give the executable the `CAP_NET_ADMIN` capability using: `sudo setcap cap_net_admin+epi gotatun`. sudo is not needed.
 
-#### macOS
+### macOS
 
 The behaviour is similar to that of [wireguard-go](https://git.zx2c4.com/wireguard-go/about/). Specifically the interface name must be `utun[0-9]+` for an explicit interface name or `utun` to have the kernel select the lowest available. If you choose `utun` as the interface name, and the environment variable `WG_TUN_NAME_FILE` is defined, then the actual name of the interface chosen by the kernel is written to the file specified by that variable.
 
