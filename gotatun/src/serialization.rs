@@ -5,6 +5,7 @@
 // This file incorporates work covered by the following copyright and
 // permission notice:
 //
+//   Copyright (c) Mullvad VPN AB. All rights reserved.
 //   Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: MPL-2.0
