@@ -19,7 +19,7 @@ use zerocopy::{FromBytes, IntoBytes};
 use crate::{
     packet::{
         IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Ipv6Header, Packet, PacketBufPool, PseudoHeaderV4,
-        PseudoHeaderV6, Udp, UdpHeader, checksum, checksum_with_header,
+        PseudoHeaderV6, Udp, UdpHeader, checksum, checksum_udp,
     },
     tun::{
         MtuWatcher,
@@ -330,7 +330,7 @@ fn create_ipv4_payload_inner(
     udp.header.length = udp_len.into();
     udp.payload.copy_from_slice(udp_payload);
 
-    let csum = checksum_with_header(
+    let csum = checksum_udp(
         PseudoHeaderV4::from_udp(
             source_ip.octets().into(),
             destination_ip.octets().into(),
@@ -378,7 +378,7 @@ fn create_ipv6_payload(
     udp.header.length = udp_len.into();
     udp.payload.copy_from_slice(udp_payload);
 
-    let csum = checksum_with_header(
+    let csum = checksum_udp(
         PseudoHeaderV6::from_udp(
             source_ip.octets().into(),
             destination_ip.octets().into(),
@@ -437,6 +437,30 @@ mod tests {
         assert_eq!(
             packet.payload.header.checksum.get(),
             0x0987,
+            "UDP checksum invalid"
+        );
+    }
+
+    #[test]
+    fn test_create_ipv4_payload_checksum_zero() {
+        let src_ip = Ipv4Addr::new(10, 0, 0, 1);
+        let dst_ip = Ipv4Addr::new(192, 168, 1, 1);
+        let src_port = 12345u16;
+        let dst_port = 51820u16;
+        let mut payload = *b"\0\0";
+
+        // Checksum a packet
+        let mut packet = create_ipv4_payload(src_ip, src_port, dst_ip, dst_port, &payload);
+
+        // Change the payload such that the output of the checksum function would be 0
+        payload = *packet.payload.header.checksum.as_ref();
+        packet.payload.header.checksum = 0.into();
+        let packet = create_ipv4_payload(src_ip, src_port, dst_ip, dst_port, &payload);
+
+        // Assert that the checksum of `0` is represented as `0xffff`
+        assert_eq!(
+            packet.payload.header.checksum.get(),
+            0xffff,
             "UDP checksum invalid"
         );
     }
