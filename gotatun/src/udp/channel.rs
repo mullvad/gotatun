@@ -292,9 +292,7 @@ fn create_ipv4_payload(
     udp_payload: &[u8],
 ) -> Packet<Ipv4<Udp>> {
     static NEXT_ID: AtomicU16 = AtomicU16::new(1);
-    let identification = NEXT_ID
-        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-        .into();
+    let identification = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
     create_ipv4_payload_inner(
         source_ip,
