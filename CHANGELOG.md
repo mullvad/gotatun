@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Linux
 - Fix packet loss when sending on the UDP socket using `sendmmsg`.
 
+#### macOS
+- Fix GotaTun CLI not working due to assigning wrong IP address.
+
 ### Security
 - Fix session nonce reuse issue on 32 bit platforms. Always use 64 bit counter for nonce
   instead of a counter with the platforms' pointer width.
