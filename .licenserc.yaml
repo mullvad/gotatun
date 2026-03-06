@@ -1,0 +1,14 @@
+header:
+  license:
+    spdx-id: MPL-2.0
+    copyright-owner: Mullvad VPN AB
+  # Limit the scope to Rust source files.
+  paths:
+      - '**/*.rs'
+  comment: on-failure
+
+# Don't check dependencies' license compatibility.
+dependency:
+  files:
+    - Cargo.toml
+
