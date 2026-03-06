@@ -123,8 +123,8 @@ mod tests {
         let src_ip = Ipv4Addr::new(10, 0, 0, 1);
         let dst_ip = Ipv4Addr::new(192, 168, 1, 1);
         let mut header = Ipv4Header::new_for_length(src_ip, dst_ip, IpNextProtocol::Udp, 23);
-        header.header_checksum = checksum(header.as_bytes()).into();
+        header.header_checksum = checksum(&[header.as_bytes()]).into();
         assert_eq!(header.header_checksum.get(), 0xAF18);
-        assert_eq!(checksum(header.as_bytes()), 0);
+        assert_eq!(checksum(&[header.as_bytes()]), 0);
     }
 }
