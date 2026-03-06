@@ -450,11 +450,10 @@ mod tests {
         let mut payload = *b"\0\0";
 
         // Checksum a packet
-        let mut packet = create_ipv4_payload(src_ip, src_port, dst_ip, dst_port, &payload);
+        let packet = create_ipv4_payload(src_ip, src_port, dst_ip, dst_port, &payload);
 
         // Change the payload such that the output of the checksum function would be 0
         payload = *packet.payload.header.checksum.as_ref();
-        packet.payload.header.checksum = 0.into();
         let packet = create_ipv4_payload(src_ip, src_port, dst_ip, dst_port, &payload);
 
         // Assert that the checksum of `0` is represented as `0xffff`
