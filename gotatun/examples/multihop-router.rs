@@ -98,7 +98,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use base64::Engine;
 use clap::Parser;
 use eyre::{Context, ContextCompat};
-#[cfg(feature = "pcap")]
+#[cfg(all(feature = "pcap", unix))]
 use gotatun::tun::pcap::{PcapSniffer, PcapStream};
 use gotatun::{
     device::{DeviceBuilder, Peer},
@@ -166,7 +166,7 @@ struct Args {
     routes: Vec<String>,
 
     /// PCAP unix socket path for Wireshark (requires `--features pcap`).
-    #[cfg(feature = "pcap")]
+    #[cfg(all(feature = "pcap", unix))]
     #[arg(long, default_value = "/tmp/multihop.pcap")]
     pcap_socket: String,
 }
@@ -297,7 +297,7 @@ async fn main() -> eyre::Result<()> {
         .build()
         .await?;
 
-    #[cfg(feature = "pcap")]
+    #[cfg(all(feature = "pcap", unix))]
     let (outer_ip_send, outer_ip_recv) =
         wrap_in_pcap_sniffer(outer_ip_send, outer_ip_recv, &args.pcap_socket);
 
@@ -336,7 +336,7 @@ async fn main() -> eyre::Result<()> {
 /// ```sh
 /// wireshark -k -i /tmp/multihop.pcap
 /// ```
-#[cfg(feature = "pcap")]
+#[cfg(all(feature = "pcap", unix))]
 fn wrap_in_pcap_sniffer<S, R>(
     ip_send: S,
     ip_recv: R,
