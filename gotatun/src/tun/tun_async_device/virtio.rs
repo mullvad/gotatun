@@ -1,3 +1,14 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+//
+// This file incorporates work covered by the following copyright and
+// permission notice:
+//
+//   Copyright (c) Mullvad VPN AB. All rights reserved.
+//
+// SPDX-License-Identifier: MPL-2.0
+
 //! Implementation of the Virtio net header.
 //!
 //! The header can be enabled on TUN devices using the [libc::IFF_VNET_HDR]-flag,
