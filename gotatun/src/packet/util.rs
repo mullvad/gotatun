@@ -72,22 +72,20 @@ impl PseudoHeaderV6 {
     }
 }
 
-/// Compute an "Internet checksum" with an additional header
-pub fn checksum_with_header<H: IntoBytes + Immutable>(header: H, payload: &[u8]) -> u16 {
-    let sum = checksum_payload(header.as_bytes()) + checksum_payload(payload);
+/// Compute an "Internet checksum"
+pub fn checksum(payload: &[&[u8]]) -> u16 {
+    let mut sum = 0;
+    for p in payload {
+        sum += checksum_payload(p);
+    }
     finalize_csum(sum)
-}
-
-/// Compute an "Internet checksum" used by IP headers
-pub fn checksum(bytes: &[u8]) -> u16 {
-    finalize_csum(checksum_payload(bytes))
 }
 
 /// Compute an "Internet checksum" with an additional header and a final
 /// inversion of all bits if the checksum is all zeros. This is used for UDP checksums
 /// because 0 means "no checksum" in UDP + IPv4.
 pub fn checksum_udp<H: IntoBytes + Immutable>(header: H, payload: &[u8]) -> u16 {
-    let csum = checksum_with_header(header, payload);
+    let csum = checksum(&[header.as_bytes(), payload]);
     if csum == 0 {
         return !0;
     }

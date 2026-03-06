@@ -322,7 +322,7 @@ fn create_ipv4_payload_inner(
         Ipv4Header::new_for_length(source_ip, destination_ip, IpNextProtocol::Udp, udp_len);
 
     ipv4.header.identification = identification.into();
-    ipv4.header.header_checksum = checksum(ipv4.header.as_bytes()).into();
+    ipv4.header.header_checksum = checksum(&[ipv4.header.as_bytes()]).into();
 
     let udp = &mut ipv4.payload;
     udp.header.source_port = source_port.into();
