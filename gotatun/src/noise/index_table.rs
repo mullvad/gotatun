@@ -66,6 +66,7 @@ where
         IndexTable(Arc::new(Mutex::new((rng, HashSet::new()))))
     }
 
+    /// Check if an index is already in the table.
     pub fn in_use(&self, value: u32) -> bool {
         let g = self.0.lock().unwrap();
         g.1.contains(&value)
