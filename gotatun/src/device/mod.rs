@@ -492,8 +492,7 @@ impl<T: DeviceTransports> DeviceState<T> {
 
                 // Remove stale session indices.
                 device.peers_by_idx.lock().retain(|idx, map_peer| {
-                    !Arc::ptr_eq(peer, map_peer)
-                        || p.tunnel.active_receiving_indices().any(|i| i == *idx)
+                    !Arc::ptr_eq(peer, map_peer) || device.index_table.in_use(*idx)
                 });
 
                 match p.update_timers() {
