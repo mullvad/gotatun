@@ -480,6 +480,10 @@ impl<T: DeviceTransports> DeviceState<T> {
             };
             let device = device.read().await;
             // Remove stale session indices.
+            //
+            // `device.index_table` is a singleton which identifies initiatied and active sessions.
+            // Once a session is stale it is dropped (see `update_session_timers`), and its
+            // associated index is freed from the table.
             device
                 .peers_by_idx
                 .lock()
