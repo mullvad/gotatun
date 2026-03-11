@@ -479,6 +479,16 @@ impl<T: DeviceTransports> DeviceState<T> {
                 break;
             };
             let device = device.read().await;
+            // Remove stale session indices.
+            //
+            // `device.index_table` is a singleton which identifies ongoing handshakes and active sessions.
+            // Once a session is stale it is dropped (see `update_session_timers`), and its
+            // associated index is freed from the table.
+            device
+                .peers_by_idx
+                .lock()
+                .retain(|idx, _| device.index_table.in_use(*idx));
+
             // TODO: pass in peers instead?
             let peer_map = &device.peers;
 
@@ -489,12 +499,6 @@ impl<T: DeviceTransports> DeviceState<T> {
                     Some(addr) => addr,
                     None => continue,
                 };
-
-                // Remove stale session indices.
-                device.peers_by_idx.lock().retain(|idx, map_peer| {
-                    !Arc::ptr_eq(peer, map_peer)
-                        || p.tunnel.active_receiving_indices().any(|i| i == *idx)
-                });
 
                 match p.update_timers() {
                     Ok(Some(packet)) => {
