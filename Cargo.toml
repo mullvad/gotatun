@@ -9,7 +9,7 @@ repository = "https://github.com/mullvad/gotatun"
 license = "MPL-2.0"
 
 [workspace.dependencies]
-gotatun = { version = "0.4.0", path = "./gotatun" }
+gotatun = { version = "0.4.1", path = "./gotatun" }
 
 [profile.release]
 lto = true        # Enable full link-time optimization.
