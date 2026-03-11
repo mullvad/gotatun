@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Fixed
+- Fix handshake responses being discarded after at most 250 ms.
+
 #### Linux
 - Fix packet loss when sending on the UDP socket using `sendmmsg`.
 
