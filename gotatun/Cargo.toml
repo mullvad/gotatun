@@ -38,11 +38,11 @@ bitfield-struct = { workspace = true }
 blake2 = { workspace = true }
 bytes = { workspace = true }
 chacha20poly1305 = { workspace = true }
-constant_time_eq = "0.4.2"
-duplicate = { version = "2.0.0", default-features = false }
+constant_time_eq = { workspace = true }
+duplicate = { workspace = true, default-features = false }
 either = { workspace = true }
 eyre = { workspace = true }
-futures = "0.3.31"
+futures = { workspace = true }
 hex = { workspace = true }
 hmac = { workspace = true }
 ip_network = { workspace = true }
@@ -50,12 +50,12 @@ ip_network_table = { workspace = true }
 ipnetwork = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
-maybenot = "2.2.2"
+maybenot = { workspace = true, optional = true }
 mock_instant = { workspace = true, optional = true }
 parking_lot = { workspace = true }
-pcap-file = { version = "2.0.0", optional = true }
+pcap-file = { workspace = true, optional = true }
 rand = { workspace = true }
-rand_chacha = "0.9.0"
+rand_chacha = { workspace = true }
 rand_core = { workspace = true, features = ["getrandom"] }
 ring = { workspace = true }
 socket2 = { workspace = true, features = ["all"] }
@@ -67,7 +67,7 @@ x25519-dalek = { workspace = true, features = [
   "reusable_secrets",
   "static_secrets",
 ] }
-zerocopy = { version = "0.8.27", features = ["derive", "std"] }
+zerocopy = { workspace = true, features = ["derive", "std"] }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports"] }
@@ -97,7 +97,7 @@ nix = { workspace = true, default-features = false, features = [
 
 [features]
 default = []
-daita = ["device"]
+daita = ["device", "dep:maybenot"]
 # Add non-compliant UAPI support for DAITA.
 # See `UAPI.md` for details.
 daita-uapi = ["daita"]
