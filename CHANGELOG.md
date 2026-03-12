@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cookie mode was triggered for all peers. This meant a single attacker flooding handshake
   initiations forced every legitimate peer into cookie mode, amplifying DoS rather than isolating
   it.
+- Include source port in cookie MAC input. The WireGuard whitepaper states that the cookie
+  should be computed using the remote endpoint's address, being both the IP and port.
+  But the cookie was only using the sender's IP address. This weakened the built in DoS
+  mitigation by allowing for example multiple clients behind NAT to reuse a cookie issued
+  to a different source port.
 
 
 ## [0.4.0] - 2026-02-25

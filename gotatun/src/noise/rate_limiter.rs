@@ -19,7 +19,7 @@ use constant_time_eq::constant_time_eq;
 #[cfg(feature = "mock_instant")]
 use mock_instant::thread_local::Instant;
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -111,17 +111,18 @@ impl RateLimiter {
         }
     }
 
-    /// Compute the correct cookie value based on the current secret value and the source IP
-    fn current_cookie(&self, addr: IpAddr) -> Cookie {
-        let mut addr_bytes = [0u8; 16];
+    /// Compute the correct cookie value based on the current secret value and the source address
+    fn current_cookie(&self, addr: SocketAddr) -> Cookie {
+        let mut addr_bytes = [0u8; 18]; // 16 for IP + 2 for port
 
-        match addr {
-            IpAddr::V4(a) => addr_bytes[..4].copy_from_slice(&a.octets()[..]),
-            IpAddr::V6(a) => addr_bytes[..].copy_from_slice(&a.octets()[..]),
+        match addr.ip() {
+            IpAddr::V4(a) => addr_bytes[..4].copy_from_slice(&a.octets()),
+            IpAddr::V6(a) => addr_bytes[..16].copy_from_slice(&a.octets()),
         }
+        addr_bytes[16..18].copy_from_slice(&addr.port().to_be_bytes());
 
         // The current cookie for a given IP is the MAC(responder.changing_secret_every_two_minutes,
-        // initiator.ip_address) First we derive the secret from the current time, the value
+        // initiator.address) First we derive the secret from the current time, the value
         // of cur_counter would change with time.
         let cur_counter = Instant::now().duration_since(self.start_time).as_secs() / COOKIE_REFRESH;
 
@@ -175,7 +176,11 @@ impl RateLimiter {
 
     /// Decode the packet as wireguard packet.
     /// Then, verify the MAC fields on the packet (if any), and apply rate limiting if needed.
-    pub fn verify_packet(&self, src_addr: IpAddr, packet: Packet) -> Result<WgKind, TunnResult> {
+    pub fn verify_packet(
+        &self,
+        src_addr: SocketAddr,
+        packet: Packet,
+    ) -> Result<WgKind, TunnResult> {
         let packet = packet
             .try_into_wg()
             .map_err(|_err| TunnResult::Err(WireGuardError::InvalidPacket))?;
@@ -195,7 +200,7 @@ impl RateLimiter {
     /// Verify the MAC fields on the handshake, and apply rate limiting if needed.
     pub(crate) fn verify_handshake<P: WgHandshakeBase>(
         &self,
-        src_addr: IpAddr,
+        src_addr: SocketAddr,
         handshake: Packet<P>,
     ) -> Result<Packet<P>, TunnResult> {
         let sender_idx = handshake.sender_idx();
@@ -207,7 +212,7 @@ impl RateLimiter {
             return Err(TunnResult::Err(WireGuardError::InvalidMac));
         }
 
-        if self.is_under_load(src_addr) {
+        if self.is_under_load(src_addr.ip()) {
             let cookie = self.current_cookie(src_addr);
             let computed_mac2 = b2s_keyed_mac_16_2(&cookie, handshake.until_mac1(), mac1);
 
