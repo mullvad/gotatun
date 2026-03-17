@@ -24,6 +24,8 @@ pub mod rate_limiter;
 mod session;
 mod timers;
 
+use rand_core::OsRng;
+use rand_core::RngCore;
 use zerocopy::IntoBytes;
 
 use crate::noise::errors::WireGuardError;
@@ -63,7 +65,7 @@ impl From<WireGuardError> for TunnResult {
 }
 
 /// Tunnel represents a point-to-point WireGuard connection.
-pub struct Tunn {
+pub struct Tunn<R: RngCore + Send = OsRng> {
     /// The handshake currently in progress.
     handshake: handshake::Handshake,
     /// The [`N_SESSIONS`] most recent sessions.
@@ -81,14 +83,11 @@ pub struct Tunn {
     tx_bytes: usize,
     rx_bytes: usize,
     rate_limiter: Arc<RateLimiter>,
+    /// RNG used for handshake retry jitter.
+    rng: R,
 }
 
-impl Tunn {
-    /// Check if the tunnel handshake has expired.
-    pub fn is_expired(&self) -> bool {
-        self.handshake.is_expired()
-    }
-
+impl Tunn<OsRng> {
     /// Create a new tunnel using own private key and the peer public key.
     pub fn new(
         static_private: x25519::StaticSecret,
@@ -97,6 +96,29 @@ impl Tunn {
         persistent_keepalive: Option<u16>,
         index_table: IndexTable,
         rate_limiter: Arc<RateLimiter>,
+    ) -> Self {
+        Self::new_with_rng(
+            static_private,
+            peer_static_public,
+            preshared_key,
+            persistent_keepalive,
+            index_table,
+            rate_limiter,
+            OsRng,
+        )
+    }
+}
+
+impl<R: RngCore + Send> Tunn<R> {
+    /// Create a new tunnel using own private key and the peer public key.
+    pub fn new_with_rng(
+        static_private: x25519::StaticSecret,
+        peer_static_public: x25519::PublicKey,
+        preshared_key: Option<[u8; 32]>,
+        persistent_keepalive: Option<u16>,
+        index_table: IndexTable,
+        rate_limiter: Arc<RateLimiter>,
+        rng: R,
     ) -> Self {
         let static_public = x25519::PublicKey::from(&static_private);
 
@@ -118,7 +140,13 @@ impl Tunn {
             timers: Timers::new(persistent_keepalive),
 
             rate_limiter,
+            rng,
         }
+    }
+
+    /// Check if the tunnel handshake has expired.
+    pub fn is_expired(&self) -> bool {
+        self.handshake.is_expired()
     }
 
     /// Update the private key and clear existing sessions.
@@ -357,7 +385,13 @@ impl Tunn {
             self.timer_tick(TimerName::TimeLastHandshakeStarted);
         }
         self.timer_tick(TimerName::TimeLastPacketSent);
+        self.update_handshake_jitter();
         Some(packet)
+    }
+
+    /// Update jitter to apply to the handshake initiation retry timer.
+    fn update_handshake_jitter(&mut self) {
+        self.timers.handshake_jitter = Duration::from_millis((self.rng.next_u32() % 334) as u64);
     }
 
     /// Encapsulate and return all queued packets.
@@ -731,7 +765,9 @@ mod tests {
 
         let _init = create_handshake_init(&mut my_tun);
 
-        MockClock::advance(REKEY_TIMEOUT);
+        // Jitter is now set inside format_handshake_initiation (0-333 ms).
+        // Advance past REKEY_TIMEOUT + max possible jitter to guarantee the retry fires.
+        MockClock::advance(REKEY_TIMEOUT + Duration::from_millis(334));
         update_timer_results_in_handshake(&mut my_tun)
     }
 
@@ -813,6 +849,75 @@ mod tests {
             time_since_after_jump,
             Some(PRESENT),
             "time_since_last_handshake should never decrease"
+        );
+    }
+
+    /// Verify that jitter is applied to the handshake retry timeout.
+    ///
+    /// The retry must not fire before `REKEY_TIMEOUT + jitter` but must fire after.
+    #[test]
+    #[cfg(feature = "mock_instant")]
+    fn handshake_jitter_applied() {
+        // A deterministic RNG that always returns the same value.
+        struct FixedRng(u32);
+
+        impl rand_core::RngCore for FixedRng {
+            fn next_u32(&mut self) -> u32 {
+                self.0
+            }
+
+            fn next_u64(&mut self) -> u64 {
+                u64::from(self.0)
+            }
+
+            fn fill_bytes(&mut self, dest: &mut [u8]) {
+                dest.fill(0);
+            }
+
+            fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
+                self.fill_bytes(dest);
+                Ok(())
+            }
+        }
+
+        // RNG always returns 200; jitter = 200 % 334 = 200 ms.
+        const FIXED_VALUE: u32 = 200;
+        let expected_jitter = Duration::from_millis((FIXED_VALUE % 334) as u64);
+
+        MockClock::set_time(Duration::ZERO);
+
+        let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
+        let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
+        let their_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
+        let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
+
+        let rate_limiter = Arc::new(RateLimiter::new(&my_public_key, HANDSHAKE_RATE_LIMIT));
+        let mut my_tun = Tunn::new_with_rng(
+            my_secret_key,
+            their_public_key,
+            None,
+            None,
+            IndexTable::from_os_rng(),
+            rate_limiter,
+            FixedRng(FIXED_VALUE),
+        );
+
+        // Trigger the initial handshake via handle_outgoing_packet, which sets jitter.
+        let packet = create_ipv4_udp_packet();
+        let _ = my_tun.handle_outgoing_packet(packet.into_bytes(), None);
+
+        // Just before REKEY_TIMEOUT + jitter: no retry yet.
+        MockClock::advance(REKEY_TIMEOUT + expected_jitter - Duration::from_millis(1));
+        assert!(
+            matches!(my_tun.update_timers(), Ok(None)),
+            "retry should not fire before REKEY_TIMEOUT + jitter"
+        );
+
+        // At REKEY_TIMEOUT + jitter: retry fires.
+        MockClock::advance(Duration::from_millis(1));
+        assert!(
+            matches!(my_tun.update_timers(), Ok(Some(WgKind::HandshakeInit(..)))),
+            "retry should fire at REKEY_TIMEOUT + jitter"
         );
     }
 
