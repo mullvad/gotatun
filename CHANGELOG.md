@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove unused function `Tunn::active_receiving_indices`. This is semver breaking since it is
   public.
 
+### Fixed
+- Apply jitter to handshake initiation retry interval.
+
 
 ## [0.4.1] - 2026-03-11
 ### Fixed
