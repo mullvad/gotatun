@@ -72,6 +72,9 @@ pub struct Timers {
     /// First data packet sent without hearing back
     want_handshake: Option<Duration>,
     persistent_keepalive: usize,
+    /// Jitter added to the current [`REKEY_TIMEOUT`] interval.
+    /// This should be randomized on each handshake initiation.
+    pub(super) handshake_jitter: Duration,
 }
 
 impl Timers {
@@ -84,6 +87,7 @@ impl Timers {
             want_keepalive: Default::default(),
             want_handshake: Default::default(),
             persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
+            handshake_jitter: Duration::ZERO,
         }
     }
 
@@ -100,6 +104,7 @@ impl Timers {
         }
         self.want_handshake = None;
         self.want_keepalive = false;
+        self.handshake_jitter = Duration::ZERO;
     }
 
     /// Compute the time elapsed since [`Self::time_started`] based on [`Instant::now`].
@@ -126,7 +131,7 @@ impl IndexMut<TimerName> for Timers {
     }
 }
 
-impl Tunn {
+impl<R: rand_core::RngCore + Send> Tunn<R> {
     pub(super) fn timer_tick(&mut self, timer_name: TimerName) {
         let time = self.timers[TimeCurrent];
 
@@ -246,7 +251,7 @@ impl Tunn {
                     return Err(WireGuardError::ConnectionExpired);
                 }
 
-                if time_init_sent.elapsed() >= REKEY_TIMEOUT {
+                if time_init_sent.elapsed() >= REKEY_TIMEOUT + self.timers.handshake_jitter {
                     // We avoid using `time` here, because it can be earlier than `time_init_sent`.
                     // Once `checked_duration_since` is stable we can use that.
                     // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
