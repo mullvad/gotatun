@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.1] - 2026-03-11
 ### Fixed
 - Fix handshake responses being discarded after at most 250 ms.
+- Fix UDP source port max value being 2^16-2 instead of 2^16-1 in channel based implementation.
 
 #### Linux
 - Fix packet loss when sending on the UDP socket using `sendmmsg`.

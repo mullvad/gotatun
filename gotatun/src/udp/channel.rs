@@ -193,7 +193,7 @@ impl UdpTransportFactory for UdpChannelFactory {
     ) -> io::Result<((Self::SendV4, Self::RecvV4), (Self::SendV6, Self::RecvV6))> {
         let connection_id = rand::random_range(1..=u32::MAX);
         let source_port = match params.port {
-            0 => rand::random_range(1u16..u16::MAX),
+            0 => rand::random_range(1..=u16::MAX),
             p => p,
         };
 
