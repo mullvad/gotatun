@@ -24,8 +24,7 @@ pub mod rate_limiter;
 mod session;
 mod timers;
 
-use rand::Rng;
-use rand::{RngCore, SeedableRng, rngs::StdRng};
+use rand::{Rng, RngCore, SeedableRng, rngs::StdRng};
 use zerocopy::IntoBytes;
 
 use crate::noise::errors::WireGuardError;
@@ -84,7 +83,7 @@ pub struct Tunn<R: RngCore + Send = StdRng> {
     rx_bytes: usize,
     rate_limiter: Arc<RateLimiter>,
     /// RNG used for handshake retry jitter.
-    rng: R,
+    jitter_rng: R,
 }
 
 impl Tunn<StdRng> {
@@ -118,7 +117,7 @@ impl<R: RngCore + Send> Tunn<R> {
         persistent_keepalive: Option<u16>,
         index_table: IndexTable,
         rate_limiter: Arc<RateLimiter>,
-        rng: R,
+        jitter_rng: R,
     ) -> Self {
         let static_public = x25519::PublicKey::from(&static_private);
 
@@ -140,7 +139,7 @@ impl<R: RngCore + Send> Tunn<R> {
             timers: Timers::new(persistent_keepalive),
 
             rate_limiter,
-            rng,
+            jitter_rng,
         }
     }
 
@@ -391,13 +390,12 @@ impl<R: RngCore + Send> Tunn<R> {
 
     /// Update jitter to apply to the handshake initiation retry timer.
     fn update_handshake_jitter(&mut self) {
-        self.timers.handshake_jitter = self.rng.random_range(Duration::ZERO..=MAX_JITTER);
         self.timers.handshake_jitter = self.next_jitter();
     }
 
     /// Calculate a jitter for the handshake initiation retry timer.
     fn next_jitter(&mut self) -> Duration {
-        self.rng.random_range(Duration::ZERO..=MAX_JITTER)
+        self.jitter_rng.random_range(Duration::ZERO..=MAX_JITTER)
     }
 
     /// Encapsulate and return all queued packets.
