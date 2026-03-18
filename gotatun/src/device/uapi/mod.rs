@@ -232,8 +232,6 @@ impl UapiServer {
         });
 
         Ok(rx)
-
-        //self.cleanup_paths.push(path.clone());
     }
 
     /// Create an [`UapiServer`] from a reader+writer that speaks the official
