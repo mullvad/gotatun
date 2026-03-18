@@ -11,7 +11,7 @@
 // SPDX-License-Identifier: MPL-2.0
 use aead::{AeadInPlace, KeyInit};
 use criterion::{BenchmarkId, Criterion, Throughput};
-use rand_core::{OsRng, RngCore};
+use rand::{TryRngCore, rngs::OsRng};
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 
 fn chacha20poly1305_ring(key_bytes: &[u8], buf: &mut [u8]) {
@@ -62,8 +62,8 @@ pub fn bench_chacha20poly1305(c: &mut Criterion) {
 
                 let mut rng = OsRng;
 
-                rng.fill_bytes(&mut key);
-                rng.fill_bytes(&mut buf);
+                rng.try_fill_bytes(&mut key).unwrap();
+                rng.try_fill_bytes(&mut buf).unwrap();
 
                 b.iter(|| chacha20poly1305_ring(&key, &mut buf));
             },
@@ -78,8 +78,8 @@ pub fn bench_chacha20poly1305(c: &mut Criterion) {
 
                 let mut rng = OsRng;
 
-                rng.fill_bytes(&mut key);
-                rng.fill_bytes(&mut buf);
+                rng.try_fill_bytes(&mut key).unwrap();
+                rng.try_fill_bytes(&mut buf).unwrap();
 
                 b.iter(|| chacha20poly1305_non_ring(&key, &mut buf));
             },
