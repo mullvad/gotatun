@@ -15,7 +15,6 @@
 
 use bytes::BytesMut;
 use duplicate::duplicate_item;
-use rand_core::RngCore;
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -192,7 +191,7 @@ impl UdpTransportFactory for UdpChannelFactory {
         &mut self,
         params: &UdpTransportFactoryParams,
     ) -> io::Result<((Self::SendV4, Self::RecvV4), (Self::SendV6, Self::RecvV6))> {
-        let connection_id = rand_core::OsRng.next_u32().max(1);
+        let connection_id = rand::random_range(1..=u32::MAX);
         let source_port = match params.port {
             0 => rand::random_range(1u16..u16::MAX),
             p => p,
