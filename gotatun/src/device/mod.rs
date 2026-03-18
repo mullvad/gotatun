@@ -50,7 +50,6 @@ use crate::udp::{UdpRecv, UdpSend, UdpTransportFactory, UdpTransportFactoryParam
 use crate::x25519;
 use allowed_ips::AllowedIps;
 use peer_state::PeerState;
-use rand_core::OsRng;
 
 #[cfg(feature = "tun")]
 pub use crate::device::transports::DefaultDeviceTransports;
@@ -352,7 +351,6 @@ impl<T: DeviceTransports> DeviceState<T> {
             peer_builder.keepalive,
             self.index_table.clone(),
             rate_limiter,
-            OsRng,
         );
 
         PeerState::new(

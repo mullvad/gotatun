@@ -87,14 +87,31 @@ pub struct Tunn<R: RngCore + Send = OsRng> {
     rng: R,
 }
 
-impl<R: RngCore + Send> Tunn<R> {
-    /// Check if the tunnel handshake has expired.
-    pub fn is_expired(&self) -> bool {
-        self.handshake.is_expired()
-    }
-
+impl Tunn<OsRng> {
     /// Create a new tunnel using own private key and the peer public key.
     pub fn new(
+        static_private: x25519::StaticSecret,
+        peer_static_public: x25519::PublicKey,
+        preshared_key: Option<[u8; 32]>,
+        persistent_keepalive: Option<u16>,
+        index_table: IndexTable,
+        rate_limiter: Arc<RateLimiter>,
+    ) -> Self {
+        Self::new_with_rng(
+            static_private,
+            peer_static_public,
+            preshared_key,
+            persistent_keepalive,
+            index_table,
+            rate_limiter,
+            OsRng,
+        )
+    }
+}
+
+impl<R: RngCore + Send> Tunn<R> {
+    /// Create a new tunnel using own private key and the peer public key.
+    pub fn new_with_rng(
         static_private: x25519::StaticSecret,
         peer_static_public: x25519::PublicKey,
         preshared_key: Option<[u8; 32]>,
@@ -125,6 +142,11 @@ impl<R: RngCore + Send> Tunn<R> {
             rate_limiter,
             rng,
         }
+    }
+
+    /// Check if the tunnel handshake has expired.
+    pub fn is_expired(&self) -> bool {
+        self.handshake.is_expired()
     }
 
     /// Update the private key and clear existing sessions.
@@ -501,7 +523,6 @@ mod tests {
             None,
             IndexTable::from_os_rng(),
             rate_limiter,
-            OsRng,
         );
 
         let rate_limiter = Arc::new(RateLimiter::new(&their_public_key, HANDSHAKE_RATE_LIMIT));
@@ -512,7 +533,6 @@ mod tests {
             None,
             IndexTable::from_os_rng(),
             rate_limiter,
-            OsRng,
         );
 
         (my_tun, their_tun)
@@ -872,7 +892,7 @@ mod tests {
         let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
 
         let rate_limiter = Arc::new(RateLimiter::new(&my_public_key, HANDSHAKE_RATE_LIMIT));
-        let mut my_tun = Tunn::new(
+        let mut my_tun = Tunn::new_with_rng(
             my_secret_key,
             their_public_key,
             None,
