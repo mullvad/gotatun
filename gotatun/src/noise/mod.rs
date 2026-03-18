@@ -445,6 +445,7 @@ impl<R: RngCore + Send> Tunn<R> {
     }
 
     /// Return the receiving indices of all active sessions.
+    // TODO: remove this
     pub fn active_receiving_indices(&self) -> impl Iterator<Item = u32> + use<'_, R> {
         self.sessions
             .iter()
