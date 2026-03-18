@@ -33,6 +33,7 @@ const REKEY_ATTEMPT_TIME: Duration = Duration::from_secs(90);
 pub(crate) const REKEY_TIMEOUT: Duration = Duration::from_secs(5);
 const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 const COOKIE_EXPIRATION_TIME: Duration = Duration::from_secs(120);
+pub(crate) const MAX_JITTER: Duration = Duration::from_millis(333);
 
 #[derive(Debug)]
 pub enum TimerName {
@@ -131,7 +132,7 @@ impl IndexMut<TimerName> for Timers {
     }
 }
 
-impl<R: rand_core::RngCore + Send> Tunn<R> {
+impl<R: rand::RngCore + Send> Tunn<R> {
     pub(super) fn timer_tick(&mut self, timer_name: TimerName) {
         let time = self.timers[TimeCurrent];
 
