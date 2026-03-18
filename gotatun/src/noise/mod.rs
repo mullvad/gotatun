@@ -24,15 +24,14 @@ pub mod rate_limiter;
 mod session;
 mod timers;
 
-use rand_core::OsRng;
-use rand_core::RngCore;
+use rand::{Rng, RngCore, SeedableRng, rngs::StdRng};
 use zerocopy::IntoBytes;
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::index_table::IndexTable;
 use crate::noise::rate_limiter::RateLimiter;
-use crate::noise::timers::{TimerName, Timers};
+use crate::noise::timers::{MAX_JITTER, TimerName, Timers};
 use crate::packet::{Packet, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind};
 use crate::tun::MtuWatcher;
 use crate::x25519;
@@ -65,7 +64,7 @@ impl From<WireGuardError> for TunnResult {
 }
 
 /// Tunnel represents a point-to-point WireGuard connection.
-pub struct Tunn<R: RngCore + Send = OsRng> {
+pub struct Tunn<R: RngCore + Send = StdRng> {
     /// The handshake currently in progress.
     handshake: handshake::Handshake,
     /// The [`N_SESSIONS`] most recent sessions.
@@ -84,10 +83,10 @@ pub struct Tunn<R: RngCore + Send = OsRng> {
     rx_bytes: usize,
     rate_limiter: Arc<RateLimiter>,
     /// RNG used for handshake retry jitter.
-    rng: R,
+    jitter_rng: R,
 }
 
-impl Tunn<OsRng> {
+impl Tunn<StdRng> {
     /// Create a new tunnel using own private key and the peer public key.
     pub fn new(
         static_private: x25519::StaticSecret,
@@ -104,7 +103,7 @@ impl Tunn<OsRng> {
             persistent_keepalive,
             index_table,
             rate_limiter,
-            OsRng,
+            StdRng::from_os_rng(),
         )
     }
 }
@@ -118,7 +117,7 @@ impl<R: RngCore + Send> Tunn<R> {
         persistent_keepalive: Option<u16>,
         index_table: IndexTable,
         rate_limiter: Arc<RateLimiter>,
-        rng: R,
+        jitter_rng: R,
     ) -> Self {
         let static_public = x25519::PublicKey::from(&static_private);
 
@@ -140,7 +139,7 @@ impl<R: RngCore + Send> Tunn<R> {
             timers: Timers::new(persistent_keepalive),
 
             rate_limiter,
-            rng,
+            jitter_rng,
         }
     }
 
@@ -391,7 +390,12 @@ impl<R: RngCore + Send> Tunn<R> {
 
     /// Update jitter to apply to the handshake initiation retry timer.
     fn update_handshake_jitter(&mut self) {
-        self.timers.handshake_jitter = Duration::from_millis((self.rng.next_u32() % 334) as u64);
+        self.timers.handshake_jitter = self.next_jitter();
+    }
+
+    /// Calculate a jitter for the handshake initiation retry timer.
+    fn next_jitter(&mut self) -> Duration {
+        self.jitter_rng.random_range(Duration::ZERO..=MAX_JITTER)
     }
 
     /// Encapsulate and return all queued packets.
@@ -497,7 +501,7 @@ mod tests {
     use std::net::Ipv4Addr;
 
     #[cfg(feature = "mock_instant")]
-    use crate::noise::timers::{REKEY_AFTER_TIME, REKEY_TIMEOUT, TimerName};
+    use crate::noise::timers::{MAX_JITTER, REKEY_AFTER_TIME, REKEY_TIMEOUT, TimerName};
     use crate::packet::Ipv4;
 
     const HANDSHAKE_RATE_LIMIT: u64 = 100;
@@ -506,13 +510,12 @@ mod tests {
     use bytes::BytesMut;
     #[cfg(feature = "mock_instant")]
     use mock_instant::thread_local::MockClock;
-    use rand_core::OsRng;
 
     fn create_two_tuns() -> (Tunn, Tunn) {
-        let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
+        let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(rand_core::OsRng);
         let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
 
-        let their_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
+        let their_secret_key = x25519_dalek::StaticSecret::random_from_rng(rand_core::OsRng);
         let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
 
         let rate_limiter = Arc::new(RateLimiter::new(&my_public_key, HANDSHAKE_RATE_LIMIT));
@@ -767,7 +770,7 @@ mod tests {
 
         // Jitter is now set inside format_handshake_initiation (0-333 ms).
         // Advance past REKEY_TIMEOUT + max possible jitter to guarantee the retry fires.
-        MockClock::advance(REKEY_TIMEOUT + Duration::from_millis(334));
+        MockClock::advance(REKEY_TIMEOUT + MAX_JITTER + Duration::from_millis(1));
         update_timer_results_in_handshake(&mut my_tun)
     }
 
@@ -861,7 +864,7 @@ mod tests {
         // A deterministic RNG that always returns the same value.
         struct FixedRng(u32);
 
-        impl rand_core::RngCore for FixedRng {
+        impl rand::RngCore for FixedRng {
             fn next_u32(&mut self) -> u32 {
                 self.0
             }
@@ -873,22 +876,13 @@ mod tests {
             fn fill_bytes(&mut self, dest: &mut [u8]) {
                 dest.fill(0);
             }
-
-            fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
-                self.fill_bytes(dest);
-                Ok(())
-            }
         }
-
-        // RNG always returns 200; jitter = 200 % 334 = 200 ms.
-        const FIXED_VALUE: u32 = 200;
-        let expected_jitter = Duration::from_millis((FIXED_VALUE % 334) as u64);
 
         MockClock::set_time(Duration::ZERO);
 
-        let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
+        let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(rand_core::OsRng);
         let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
-        let their_secret_key = x25519_dalek::StaticSecret::random_from_rng(OsRng);
+        let their_secret_key = x25519_dalek::StaticSecret::random_from_rng(rand_core::OsRng);
         let their_public_key = x25519_dalek::PublicKey::from(&their_secret_key);
 
         let rate_limiter = Arc::new(RateLimiter::new(&my_public_key, HANDSHAKE_RATE_LIMIT));
@@ -899,8 +893,11 @@ mod tests {
             None,
             IndexTable::from_os_rng(),
             rate_limiter,
-            FixedRng(FIXED_VALUE),
+            // Use a predictable RNG for the jitter
+            FixedRng(200),
         );
+
+        let expected_jitter = my_tun.next_jitter();
 
         // Trigger the initial handshake via handle_outgoing_packet, which sets jitter.
         let packet = create_ipv4_udp_packet();
