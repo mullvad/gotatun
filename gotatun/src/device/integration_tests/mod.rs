@@ -276,11 +276,11 @@ mod tests {
     impl WGHandle {
         /// Create a new interface for the tunnel with the given address
         async fn init(addr_v4: IpAddr, addr_v6: IpAddr) -> WGHandle {
+            use crate::device::uapi::{UapiServer, socket::UapiSocket};
             // Generate a new name, utun100+ should work on macOS and Linux
             let tun_name = format!("utun{}", NEXT_IFACE_IDX.fetch_add(1, Ordering::Relaxed));
 
-            let uapi = crate::device::uapi::UapiServer::default_unix_socket(&tun_name, None, None)
-                .unwrap();
+            let uapi = UapiServer::default_unix_socket(&tun_name, None, None).unwrap();
 
             let device_builder = DeviceBuilder::new()
                 .create_tun(&tun_name)
