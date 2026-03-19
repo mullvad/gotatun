@@ -211,3 +211,45 @@ impl Debug for UapiServer {
         f.debug_tuple("UapiServer").finish()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::device::uapi::command::*;
+
+    /// Spawning a background task for handling incoming requests.
+    fn spawn<F>(mut server: UapiServer, f: F)
+    where
+        F: Fn(Request) -> Response + Send + 'static,
+    {
+        tokio::task::spawn(async move {
+            loop {
+                let (request, respond) = server.recv().await.unwrap();
+                let response = f(request);
+                let _ = respond.send(response);
+            }
+        });
+    }
+
+    /// Spawn a UAPI server and connect a client to it.
+    #[tokio::test]
+    async fn hello() -> eyre::Result<()> {
+        let (client, server) = UapiServer::new();
+
+        spawn(server, |request| match request {
+            Request::Get(Get) => Response::Get(GetResponse::default()),
+            Request::Set(set) => {
+                panic!("Did not expect set command {set:#?}")
+            }
+        });
+
+        let Response::Get(response) = client.send(Get).await? else {
+            eyre::bail!("UAPI get request did not yield a get-response.");
+        };
+
+        assert_eq!(response.errno, 0);
+        assert!(response.peers.is_empty());
+
+        Ok(())
+    }
+}
