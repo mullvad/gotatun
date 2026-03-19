@@ -13,10 +13,10 @@
 //! Userspace API.
 //!
 //! The most common use-case is probably to create a unix socket with
-//! [`UapiServer::default_unix_socket`] and pass it to [`DeviceBuilder::with_uapi`]:
+//! [`UapiSocket::default_unix_socket`] and pass it to [`DeviceBuilder::with_uapi`]:
 //!
 //! ```no_run,ignore-windows
-//! use gotatun::device::{self, uapi::UapiServer};
+//! use gotatun::device::{self, uapi::{UapiServer, UapiSocket}};
 //!
 //! let uapi = UapiServer::default_unix_socket("my-gotatun", None, None)
 //!     .expect("Failed to create unix socket");
@@ -36,18 +36,19 @@
 pub mod command;
 /// Application of WireGuard userspace API to a WireGuard device.
 pub mod device;
+/// WireGuard userspace socket for UNIX-like systems.
+#[cfg(unix)]
+pub mod socket;
+
+#[cfg(unix)]
+pub use socket::UapiSocket;
 
 use command::{Request, Response};
 use eyre::{Context, bail, eyre};
-#[cfg(unix)]
-use nix::unistd::{Gid, Uid};
 use std::fmt::Debug;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::str::FromStr;
 use tokio::sync::{mpsc, oneshot};
-
-#[cfg(unix)]
-const SOCK_DIR: &str = "/var/run/wireguard/";
 
 /// A server that receives [`Request`]s. Should be passed to [`DeviceBuilder::with_uapi`].
 ///
@@ -181,51 +182,6 @@ impl UapiServer {
         (UapiClient { tx }, UapiServer { rx })
     }
 
-    /// Spawn a unix socket at `/var/run/wireguard/<name>.sock`. This socket speaks the official
-    /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
-    ///
-    /// Optionally, set the owner of the socket using `uid` and `gid`.
-    #[cfg(unix)]
-    pub fn default_unix_socket(
-        name: &str,
-        uid: Option<Uid>,
-        gid: Option<Gid>,
-    ) -> eyre::Result<Self> {
-        use std::os::unix::net::UnixListener;
-
-        let path = format!("{SOCK_DIR}/{name}.sock");
-
-        create_sock_dir()?;
-
-        let _ = std::fs::remove_file(&path); // Attempt to remove the socket if already exists
-
-        // Bind a new socket to the path
-        let api_listener =
-            UnixListener::bind(&path).map_err(|e| eyre!("Failed to bind unix socket: {e}"))?;
-
-        if uid.is_some() || gid.is_some() {
-            if let Err(err) = nix::unistd::chown(std::path::Path::new(&path), uid, gid) {
-                log::warn!("Failed to change owner of UDS: {err}");
-            }
-        }
-
-        let (tx, rx) = UapiServer::new();
-
-        std::thread::spawn(move || {
-            loop {
-                let Ok((stream, _)) = api_listener.accept() else {
-                    break;
-                };
-
-                log::info!("New UAPI connection on unix socket");
-
-                tx.clone().wrap_read_write(stream);
-            }
-        });
-
-        Ok(rx)
-    }
-
     /// Create an [`UapiServer`] from a reader+writer that speaks the official
     /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
     pub fn from_read_write<RW>(rw: RW) -> Self
@@ -254,20 +210,4 @@ impl Debug for UapiServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("UapiServer").finish()
     }
-}
-
-#[cfg(unix)]
-fn create_sock_dir() -> eyre::Result<()> {
-    match std::fs::create_dir(SOCK_DIR) {
-        Ok(_) => {
-            log::info!("Created socket directory at {SOCK_DIR}");
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            // Directory already exists, which is fine
-        }
-        Err(e) => {
-            bail!("Failed to create socket directory {SOCK_DIR}: {e}");
-        }
-    }
-    Ok(())
 }

@@ -13,7 +13,7 @@
 use clap::Parser;
 use daemonize::Daemonize;
 use eyre::{Context, Result, bail};
-use gotatun::device::uapi::UapiServer;
+use gotatun::device::uapi::{UapiServer, UapiSocket};
 use gotatun::device::{DefaultDeviceTransports, Device, DeviceBuilder};
 use gotatun::tun::tun_async_device::TunDevice;
 use std::fs::File;
