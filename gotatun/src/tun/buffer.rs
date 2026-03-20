@@ -11,14 +11,17 @@
 
 //! Generic buffered IP send and receive implementations.
 
-use std::{io, sync::Arc};
+use std::{io, sync::Arc, time::Duration};
 
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
     task::Task,
     tun::{IpRecv, IpSend, MtuWatcher},
 };
-use tokio::sync::{Mutex, mpsc};
+use tokio::{
+    sync::{Mutex, mpsc},
+    time::timeout,
+};
 
 /// An [`IpSend`] that wraps another [`IpSend`] to provide buffering.
 ///
@@ -43,7 +46,10 @@ impl BufferedIpSend {
         let (tx, mut rx) = mpsc::channel::<Packet<Ip>>(capacity);
 
         let task = Task::spawn("buffered IP send", async move {
-            let mut inner = inner.try_lock().expect("Lock must not be taken");
+            let mut inner = timeout(Duration::from_secs(5), inner.lock())
+                .await
+                .expect("Deadlock on IpSend. There must be no more than one IpSend active at any given time.");
+
             while let Some(packet) = rx.recv().await {
                 if let Err(e) = inner.send(packet).await {
                     log::error!("Error sending IP packet: {e}");
@@ -86,14 +92,19 @@ impl<I: IpRecv> BufferedIpRecv<I> {
     /// This takes an `Arc<Mutex<I>>` because the inner `I` will be re-used after [Self] is
     /// dropped. We will take the mutex lock when this function is called, and hold onto it for the
     /// lifetime of [Self]. Will panic if the lock is already taken.
-    pub fn new(capacity: usize, mut pool: PacketBufPool, inner: Arc<Mutex<I>>) -> Self {
+    pub async fn new(capacity: usize, mut pool: PacketBufPool, inner: Arc<Mutex<I>>) -> Self {
         let (tx, rx) = mpsc::channel::<Packet<Ip>>(capacity);
 
-        let mtu = inner.try_lock().expect("Lock must not be taken").mtu();
+        // We use a timeout instead of a try_lock().expect() because there may still be an old
+        // BufferedIpRecv that is in the process of being dropped. Otherwise, there would be a
+        // race condition between the old `task` dropping, and us taking the lock again.
+        let mut inner = timeout(Duration::from_secs(5), inner.lock_owned())
+            .await
+            .expect("Deadlock on IpRecv. There must be no more than one IpRecv active at any given time.");
+
+        let mtu = inner.mtu();
 
         let task = Task::spawn("buffered IP recv", async move {
-            let mut inner = inner.try_lock().expect("Lock must not be taken");
-
             loop {
                 match inner.recv(&mut pool).await {
                     Ok(packets) => {
