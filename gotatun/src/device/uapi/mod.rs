@@ -305,11 +305,7 @@ impl<T: DeviceTransports> DeviceState<T> {
 
                     if reconfigure == Reconfigure::Yes {
                         match Connection::set_up(device.clone()).await {
-                            Ok(con) => {
-                                let mut device_guard = device.write().await;
-                                device_guard.connection = Some(con);
-                                Response::Set(response)
-                            }
+                            Ok(()) => Response::Set(response),
                             Err(err) => {
                                 // TODO: error message
                                 log::error!("Failed to set up stuff: {err}");
