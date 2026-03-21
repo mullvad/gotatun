@@ -117,7 +117,7 @@ mod gro {
     use crate::udp::{UdpRecv, socket::UdpSocket};
     use bytes::BytesMut;
     use nix::cmsg_space;
-    use nix::sys::socket::{ControlMessageOwned, MsgFlags, MultiHeaders, SockaddrIn};
+    use nix::sys::socket::{ControlMessageOwned, MsgFlags, MultiHeaders, SockaddrStorage};
     use std::io::{self, IoSliceMut};
     use std::net::SocketAddr;
     use std::os::fd::AsRawFd;
@@ -168,7 +168,10 @@ mod gro {
                     // TODO: the CMSG space cannot be reused, so we must allocate new headers each
                     // time [ControlMessageOwned::UdpGroSegments(i32)] contains
                     // the size of all smaller packets/segments
-                    let headers = &mut MultiHeaders::<SockaddrIn>::preallocate(
+                    // Use a generic sockaddr storage here because this path serves both the IPv4
+                    // and IPv6 UDP sockets. Using `SockaddrIn` corrupts IPv6 source addresses and
+                    // can poison the peer runtime endpoint with an unspecified IPv4 address.
+                    let headers = &mut MultiHeaders::<SockaddrStorage>::preallocate(
                         MAX_PACKET_COUNT,
                         Some(cmsg_space!(i32)),
                     );
@@ -191,7 +194,11 @@ mod gro {
                     for result in results {
                         let iov = result.iovs().next().expect("we create exactly one IoSlice");
 
-                        let Some(source_addr) = result.address.map(|addr| addr.into()) else {
+                        let Some(source_addr) = result.address.as_ref().and_then(|addr| {
+                            addr.as_sockaddr_in()
+                                .map(|addr| (*addr).into())
+                                .or_else(|| addr.as_sockaddr_in6().map(|addr| (*addr).into()))
+                        }) else {
                             if cfg!(debug_assertions) {
                                 log::debug!("recvmmsg returned packet without source");
                             }
@@ -247,6 +254,46 @@ mod gro {
                 &true,
             )?;
             Ok(())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::UdpSocket;
+        use crate::packet::PacketBufPool;
+        use crate::udp::{UdpRecv, UdpSend};
+        use std::net::Ipv6Addr;
+        use std::time::Duration;
+
+        #[tokio::test]
+        async fn recv_many_from_preserves_ipv6_source_addr() {
+            let mut receiver = UdpSocket::bind((Ipv6Addr::LOCALHOST, 0).into()).unwrap();
+            receiver.enable_udp_gro().ok();
+            let sender = UdpSocket::bind((Ipv6Addr::LOCALHOST, 0).into()).unwrap();
+
+            let recv_addr = receiver.local_addr().unwrap();
+            let sender_addr = sender.local_addr().unwrap();
+
+            let send_pool = PacketBufPool::<4096>::new(1);
+            let mut packet = send_pool.get();
+            packet.truncate(5);
+            packet.copy_from_slice(b"hello");
+            sender.send_to(packet, recv_addr).await.unwrap();
+
+            let mut recv_pool = PacketBufPool::<4096>::new(1);
+            let mut recv_many_buf = <UdpSocket as UdpRecv>::RecvManyBuf::default();
+            let mut packets = vec![];
+
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                receiver.recv_many_from(&mut recv_many_buf, &mut recv_pool, &mut packets),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+            assert!(!packets.is_empty(), "expected at least one IPv6 packet");
+            assert_eq!(packets[0].1, sender_addr);
         }
     }
 }
