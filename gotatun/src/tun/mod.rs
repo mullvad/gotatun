@@ -22,6 +22,7 @@ use std::io;
 #[cfg(feature = "device")]
 pub(crate) mod buffer;
 pub mod channel;
+pub mod userspace;
 
 #[cfg(feature = "pcap")]
 pub mod pcap;

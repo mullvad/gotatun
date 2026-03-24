@@ -292,7 +292,8 @@ impl UdpRecv for UdpChannelV6Rx {
     }
 }
 
-fn create_ipv4_payload(
+// TODO:
+pub(crate) fn create_ipv4_payload(
     source_ip: Ipv4Addr,
     source_port: u16,
     destination_ip: Ipv4Addr,

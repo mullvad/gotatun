@@ -14,17 +14,29 @@ use clap::Parser;
 use daemonize::Daemonize;
 use eyre::{Context, Result, bail};
 use gotatun::device::uapi::UapiServer;
-use gotatun::device::{DefaultDeviceTransports, Device, DeviceBuilder};
+use gotatun::device::{Device, DeviceBuilder};
 use gotatun::tun::tun_async_device::TunDevice;
+use gotatun::tun::userspace::{UserspaceNetMuxerRx, UserspaceNetMuxerTx, new_userspace_net};
+use gotatun::udp::socket::UdpSocketFactory;
 use std::fs::File;
 use std::future::Future;
+use std::net::SocketAddrV4;
 use std::os::unix::net::UnixDatagram;
 use std::path::{Path, PathBuf};
 use std::process::exit;
+use std::time::Duration;
 use tokio::signal::unix::{SignalKind, signal};
+use tokio::time::timeout;
 use tracing::{Level, error, info};
 
 mod drop_privileges;
+
+//type Transports = DefaultDeviceTransports;
+type Transports = (
+    UdpSocketFactory,
+    UserspaceNetMuxerTx<TunDevice>,
+    UserspaceNetMuxerRx<TunDevice>,
+);
 
 // Status messages sent between forked processes
 const CHILD_OK: &[u8] = &[1];
@@ -58,6 +70,12 @@ struct Args {
     #[cfg(target_os = "macos")]
     #[clap(long, env = "WG_TUN_NAME_FILE")]
     tun_name_file: Option<String>,
+
+    #[clap(long, env = "USER_FROM")]
+    userspace_from: Option<String>,
+
+    #[clap(long, env = "USER_TO")]
+    userspace_to: Option<String>,
 }
 
 pub fn main() {
@@ -173,7 +191,7 @@ fn with_tokio_runtime(f: impl Future<Output = Result<()>>) -> Result<()> {
     rt.block_on(f)
 }
 
-async fn wait_for_shutdown(mut device: Device<DefaultDeviceTransports>) {
+async fn wait_for_shutdown(mut device: Device<Transports>) {
     let mut sigint = signal(SignalKind::interrupt()).expect("Failed to set up SIGINT handler");
     let mut sigterm = signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler");
 
@@ -188,7 +206,7 @@ async fn wait_for_shutdown(mut device: Device<DefaultDeviceTransports>) {
 }
 
 /// Create and configure wireguard tunnel
-async fn setup_device(args: Args) -> eyre::Result<Device<DefaultDeviceTransports>> {
+async fn setup_device(args: Args) -> eyre::Result<Device<Transports>> {
     let (socket_uid, socket_gid) = (!args.disable_drop_privileges)
         .then(drop_privileges::get_saved_ids)
         .transpose()?
@@ -211,6 +229,8 @@ async fn setup_device(args: Args) -> eyre::Result<Device<DefaultDeviceTransports
     let uapi = UapiServer::default_unix_socket(&tun_name, socket_uid, socket_gid)
         .context("Failed to create UAPI unix socket")?;
 
+    let (mut userspace_net, tun_tx, tun_rx) = new_userspace_net(tun.clone(), tun);
+
     let dev = DeviceBuilder::new()
         .with_uapi(uapi)
         .with_default_udp()
@@ -218,10 +238,37 @@ async fn setup_device(args: Args) -> eyre::Result<Device<DefaultDeviceTransports
         // socket buffer sizes.
         .udp_recv_buffer_size(7 * 1024 * 1024)
         .udp_send_buffer_size(7 * 1024 * 1024)
-        .with_ip(tun)
+        .with_ip_pair(tun_tx, tun_rx)
         .build()
         .await
         .context("Failed to start WireGuard device")?;
+
+    if let (Some(local), Some(remote)) = (&args.userspace_from, &args.userspace_to) {
+        let local: SocketAddrV4 = local.parse().unwrap();
+        let remote: SocketAddrV4 = remote.parse().unwrap();
+        tracing::info!("binding userspace socket {local}->{remote}");
+        let mut udp_socket = userspace_net.connect_udp_v4(local, remote).unwrap();
+
+        tokio::spawn(async move {
+            let _net = userspace_net;
+            loop {
+                tracing::info!("sending on userspace socket");
+                udp_socket.send(b"Hello there!\n").await;
+
+                tracing::info!("receiving on userspace socket");
+                match timeout(Duration::from_secs(3), udp_socket.recv()).await {
+                    Ok(resp) => {
+                        tracing::info!(name: "response",
+                            header = format_args!("{:?}", resp.header),
+                            payload_header = format_args!("{:?}", resp.payload.header),
+                            payload = std::str::from_utf8(&resp.payload.payload).unwrap_or("invalid UTF-8"),
+                        );
+                    }
+                    Err(_timeout) => continue,
+                };
+            }
+        });
+    }
 
     if !args.disable_drop_privileges {
         drop_privileges::drop_privileges().context("Failed to drop privileges")?;

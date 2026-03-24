@@ -99,7 +99,10 @@ impl Decoder<Ip, Ipv6> for Ipv6Decoder {
 }
 
 impl Ip {
-    fn as_v4_or_v6(&self) -> Option<Either<&Ipv4<[u8]>, &Ipv6>> {
+    /// Cheap-ish cast to [`Ipv4`] or [`Ipv6`] depending on version field.
+    ///
+    /// Validates nothing about the IP heathers except that the buffer is large enough.
+    pub(crate) fn as_v4_or_v6(&self) -> Option<Either<&Ipv4, &Ipv6>> {
         let b = self.as_bytes();
         match self.header.version() {
             4 => Ipv4::<[u8]>::ref_from_bytes(b).ok().map(Either::Left),
@@ -107,6 +110,7 @@ impl Ip {
             _ => None,
         }
     }
+
     /// Try to extract the source [`IpAddr`].
     ///
     /// Returns `None` if the version field is not `4` or `6`, or if the packet is too small.
