@@ -176,36 +176,66 @@ impl<T: DeviceTransports> Connection<T> {
         let pool = PacketBufPool::new(MAX_PACKET_BUFS);
         let cancel = CancellationToken::new();
 
+        let buffered_udp_tx_v4 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp4_tx.clone());
+        let buffered_udp_tx_v6 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp6_tx.clone());
+
+        let buffered_udp_rx_v4 = BufferedUdpReceive::new::<
+            <T::UdpTransportFactory as UdpTransportFactory>::RecvV4,
+        >(MAX_PACKET_BUFS, udp4_rx, pool.clone());
+        let buffered_udp_rx_v6 = BufferedUdpReceive::new::<
+            <T::UdpTransportFactory as UdpTransportFactory>::RecvV6,
+        >(MAX_PACKET_BUFS, udp6_rx, pool.clone());
+
+        // Start DAITA/hooks tasks
+        #[cfg(feature = "daita")]
+        for peer_arc in device.peers.values() {
+            PeerState::maybe_start_daita(
+                peer_arc,
+                pool.clone(),
+                device.tun_rx_mtu.clone(),
+                buffered_udp_tx_v4.clone(),
+                buffered_udp_tx_v6.clone(),
+            )
+            .await?;
+        }
+
+        let buffered_ip_tx = BufferedIpSend::new(MAX_PACKET_BUFS, Arc::clone(&device.tun_tx));
+
+        let timers = Task::spawn(
+            "handle_timers",
+            DeviceState::handle_timers(
+                Arc::downgrade(&device_arc),
+                buffered_udp_tx_v4.clone(),
+                buffered_udp_tx_v6.clone(),
+            ),
+        );
+
+        let incoming_ipv4 = Task::spawn_fallible(
+            "handle_incoming ipv4",
+            DeviceState::handle_incoming(
+                Arc::downgrade(&device_arc),
+                buffered_ip_tx.clone(),
+                buffered_udp_tx_v4.clone(),
+                buffered_udp_rx_v4,
+                pool.clone(),
+            ),
+        );
+        let incoming_ipv6 = Task::spawn_fallible(
+            "handle_incoming ipv6",
+            DeviceState::handle_incoming(
+                Arc::downgrade(&device_arc),
+                buffered_ip_tx,
+                buffered_udp_tx_v6.clone(),
+                buffered_udp_rx_v6,
+                pool.clone(),
+            ),
+        );
+
         device
             .connection
             .activate(async |tun_rx| {
                 let buffered_ip_rx =
                     BufferedIpRecv::new(MAX_PACKET_BUFS, pool.clone(), tun_rx).await;
-                let buffered_ip_tx =
-                    BufferedIpSend::new(MAX_PACKET_BUFS, Arc::clone(&device.tun_tx));
-
-                let buffered_udp_tx_v4 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp4_tx.clone());
-                let buffered_udp_tx_v6 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp6_tx.clone());
-
-                let buffered_udp_rx_v4 = BufferedUdpReceive::new::<
-                    <T::UdpTransportFactory as UdpTransportFactory>::RecvV4,
-                >(MAX_PACKET_BUFS, udp4_rx, pool.clone());
-                let buffered_udp_rx_v6 = BufferedUdpReceive::new::<
-                    <T::UdpTransportFactory as UdpTransportFactory>::RecvV6,
-                >(MAX_PACKET_BUFS, udp6_rx, pool.clone());
-
-                // Start DAITA/hooks tasks
-                #[cfg(feature = "daita")]
-                for peer_arc in device.peers.values() {
-                    PeerState::maybe_start_daita(
-                        peer_arc,
-                        pool.clone(),
-                        device.tun_rx_mtu.clone(),
-                        buffered_udp_tx_v4.clone(),
-                        buffered_udp_tx_v6.clone(),
-                    )
-                    .await?;
-                }
 
                 // Start device tasks
                 let outgoing = Task::spawn(
@@ -214,37 +244,8 @@ impl<T: DeviceTransports> Connection<T> {
                         Arc::downgrade(&device_arc),
                         cancel.child_token(),
                         buffered_ip_rx,
-                        buffered_udp_tx_v4.clone(),
-                        buffered_udp_tx_v6.clone(),
-                        pool.clone(),
-                    ),
-                );
-                let timers = Task::spawn(
-                    "handle_timers",
-                    DeviceState::handle_timers(
-                        Arc::downgrade(&device_arc),
-                        buffered_udp_tx_v4.clone(),
-                        buffered_udp_tx_v6.clone(),
-                    ),
-                );
-
-                let incoming_ipv4 = Task::spawn_fallible(
-                    "handle_incoming ipv4",
-                    DeviceState::handle_incoming(
-                        Arc::downgrade(&device_arc),
-                        buffered_ip_tx.clone(),
                         buffered_udp_tx_v4,
-                        buffered_udp_rx_v4,
-                        pool.clone(),
-                    ),
-                );
-                let incoming_ipv6 = Task::spawn_fallible(
-                    "handle_incoming ipv6",
-                    DeviceState::handle_incoming(
-                        Arc::downgrade(&device_arc),
-                        buffered_ip_tx,
                         buffered_udp_tx_v6,
-                        buffered_udp_rx_v6,
                         pool.clone(),
                     ),
                 );
