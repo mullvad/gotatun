@@ -245,7 +245,6 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             udp_factory: self.udp,
             tun_tx: Arc::new(Mutex::new(self.tun_tx)),
             tun_rx_mtu: self.tun_rx.mtu(),
-            tun_rx: Some(self.tun_rx),
             fwmark,
             key_pair: None,
             index_table: self.index_table.unwrap_or_else(IndexTable::from_os_rng),
@@ -254,7 +253,9 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             peers_by_ip: AllowedIps::new(),
             rate_limiter: None,
             port: self.port,
-            connection: None,
+            connection: Connection::Idle {
+                tun_rx: self.tun_rx,
+            },
         };
 
         if let Some(private_key) = self.private_key {

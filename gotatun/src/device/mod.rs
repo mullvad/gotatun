@@ -30,6 +30,7 @@ use builder::Nul;
 use futures::{FutureExt, select};
 use std::collections::HashMap;
 use std::io::{self};
+use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
 use std::ops::BitOrAssign;
 use std::sync::{Arc, Weak};
@@ -107,15 +108,6 @@ pub(crate) struct DeviceState<T: DeviceTransports> {
 
     tun_tx: Arc<Mutex<T::IpSend>>,
 
-    /// The tun device reader.
-    ///
-    /// This is an `Option` because the task responsible from reading from the `tun_rx` must
-    /// have ownership of it. Thus we must be able to give the tun_rx away and take it back.
-    ///
-    /// # Invariant
-    /// This must be `Some` when `connection` is `None`, and vice versa.
-    tun_rx: Option<T::IpRecv>,
-
     /// MTU watcher of the TUN device.
     tun_rx_mtu: MtuWatcher,
 
@@ -128,13 +120,13 @@ pub(crate) struct DeviceState<T: DeviceTransports> {
 
     port: u16,
     udp_factory: T::UdpTransportFactory,
-    connection: Option<Connection<T>>,
+    connection: Connection<T>,
 
     /// The task that responds to API requests.
     api: Option<Task>,
 }
 
-pub(crate) struct Connection<T: DeviceTransports> {
+pub(crate) struct ActiveConnection<T: DeviceTransports> {
     udp4: <T::UdpTransportFactory as UdpTransportFactory>::SendV4,
     udp6: <T::UdpTransportFactory as UdpTransportFactory>::SendV6,
 
@@ -155,99 +147,120 @@ pub(crate) struct Connection<T: DeviceTransports> {
     outgoing: Task<BufferedIpRecv<T::IpRecv>>,
 }
 
+pub(crate) enum Connection<T: DeviceTransports> {
+    Idle {
+        /// The tun device reader.
+        tun_rx: T::IpRecv,
+    },
+    Active(ActiveConnection<T>),
+
+    /// A temporary placeholder value for when the [`Connection`] is being recreated.
+    ///
+    /// Must only be used temporarily to get around ownership issues when convverting
+    /// between [`Connection::Idle`] and [`Connection::Active`].
+    _TemporarilyNone,
+}
+
 impl<T: DeviceTransports> Connection<T> {
     pub async fn set_up(device_arc: Arc<RwLock<DeviceState<T>>>) -> Result<(), Error> {
-        let mut device = device_arc.write().await;
+        let mut device_guard = device_arc.write().await;
+        let device: &mut DeviceState<T> = &mut device_guard;
+
+        // TODO: feels bad that we have to remember to call `stop` before `activate`.
+        // If we don't `open_listen_socket` might fail i think.
+        device.connection.stop().await;
+
+        let (udp4_tx, udp4_rx, udp6_tx, udp6_rx) = device.open_listen_socket().await?;
+        let listen_port = udp4_tx.local_addr()?.map(|sa| sa.port());
+
         let pool = PacketBufPool::new(MAX_PACKET_BUFS);
         let cancel = CancellationToken::new();
 
-        // clean up existing connection
-        if let Some(conn) = device.connection.take() {
-            let tun_rx = conn.stop().await;
-            device.tun_rx = Some(tun_rx);
-        }
+        device
+            .connection
+            .activate(async |tun_rx| {
+                let buffered_ip_rx =
+                    BufferedIpRecv::new(MAX_PACKET_BUFS, pool.clone(), tun_rx).await;
+                let buffered_ip_tx =
+                    BufferedIpSend::new(MAX_PACKET_BUFS, Arc::clone(&device.tun_tx));
 
-        let (udp4_tx, udp4_rx, udp6_tx, udp6_rx) = device.open_listen_socket().await?;
-        let tun_rx = device.tun_rx.take().unwrap(); // TODO
-        let buffered_ip_rx = BufferedIpRecv::new(MAX_PACKET_BUFS, pool.clone(), tun_rx).await;
-        let buffered_ip_tx = BufferedIpSend::new(MAX_PACKET_BUFS, Arc::clone(&device.tun_tx));
+                let buffered_udp_tx_v4 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp4_tx.clone());
+                let buffered_udp_tx_v6 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp6_tx.clone());
 
-        let buffered_udp_tx_v4 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp4_tx.clone());
-        let buffered_udp_tx_v6 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp6_tx.clone());
+                let buffered_udp_rx_v4 = BufferedUdpReceive::new::<
+                    <T::UdpTransportFactory as UdpTransportFactory>::RecvV4,
+                >(MAX_PACKET_BUFS, udp4_rx, pool.clone());
+                let buffered_udp_rx_v6 = BufferedUdpReceive::new::<
+                    <T::UdpTransportFactory as UdpTransportFactory>::RecvV6,
+                >(MAX_PACKET_BUFS, udp6_rx, pool.clone());
 
-        let buffered_udp_rx_v4 = BufferedUdpReceive::new::<
-            <T::UdpTransportFactory as UdpTransportFactory>::RecvV4,
-        >(MAX_PACKET_BUFS, udp4_rx, pool.clone());
-        let buffered_udp_rx_v6 = BufferedUdpReceive::new::<
-            <T::UdpTransportFactory as UdpTransportFactory>::RecvV6,
-        >(MAX_PACKET_BUFS, udp6_rx, pool.clone());
+                // Start DAITA/hooks tasks
+                #[cfg(feature = "daita")]
+                for peer_arc in device.peers.values() {
+                    PeerState::maybe_start_daita(
+                        peer_arc,
+                        pool.clone(),
+                        device.tun_rx_mtu.clone(),
+                        buffered_udp_tx_v4.clone(),
+                        buffered_udp_tx_v6.clone(),
+                    )
+                    .await?;
+                }
 
-        // Start DAITA/hooks tasks
-        #[cfg(feature = "daita")]
-        for peer_arc in device.peers.values() {
-            PeerState::maybe_start_daita(
-                peer_arc,
-                pool.clone(),
-                device.tun_rx_mtu.clone(),
-                buffered_udp_tx_v4.clone(),
-                buffered_udp_tx_v6.clone(),
-            )
-            .await?;
-        }
+                // Start device tasks
+                let outgoing = Task::spawn(
+                    "handle_outgoing",
+                    DeviceState::handle_outgoing(
+                        Arc::downgrade(&device_arc),
+                        cancel.child_token(),
+                        buffered_ip_rx,
+                        buffered_udp_tx_v4.clone(),
+                        buffered_udp_tx_v6.clone(),
+                        pool.clone(),
+                    ),
+                );
+                let timers = Task::spawn(
+                    "handle_timers",
+                    DeviceState::handle_timers(
+                        Arc::downgrade(&device_arc),
+                        buffered_udp_tx_v4.clone(),
+                        buffered_udp_tx_v6.clone(),
+                    ),
+                );
 
-        // Start device tasks
-        let outgoing = Task::spawn(
-            "handle_outgoing",
-            DeviceState::handle_outgoing(
-                Arc::downgrade(&device_arc),
-                cancel.child_token(),
-                buffered_ip_rx,
-                buffered_udp_tx_v4.clone(),
-                buffered_udp_tx_v6.clone(),
-                pool.clone(),
-            ),
-        );
-        let timers = Task::spawn(
-            "handle_timers",
-            DeviceState::handle_timers(
-                Arc::downgrade(&device_arc),
-                buffered_udp_tx_v4.clone(),
-                buffered_udp_tx_v6.clone(),
-            ),
-        );
+                let incoming_ipv4 = Task::spawn_fallible(
+                    "handle_incoming ipv4",
+                    DeviceState::handle_incoming(
+                        Arc::downgrade(&device_arc),
+                        buffered_ip_tx.clone(),
+                        buffered_udp_tx_v4,
+                        buffered_udp_rx_v4,
+                        pool.clone(),
+                    ),
+                );
+                let incoming_ipv6 = Task::spawn_fallible(
+                    "handle_incoming ipv6",
+                    DeviceState::handle_incoming(
+                        Arc::downgrade(&device_arc),
+                        buffered_ip_tx,
+                        buffered_udp_tx_v6,
+                        buffered_udp_rx_v6,
+                        pool.clone(),
+                    ),
+                );
 
-        let incoming_ipv4 = Task::spawn_fallible(
-            "handle_incoming ipv4",
-            DeviceState::handle_incoming(
-                Arc::downgrade(&device_arc),
-                buffered_ip_tx.clone(),
-                buffered_udp_tx_v4,
-                buffered_udp_rx_v4,
-                pool.clone(),
-            ),
-        );
-        let incoming_ipv6 = Task::spawn_fallible(
-            "handle_incoming ipv6",
-            DeviceState::handle_incoming(
-                Arc::downgrade(&device_arc),
-                buffered_ip_tx,
-                buffered_udp_tx_v6,
-                buffered_udp_rx_v6,
-                pool.clone(),
-            ),
-        );
-
-        debug_assert!(device.connection.is_none());
-        device.connection = Some(Connection {
-            listen_port: udp4_tx.local_addr()?.map(|sa| sa.port()),
-            cancel,
-            udp4: udp4_tx,
-            udp6: udp6_tx,
-            incoming_ipv4,
-            incoming_ipv6,
-            timers,
-            outgoing,
-        });
+                ActiveConnection {
+                    listen_port,
+                    cancel,
+                    udp4: udp4_tx,
+                    udp6: udp6_tx,
+                    incoming_ipv4,
+                    incoming_ipv6,
+                    timers,
+                    outgoing,
+                }
+            })
+            .await;
 
         Ok(())
     }
@@ -268,9 +281,7 @@ impl<T: DeviceTransports> Device<T> {
             api_task.stop().await;
         }
 
-        if let Some(connection) = device.connection.take() {
-            connection.stop().await;
-        }
+        device.connection.stop().await;
     }
 }
 
@@ -435,7 +446,7 @@ impl<T: DeviceTransports> DeviceState<T> {
     fn set_fwmark(&mut self, mark: u32) -> Result<(), Error> {
         self.fwmark = Some(mark);
 
-        if let Some(conn) = &mut self.connection {
+        if let Connection::Active(conn) = &mut self.connection {
             conn.udp4.set_fwmark(mark)?;
             conn.udp6.set_fwmark(mark)?;
         }
@@ -791,9 +802,9 @@ impl<T: DeviceTransports> DeviceState<T> {
     }
 }
 
-impl<T: DeviceTransports> Connection<T> {
+impl<T: DeviceTransports> ActiveConnection<T> {
     async fn stop(self) -> T::IpRecv {
-        let Self {
+        let ActiveConnection {
             udp4,
             udp6,
             listen_port: _,
@@ -815,7 +826,32 @@ impl<T: DeviceTransports> Connection<T> {
         );
 
         let buffered_tun_rx = buffered_tun_rx.expect("task must exit gracefully");
-        let tun_rx = buffered_tun_rx.stop().await;
-        tun_rx
+        buffered_tun_rx.stop().await
+    }
+}
+
+impl<T: DeviceTransports> Connection<T> {
+    /// Stop the connection and turn `self` into [`Connection::Idle`].
+    async fn stop(&mut self) {
+        let connection = mem::replace(self, Connection::_TemporarilyNone);
+        let tun_rx = match connection {
+            Connection::_TemporarilyNone => unreachable!(),
+            Connection::Idle { tun_rx } => tun_rx,
+            Connection::Active(active_connection) => active_connection.stop().await,
+        };
+        *self = Connection::Idle { tun_rx };
+    }
+
+    /// Turn `self` into a new [`Connection::Active`], recycling the inner [`IpRecv`].
+    async fn activate(&mut self, f: impl AsyncFnOnce(T::IpRecv) -> ActiveConnection<T>) {
+        let connection = mem::replace(self, Connection::_TemporarilyNone);
+        let tun_rx = match connection {
+            Connection::_TemporarilyNone => unreachable!(),
+            Connection::Idle { tun_rx } => tun_rx,
+            Connection::Active(active_connection) => active_connection.stop().await,
+        };
+
+        let active_connection = f(tun_rx).await;
+        *self = Connection::Active(active_connection);
     }
 }
