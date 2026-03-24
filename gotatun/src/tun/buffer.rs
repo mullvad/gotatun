@@ -18,10 +18,12 @@ use crate::{
     task::Task,
     tun::{IpRecv, IpSend, MtuWatcher},
 };
+use futures::{FutureExt, select};
 use tokio::{
     sync::{Mutex, mpsc},
     time::timeout,
 };
+use tokio_util::sync::{CancellationToken, DropGuard};
 
 /// An [`IpSend`] that wraps another [`IpSend`] to provide buffering.
 ///
@@ -81,8 +83,9 @@ impl IpSend for BufferedIpSend {
 pub struct BufferedIpRecv<I> {
     rx: mpsc::Receiver<Packet<Ip>>,
     rx_packet_buf: Vec<Packet<Ip>>,
-    _task: Arc<Task>,
-    _phantom: std::marker::PhantomData<I>,
+    cancel: CancellationToken,
+    _cancel_on_drop: DropGuard,
+    task: Task<I>,
     mtu: MtuWatcher,
 }
 
@@ -92,25 +95,26 @@ impl<I: IpRecv> BufferedIpRecv<I> {
     /// This takes an `Arc<Mutex<I>>` because the inner `I` will be re-used after [Self] is
     /// dropped. We will take the mutex lock when this function is called, and hold onto it for the
     /// lifetime of [Self]. Will panic if the lock is already taken.
-    pub async fn new(capacity: usize, mut pool: PacketBufPool, inner: Arc<Mutex<I>>) -> Self {
+    pub async fn new(capacity: usize, mut pool: PacketBufPool, mut inner: I) -> Self {
         let (tx, rx) = mpsc::channel::<Packet<Ip>>(capacity);
 
-        // We use a timeout instead of a try_lock().expect() because there may still be an old
-        // BufferedIpRecv that is in the process of being dropped. Otherwise, there would be a
-        // race condition between the old `task` dropping, and us taking the lock again.
-        let mut inner = timeout(Duration::from_secs(5), inner.lock_owned())
-            .await
-            .expect("Deadlock on IpRecv. There must be no more than one IpRecv active at any given time.");
-
         let mtu = inner.mtu();
+        let cancel = CancellationToken::new();
 
+        let task_cancel = cancel.child_token();
         let task = Task::spawn("buffered IP recv", async move {
-            loop {
-                match inner.recv(&mut pool).await {
+            let cancel = task_cancel;
+            'task: loop {
+                let result = select! {
+                    _ = cancel.cancelled().fuse() => break 'task,
+                    result = inner.recv(&mut pool).fuse() => result,
+                };
+
+                match result {
                     Ok(packets) => {
                         for packet in packets {
                             if tx.send(packet).await.is_err() {
-                                return;
+                                break 'task;
                             }
                         }
                     }
@@ -121,15 +125,23 @@ impl<I: IpRecv> BufferedIpRecv<I> {
                     }
                 }
             }
+
+            inner
         });
 
         Self {
             rx,
             rx_packet_buf: vec![],
-            _task: Arc::new(task),
-            _phantom: std::marker::PhantomData,
+            _cancel_on_drop: cancel.clone().drop_guard(),
+            cancel,
+            task,
             mtu,
         }
+    }
+
+    pub async fn stop(self) -> I {
+        self.cancel.cancel();
+        self.task.join().await.expect("task must exit gracefully")
     }
 }
 

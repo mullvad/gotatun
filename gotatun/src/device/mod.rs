@@ -27,6 +27,7 @@ pub mod uapi;
 
 use crate::noise::index_table::IndexTable;
 use builder::Nul;
+use futures::{FutureExt, select};
 use std::collections::HashMap;
 use std::io::{self};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
@@ -36,6 +37,7 @@ use std::time::Duration;
 use tokio::join;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
@@ -104,15 +106,15 @@ pub(crate) struct DeviceState<T: DeviceTransports> {
     fwmark: Option<u32>,
 
     tun_tx: Arc<Mutex<T::IpSend>>,
+
     /// The tun device reader.
     ///
-    /// This is `Arc<Mutex>`:ed because:
-    /// - The task responsible from reading from the `tun_rx` must have ownership of it.
-    /// - We must be able to claim the ownership after that task is stopped.
+    /// This is an `Option` because the task responsible from reading from the `tun_rx` must
+    /// have ownership of it. Thus we must be able to give the tun_rx away and take it back.
     ///
-    /// This is implemented by the task taking the lock upon startup, and holding it until it is
-    /// stopped.
-    tun_rx: Arc<Mutex<T::IpRecv>>,
+    /// # Invariant
+    /// This must be `Some` when `connection` is `None`, and vice versa.
+    tun_rx: Option<T::IpRecv>,
 
     /// MTU watcher of the TUN device.
     tun_rx_mtu: MtuWatcher,
@@ -138,32 +140,36 @@ pub(crate) struct Connection<T: DeviceTransports> {
 
     listen_port: Option<u16>,
 
+    cancel: CancellationToken,
+
     /// The task that reads IPv4 traffic from the UDP socket.
-    incoming_ipv4: Task,
+    incoming_ipv4: Task<Result<(), Error>>,
 
     /// The task that reads IPv6 traffic from the UDP socket.
-    incoming_ipv6: Task,
+    incoming_ipv6: Task<Result<(), Error>>,
 
     /// The task that handles keepalives/heartbeats/etc.
     timers: Task,
 
     /// The task that reads traffic from the TUN device.
-    outgoing: Task,
+    outgoing: Task<BufferedIpRecv<T::IpRecv>>,
 }
 
 impl<T: DeviceTransports> Connection<T> {
     pub async fn set_up(device_arc: Arc<RwLock<DeviceState<T>>>) -> Result<(), Error> {
         let mut device = device_arc.write().await;
         let pool = PacketBufPool::new(MAX_PACKET_BUFS);
+        let cancel = CancellationToken::new();
 
         // clean up existing connection
         if let Some(conn) = device.connection.take() {
-            conn.stop().await;
+            let tun_rx = conn.stop().await;
+            device.tun_rx = Some(tun_rx);
         }
 
         let (udp4_tx, udp4_rx, udp6_tx, udp6_rx) = device.open_listen_socket().await?;
-        let buffered_ip_rx =
-            BufferedIpRecv::new(MAX_PACKET_BUFS, pool.clone(), Arc::clone(&device.tun_rx)).await;
+        let tun_rx = device.tun_rx.take().unwrap(); // TODO
+        let buffered_ip_rx = BufferedIpRecv::new(MAX_PACKET_BUFS, pool.clone(), tun_rx).await;
         let buffered_ip_tx = BufferedIpSend::new(MAX_PACKET_BUFS, Arc::clone(&device.tun_tx));
 
         let buffered_udp_tx_v4 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp4_tx.clone());
@@ -194,6 +200,7 @@ impl<T: DeviceTransports> Connection<T> {
             "handle_outgoing",
             DeviceState::handle_outgoing(
                 Arc::downgrade(&device_arc),
+                cancel.child_token(),
                 buffered_ip_rx,
                 buffered_udp_tx_v4.clone(),
                 buffered_udp_tx_v6.clone(),
@@ -209,7 +216,7 @@ impl<T: DeviceTransports> Connection<T> {
             ),
         );
 
-        let incoming_ipv4 = Task::spawn(
+        let incoming_ipv4 = Task::spawn_fallible(
             "handle_incoming ipv4",
             DeviceState::handle_incoming(
                 Arc::downgrade(&device_arc),
@@ -219,7 +226,7 @@ impl<T: DeviceTransports> Connection<T> {
                 pool.clone(),
             ),
         );
-        let incoming_ipv6 = Task::spawn(
+        let incoming_ipv6 = Task::spawn_fallible(
             "handle_incoming ipv6",
             DeviceState::handle_incoming(
                 Arc::downgrade(&device_arc),
@@ -233,6 +240,7 @@ impl<T: DeviceTransports> Connection<T> {
         debug_assert!(device.connection.is_none());
         device.connection = Some(Connection {
             listen_port: udp4_tx.local_addr()?.map(|sa| sa.port()),
+            cancel,
             udp4: udp4_tx,
             udp6: udp6_tx,
             incoming_ipv4,
@@ -672,23 +680,29 @@ impl<T: DeviceTransports> DeviceState<T> {
     }
 
     /// Read from tunnel device, encapsulate, and write to UDP socket for the corresponding peer
-    async fn handle_outgoing(
+    async fn handle_outgoing<I: IpRecv>(
         device: Weak<RwLock<Self>>,
-        mut tun_rx: impl IpRecv,
+        cancel: CancellationToken,
+        mut tun_rx: I,
         udp4: impl UdpSend,
         udp6: impl UdpSend,
         mut packet_pool: PacketBufPool,
-    ) {
+    ) -> I {
         let mut tun_mtu = {
             let Some(device) = device.upgrade() else {
-                return;
+                return tun_rx;
             };
             let device = device.read().await;
             device.tun_rx_mtu.clone()
         };
 
-        loop {
-            let packets = match tun_rx.recv(&mut packet_pool).await {
+        'task: loop {
+            let recv_result = select! {
+                result = tun_rx.recv(&mut packet_pool).fuse() => result,
+                _ = cancel.cancelled().fuse() => break,
+            };
+
+            let packets = match recv_result {
                 Ok(packets) => packets,
                 Err(e) => {
                     log::error!("Unexpected error on tun interface: {e:?}");
@@ -703,7 +717,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                 };
 
                 let Some(device_arc) = device.upgrade() else {
-                    return;
+                    break 'task;
                 };
 
                 let device_guard = device_arc.read().await;
@@ -772,27 +786,36 @@ impl<T: DeviceTransports> DeviceState<T> {
                 }
             }
         }
+
+        tun_rx
     }
 }
 
 impl<T: DeviceTransports> Connection<T> {
-    async fn stop(self) {
+    async fn stop(self) -> T::IpRecv {
         let Self {
             udp4,
             udp6,
             listen_port: _,
+            cancel,
             incoming_ipv4,
             incoming_ipv6,
             timers,
             outgoing,
         } = self;
+
+        cancel.cancel();
         drop((udp4, udp6));
 
-        join!(
+        let (.., buffered_tun_rx) = join!(
             incoming_ipv4.stop(),
             incoming_ipv6.stop(),
             timers.stop(),
-            outgoing.stop(),
+            outgoing.join(),
         );
+
+        let buffered_tun_rx = buffered_tun_rx.expect("task must exit gracefully");
+        let tun_rx = buffered_tun_rx.stop().await;
+        tun_rx
     }
 }

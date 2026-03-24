@@ -9,13 +9,13 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use std::pin::Pin;
-use tokio::task::JoinHandle;
+use std::{fmt, pin::Pin};
+use tokio::task::{JoinError, JoinHandle};
 
 /// A wrapper around [`JoinHandle`] that.
 /// - Aborts the task on Drop.
 /// - If the task returns an `Err`, logs it.
-pub struct Task {
+pub struct Task<Output = ()> {
     name: &'static str,
 
     /// [`JoinHandle`] for the tokio task.
@@ -23,7 +23,7 @@ pub struct Task {
     /// INVARIANT: This will be `Some` until either of:
     /// - Self is dropped.
     /// - [`Self::stop`] is called.
-    handle: Option<JoinHandle<()>>,
+    handle: Option<JoinHandle<Output>>,
 }
 
 pub trait TaskOutput: Sized + Send + 'static {
@@ -47,16 +47,49 @@ where
     }
 }
 
-impl Task {
+impl<O> Task<O> {
     #[track_caller]
-    pub fn spawn<Fut, O>(name: &'static str, fut: Fut) -> Self
+    pub fn spawn<Fut>(name: &'static str, fut: Fut) -> Self
     where
         Fut: Future<Output = O> + Send + 'static,
-        O: TaskOutput,
+        O: Send + 'static,
     {
         let handle = tokio::spawn(async move {
             let output = fut.await;
-            TaskOutput::handle(output, name);
+            log::trace!("task {name:?} exited");
+            output
+        });
+
+        Task {
+            name,
+            handle: Some(handle),
+        }
+    }
+
+    pub async fn join(mut self) -> Result<O, JoinError> {
+        let handle = self
+            .handle
+            .take()
+            .expect("handle is Some until Task is dropped");
+        handle.await
+    }
+}
+
+impl<T, E> Task<Result<T, E>> {
+    #[track_caller]
+    pub fn spawn_fallible<Fut>(name: &'static str, fut: Fut) -> Self
+    where
+        Fut: Future<Output = Result<T, E>> + Send + 'static,
+        T: Send + 'static,
+        E: fmt::Debug + Send + 'static,
+    {
+        let handle = tokio::spawn(async move {
+            let output = fut.await;
+            match &output {
+                Ok(_) => log::trace!("task {name:?} exited"),
+                Err(e) => log::error!("task {name:?} errored: {e:?}"),
+            }
+            output
         });
 
         Task {
@@ -81,7 +114,7 @@ impl Future for Task {
     }
 }
 
-impl Task {
+impl<O> Task<O> {
     #[cfg(feature = "device")]
     pub async fn stop(mut self) {
         if let Some(handle) = self.handle.take() {
@@ -98,7 +131,7 @@ impl Task {
     }
 }
 
-impl Drop for Task {
+impl<O> Drop for Task<O> {
     fn drop(&mut self) {
         if let Some(handle) = self.handle.take() {
             log::trace!("dropped task {}", self.name);
