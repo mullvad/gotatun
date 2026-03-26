@@ -52,6 +52,10 @@ impl BufferedIpSend {
 
             while let Some(packet) = rx.recv().await {
                 if let Err(e) = inner.send(packet).await {
+                    if is_fatal_tun_error(&e) {
+                        log::error!("TUN device was deleted, shutting down: {e}");
+                        break;
+                    }
                     log::error!("Error sending IP packet: {e}");
                 }
             }
@@ -115,9 +119,11 @@ impl<I: IpRecv> BufferedIpRecv<I> {
                         }
                     }
                     Err(e) => {
+                        if is_fatal_tun_error(&e) {
+                            log::error!("TUN device was deleted, shutting down: {e}");
+                            break;
+                        }
                         log::error!("Error receiving IP packet: {e}");
-                        // exit?
-                        continue;
                     }
                 }
             }
@@ -153,4 +159,24 @@ impl<I: IpRecv> IpRecv for BufferedIpRecv<I> {
     fn mtu(&self) -> MtuWatcher {
         self.mtu.clone()
     }
+}
+
+/// Checks if an I/O error indicates the TUN device has been deleted or is unusable.
+fn is_fatal_tun_error(err: &io::Error) -> bool {
+    #[cfg(unix)]
+    if matches!(
+        err.raw_os_error(),
+        Some(libc::EBADF) | Some(libc::EBADFD) | Some(libc::ENODEV)
+    ) {
+        return true;
+    }
+
+    matches!(
+        err.kind(),
+        io::ErrorKind::NotFound
+            | io::ErrorKind::UnexpectedEof
+            | io::ErrorKind::BrokenPipe
+            | io::ErrorKind::InvalidData
+            | io::ErrorKind::InvalidInput
+    )
 }
