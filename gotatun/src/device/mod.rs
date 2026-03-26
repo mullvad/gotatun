@@ -152,22 +152,19 @@ pub(crate) struct Connection<T: DeviceTransports> {
 }
 
 impl<T: DeviceTransports> Connection<T> {
-    pub async fn set_up(device: Arc<RwLock<DeviceState<T>>>) -> Result<Self, Error> {
-        let mut device_guard = device.write().await;
+    pub async fn set_up(device_arc: Arc<RwLock<DeviceState<T>>>) -> Result<(), Error> {
+        let mut device = device_arc.write().await;
         let pool = PacketBufPool::new(MAX_PACKET_BUFS);
 
         // clean up existing connection
-        if let Some(conn) = device_guard.connection.take() {
+        if let Some(conn) = device.connection.take() {
             conn.stop().await;
         }
 
-        let (udp4_tx, udp4_rx, udp6_tx, udp6_rx) = device_guard.open_listen_socket().await?;
-        let buffered_ip_rx = BufferedIpRecv::new(
-            MAX_PACKET_BUFS,
-            pool.clone(),
-            Arc::clone(&device_guard.tun_rx),
-        );
-        let buffered_ip_tx = BufferedIpSend::new(MAX_PACKET_BUFS, Arc::clone(&device_guard.tun_tx));
+        let (udp4_tx, udp4_rx, udp6_tx, udp6_rx) = device.open_listen_socket().await?;
+        let buffered_ip_rx =
+            BufferedIpRecv::new(MAX_PACKET_BUFS, pool.clone(), Arc::clone(&device.tun_rx)).await;
+        let buffered_ip_tx = BufferedIpSend::new(MAX_PACKET_BUFS, Arc::clone(&device.tun_tx));
 
         let buffered_udp_tx_v4 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp4_tx.clone());
         let buffered_udp_tx_v6 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp6_tx.clone());
@@ -181,24 +178,22 @@ impl<T: DeviceTransports> Connection<T> {
 
         // Start DAITA/hooks tasks
         #[cfg(feature = "daita")]
-        for peer_arc in device_guard.peers.values() {
+        for peer_arc in device.peers.values() {
             PeerState::maybe_start_daita(
                 peer_arc,
                 pool.clone(),
-                device_guard.tun_rx_mtu.clone(),
+                device.tun_rx_mtu.clone(),
                 buffered_udp_tx_v4.clone(),
                 buffered_udp_tx_v6.clone(),
             )
             .await?;
         }
 
-        drop(device_guard);
-
         // Start device tasks
         let outgoing = Task::spawn(
             "handle_outgoing",
             DeviceState::handle_outgoing(
-                Arc::downgrade(&device),
+                Arc::downgrade(&device_arc),
                 buffered_ip_rx,
                 buffered_udp_tx_v4.clone(),
                 buffered_udp_tx_v6.clone(),
@@ -208,7 +203,7 @@ impl<T: DeviceTransports> Connection<T> {
         let timers = Task::spawn(
             "handle_timers",
             DeviceState::handle_timers(
-                Arc::downgrade(&device),
+                Arc::downgrade(&device_arc),
                 buffered_udp_tx_v4.clone(),
                 buffered_udp_tx_v6.clone(),
             ),
@@ -217,7 +212,7 @@ impl<T: DeviceTransports> Connection<T> {
         let incoming_ipv4 = Task::spawn(
             "handle_incoming ipv4",
             DeviceState::handle_incoming(
-                Arc::downgrade(&device),
+                Arc::downgrade(&device_arc),
                 buffered_ip_tx.clone(),
                 buffered_udp_tx_v4,
                 buffered_udp_rx_v4,
@@ -227,7 +222,7 @@ impl<T: DeviceTransports> Connection<T> {
         let incoming_ipv6 = Task::spawn(
             "handle_incoming ipv6",
             DeviceState::handle_incoming(
-                Arc::downgrade(&device),
+                Arc::downgrade(&device_arc),
                 buffered_ip_tx,
                 buffered_udp_tx_v6,
                 buffered_udp_rx_v6,
@@ -235,7 +230,8 @@ impl<T: DeviceTransports> Connection<T> {
             ),
         );
 
-        Ok(Connection {
+        debug_assert!(device.connection.is_none());
+        device.connection = Some(Connection {
             listen_port: udp4_tx.local_addr()?.map(|sa| sa.port()),
             udp4: udp4_tx,
             udp6: udp6_tx,
@@ -243,7 +239,9 @@ impl<T: DeviceTransports> Connection<T> {
             incoming_ipv6,
             timers,
             outgoing,
-        })
+        });
+
+        Ok(())
     }
 }
 

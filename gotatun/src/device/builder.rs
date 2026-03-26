@@ -276,9 +276,7 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
         }
 
         if has_peers {
-            let con = Connection::set_up(inner.clone()).await?;
-            let mut state = inner.write().await;
-            state.connection = Some(con);
+            Connection::set_up(inner.clone()).await?;
         }
 
         Ok(Device { inner })

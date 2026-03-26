@@ -472,11 +472,9 @@ impl<T: DeviceTransports> Device<T> {
 
         if let Reconfigure::Yes = configurator.reconfigure {
             // TODO: don't do this elsewhere for ApiServer?
-            // FIXME: set_up acquires lock but we should reuseit
+            // FIXME: set_up acquires lock but we should reuse it
             drop(state);
-            let con = Connection::set_up(self.inner.clone()).await?;
-            let mut state = self.inner.write().await;
-            state.connection = Some(con);
+            Connection::set_up(self.inner.clone()).await?;
         }
 
         Ok(t)
