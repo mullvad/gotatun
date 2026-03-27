@@ -86,6 +86,17 @@ impl<SourceTunRx: IpRecv> TunRxRouter<SourceTunRx> {
         rx
     }
 
+    /// Insert multiple new routes with shared receiver. This will replace any previously conflicting route.
+    pub fn add_routes(&mut self, routes: &[IpNetwork], channel_capacity: usize) -> SplitIpRecv {
+        let (tx, rx) = new_split_channel(channel_capacity, self.source.mtu());
+        for route in routes {
+            let net = ip_network::IpNetwork::new_truncate(route.ip(), route.prefix())
+                .expect("cidr is valid length");
+            self.table.insert(net, tx.clone());
+        }
+        rx
+    }
+
     /// Begin forwarding `self.source` to split streams.
     pub async fn run(mut self, mut pool: PacketBufPool) {
         loop {
