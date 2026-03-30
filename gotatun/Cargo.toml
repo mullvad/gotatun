@@ -60,7 +60,7 @@ rand_core = { workspace = true, features = ["getrandom"] }
 ring = { workspace = true }
 socket2 = { workspace = true, features = ["all"] }
 thiserror = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["sync", "rt", "time", "net"] }
 tun = { workspace = true, default-features = false, features = ["async"], optional = true }
 typed-builder = { workspace = true }
 x25519-dalek = { workspace = true, features = [
