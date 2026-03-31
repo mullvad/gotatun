@@ -127,54 +127,7 @@ impl UapiClient {
         RW: Send + Sync + 'static,
     {
         std::thread::spawn(move || {
-            let r = BufReader::new(&rw);
-
-            let make_request = |s: &str| {
-                let request = Request::from_str(s).wrap_err("Failed to parse command")?;
-
-                let Some(response) = self.send_sync(request).ok() else {
-                    bail!("Server hung up");
-                };
-
-                if let Err(e) = writeln!(&rw, "{response}") {
-                    log::error!("Failed to write API response: {e}");
-                }
-
-                Ok(())
-            };
-
-            let mut lines = String::new();
-
-            for line in r.lines() {
-                let Ok(line) = line else {
-                    if !lines.is_empty()
-                        && let Err(e) = make_request(&lines)
-                    {
-                        log::error!("Failed to handle UAPI request: {e:#}");
-                        return;
-                    }
-                    return;
-                };
-
-                // Final line of a command is empty, so if this one is not, we add it to the
-                // `lines` buffer and wait for more.
-                if !line.is_empty() {
-                    lines.push_str(&line);
-                    lines.push('\n');
-                    continue;
-                }
-
-                if lines.is_empty() {
-                    continue;
-                }
-
-                if let Err(e) = make_request(&lines) {
-                    log::error!("Failed to handle UAPI request: {e:#}");
-                    return;
-                }
-
-                lines.clear();
-            }
+            run_uapi_protocol_sync(self, &rw, &rw);
         });
     }
 }
@@ -199,7 +152,7 @@ impl UapiServer {
         uid: Option<Uid>,
         gid: Option<Gid>,
     ) -> eyre::Result<Self> {
-        use std::os::unix::net::UnixListener;
+        use tokio::net::UnixListener;
 
         let path = format!("{SOCK_DIR}/{name}.sock");
 
@@ -219,29 +172,79 @@ impl UapiServer {
 
         let (tx, rx) = UapiServer::new();
 
-        std::thread::spawn(move || {
+        tokio::spawn(async move {
             loop {
-                let Ok((stream, _)) = api_listener.accept() else {
+                let Ok((stream, _)) = api_listener.accept().await else {
                     break;
                 };
 
                 log::info!("New UAPI connection on unix socket");
 
-                tx.clone().wrap_read_write(stream);
+                let client = tx.clone();
+                tokio::spawn(async move {
+                    let (r, w) = stream.into_split();
+                    run_uapi_protocol(client, r, w).await;
+                });
             }
         });
 
         Ok(rx)
+    }
 
-        //self.cleanup_paths.push(path.clone());
+    /// Spawn a named pipe server at `\\.\pipe\WireGuard\<name>`. This pipe speaks the official
+    /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
+    ///
+    /// This is the Windows equivalent of [`UapiServer::default_unix_socket`].
+    ///
+    /// Must be called from within a tokio runtime context.
+    #[cfg(windows)]
+    pub fn default_named_pipe(name: &str) -> eyre::Result<Self> {
+        use tokio::net::windows::named_pipe::ServerOptions;
+
+        let pipe_path = format!(r"\\.\pipe\WireGuard\{name}");
+        let (tx, rx) = UapiServer::new();
+
+        tokio::spawn(async move {
+            // Windows named pipes require a new server instance per accepted client.
+            // The first instance must set first_pipe_instance(true) to ensure exclusive creation.
+            let mut first = true;
+            loop {
+                let server = match async {
+                    let server = ServerOptions::new()
+                        .first_pipe_instance(first)
+                        .create(&pipe_path)?;
+                    server.connect().await?;
+                    std::io::Result::Ok(server)
+                }
+                .await
+                {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::error!("Failed to accept named pipe connection: {e}");
+                        break;
+                    }
+                };
+                first = false;
+
+                log::info!("New UAPI connection on named pipe");
+
+                let client = tx.clone();
+                tokio::spawn(async move {
+                    let (r, w) = tokio::io::split(server);
+                    run_uapi_protocol(client, r, w).await;
+                });
+            }
+        });
+
+        Ok(rx)
     }
 
     /// Create an [`UapiServer`] from a reader+writer that speaks the official
     /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
     pub fn from_read_write<RW>(rw: RW) -> Self
     where
-        RW: Send + Sync + 'static,
         for<'a> &'a RW: Read + Write,
+        RW: Send + Sync + 'static,
     {
         let (tx, rx) = Self::new();
         tx.wrap_read_write(rw);
@@ -258,6 +261,125 @@ impl UapiServer {
 
         Some((request, response_tx))
     }
+}
+
+/// Drives a single UAPI connection to completion.
+///
+/// Reads WireGuard text-protocol commands from `r`, dispatches them through `client`, and writes
+/// responses to `w`. Used by both the Unix (via [`UapiClient::wrap_read_write`]) and Windows (via
+/// [`UapiServer::default_named_pipe`]) code paths.
+async fn run_uapi_protocol(
+    client: UapiClient,
+    r: impl tokio::io::AsyncRead + Unpin,
+    mut w: impl tokio::io::AsyncWrite + Unpin,
+) {
+    use tokio::io::AsyncBufReadExt;
+
+    let mut reader = tokio::io::BufReader::new(r).lines();
+    let mut buf = String::new();
+
+    loop {
+        let line = match reader.next_line().await {
+            Ok(Some(line)) => line,
+            Ok(None) | Err(_) => {
+                if !buf.is_empty() {
+                    if let Err(e) = dispatch_request(&client, &mut w, &buf).await {
+                        log::error!("Failed to handle UAPI request: {e:#}");
+                    }
+                }
+                return;
+            }
+        };
+
+        // Final line of a command is empty, so if this one is not, we add it to the
+        // `buf` buffer and wait for more.
+        if !line.is_empty() {
+            buf.push_str(&line);
+            buf.push('\n');
+            continue;
+        }
+
+        if buf.is_empty() {
+            continue;
+        }
+
+        if let Err(e) = dispatch_request(&client, &mut w, &buf).await {
+            log::error!("Failed to handle UAPI request: {e:#}");
+            return;
+        }
+
+        buf.clear();
+    }
+}
+
+async fn dispatch_request(
+    client: &UapiClient,
+    w: &mut (impl tokio::io::AsyncWrite + Unpin),
+    s: &str,
+) -> eyre::Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    let request = Request::from_str(s).wrap_err("Failed to parse command")?;
+
+    let Some(response) = client.send(request).await.ok() else {
+        bail!("Server hung up");
+    };
+
+    let response_str = format!("{response}\n");
+    if let Err(e) = w.write_all(response_str.as_bytes()).await {
+        log::error!("Failed to write API response: {e}");
+    }
+
+    Ok(())
+}
+
+/// Synchronous counterpart of [`run_uapi_protocol`] for use with blocking [`Read`]+[`Write`]
+/// streams (see [`UapiClient::wrap_read_write`]).
+fn run_uapi_protocol_sync(client: UapiClient, r: impl Read, mut w: impl Write) {
+    let r = BufReader::new(r);
+    let mut buf = String::new();
+
+    for line in r.lines() {
+        let Ok(line) = line else {
+            if !buf.is_empty() {
+                if let Err(e) = dispatch_request_sync(&client, &mut w, &buf) {
+                    log::error!("Failed to handle UAPI request: {e:#}");
+                }
+            }
+            return;
+        };
+
+        if !line.is_empty() {
+            buf.push_str(&line);
+            buf.push('\n');
+            continue;
+        }
+
+        if buf.is_empty() {
+            continue;
+        }
+
+        if let Err(e) = dispatch_request_sync(&client, &mut w, &buf) {
+            log::error!("Failed to handle UAPI request: {e:#}");
+            return;
+        }
+
+        buf.clear();
+    }
+}
+
+fn dispatch_request_sync(client: &UapiClient, w: &mut impl Write, s: &str) -> eyre::Result<()> {
+    let request = Request::from_str(s).wrap_err("Failed to parse command")?;
+
+    let Some(response) = client.send_sync(request).ok() else {
+        bail!("Server hung up");
+    };
+
+    if let Err(e) = writeln!(w, "{response}") {
+        log::error!("Failed to write API response: {e}");
+    }
+
+    Ok(())
 }
 
 impl Debug for UapiServer {
