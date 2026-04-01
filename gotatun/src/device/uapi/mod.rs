@@ -191,7 +191,7 @@ impl UapiServer {
         Ok(rx)
     }
 
-    /// Spawn a named pipe server at `\\.\pipe\WireGuard\<name>`. This pipe speaks the official
+    /// Spawn a named pipe server at `\\.\pipe\ProtectedPrefix\Administrators\WireGuard\<name>`. This pipe speaks the official
     /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
     ///
     /// This is the Windows equivalent of [`UapiServer::default_unix_socket`].
@@ -199,31 +199,59 @@ impl UapiServer {
     /// Must be called from within a tokio runtime context.
     #[cfg(windows)]
     pub fn default_named_pipe(name: &str) -> eyre::Result<Self> {
-        use tokio::net::windows::named_pipe::ServerOptions;
+        use windows_sys::Win32::Security::Authorization::{
+            ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+        };
 
-        let pipe_path = format!(r"\\.\pipe\WireGuard\{name}");
+        let pipe_path = format!(r"\\.\pipe\ProtectedPrefix\Administrators\WireGuard\{name}");
         let (tx, rx) = UapiServer::new();
+
+        // Enable SeRestorePrivilege so we can set the pipe owner to SYSTEM
+        // even when running as a regular (elevated) administrator.
+        // wireguard-tools' wg.exe verifies the pipe owner is SYSTEM before connecting.
+        enable_privilege("SeRestorePrivilege")?;
+
+        // Create a security descriptor owned by SYSTEM (O:SY) with a DACL
+        // granting full access to SYSTEM and Administrators only.
+        let sddl: Vec<u16> = "O:SYD:(A;;GA;;;SY)(A;;GA;;;BA)\0".encode_utf16().collect();
+        let mut sd = std::ptr::null_mut();
+        let ret = unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_ptr(),
+                SDDL_REVISION_1,
+                &mut sd,
+                std::ptr::null_mut(),
+            )
+        };
+        if ret == 0 {
+            eyre::bail!(
+                "ConvertStringSecurityDescriptorToSecurityDescriptorW failed: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+        // Safety: sd is freed via SecurityDescriptor Drop
+        let sd = SecurityDescriptor(sd);
 
         tokio::spawn(async move {
             // Windows named pipes require a new server instance per accepted client.
             // The first instance must set first_pipe_instance(true) to ensure exclusive creation.
             let mut first = true;
             loop {
-                let server = match async {
-                    let server = ServerOptions::new()
-                        .first_pipe_instance(first)
-                        .create(&pipe_path)?;
-                    server.connect().await?;
-                    std::io::Result::Ok(server)
-                }
-                .await
-                {
+                let server = create_named_pipe(&pipe_path, &sd, first);
+                let server = match server {
                     Ok(s) => s,
+                    Err(e) => {
+                        log::error!("Failed to create named pipe: {e}");
+                        break;
+                    }
+                };
+                match server.connect().await {
+                    Ok(()) => {}
                     Err(e) => {
                         log::error!("Failed to accept named pipe connection: {e}");
                         break;
                     }
-                };
+                }
                 first = false;
 
                 log::info!("New UAPI connection on named pipe");
@@ -695,4 +723,103 @@ async fn on_api_set(
     }
 
     (SetResponse { errno: 0 }, reconfigure)
+}
+
+/// RAII wrapper for a security descriptor allocated by Windows APIs.
+/// Frees the memory via `LocalFree` on drop.
+#[cfg(windows)]
+struct SecurityDescriptor(*mut core::ffi::c_void);
+
+#[cfg(windows)]
+// Safety: The security descriptor is only read by the OS during pipe creation
+// and is not mutated after construction.
+unsafe impl Send for SecurityDescriptor {}
+#[cfg(windows)]
+unsafe impl Sync for SecurityDescriptor {}
+
+#[cfg(windows)]
+impl Drop for SecurityDescriptor {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::LocalFree(self.0 as _);
+        }
+    }
+}
+
+/// Enable a Windows privilege (e.g. `SeRestorePrivilege`) on the current process token.
+#[cfg(windows)]
+fn enable_privilege(name: &str) -> eyre::Result<()> {
+    use windows_sys::Win32::Foundation::{CloseHandle, LUID};
+    use windows_sys::Win32::Security::{
+        AdjustTokenPrivileges, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED,
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let mut token = std::ptr::null_mut();
+    let ret = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &mut token) };
+    if ret == 0 {
+        eyre::bail!(
+            "OpenProcessToken failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+
+    let priv_name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+    let mut luid = LUID {
+        LowPart: 0,
+        HighPart: 0,
+    };
+    let ret = unsafe { LookupPrivilegeValueW(std::ptr::null(), priv_name.as_ptr(), &mut luid) };
+    if ret == 0 {
+        unsafe { CloseHandle(token) };
+        eyre::bail!(
+            "LookupPrivilegeValueW failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+
+    let tp = TOKEN_PRIVILEGES {
+        PrivilegeCount: 1,
+        Privileges: [windows_sys::Win32::Security::LUID_AND_ATTRIBUTES {
+            Luid: luid,
+            Attributes: SE_PRIVILEGE_ENABLED,
+        }],
+    };
+    let ret = unsafe {
+        AdjustTokenPrivileges(token, 0, &tp, 0, std::ptr::null_mut(), std::ptr::null_mut())
+    };
+    unsafe { CloseHandle(token) };
+    if ret == 0 {
+        eyre::bail!(
+            "AdjustTokenPrivileges failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+
+    Ok(())
+}
+
+/// Create a named pipe with the given security descriptor using tokio's `ServerOptions`.
+#[cfg(windows)]
+fn create_named_pipe(
+    pipe_path: &str,
+    sd: &SecurityDescriptor,
+    first: bool,
+) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
+    use tokio::net::windows::named_pipe::ServerOptions;
+    use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
+
+    let mut sa = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: sd.0,
+        bInheritHandle: 0,
+    };
+
+    // Safety: sa is a valid SECURITY_ATTRIBUTES pointing to our security descriptor.
+    unsafe {
+        ServerOptions::new()
+            .first_pipe_instance(first)
+            .create_with_security_attributes_raw(pipe_path, &mut sa as *mut _ as *mut _)
+    }
 }
