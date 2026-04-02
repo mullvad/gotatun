@@ -49,13 +49,35 @@ impl UdpTransportFactory for UdpSocketFactory {
         params: &UdpTransportFactoryParams,
     ) -> io::Result<((Self::SendV4, Self::RecvV4), (Self::SendV6, Self::RecvV6))> {
         let mut port = params.port;
-        let udp_v4 = UdpSocket::bind((params.addr_v4, port).into())?;
+        let mut udp_v4 = UdpSocket::bind((params.addr_v4, port).into())?;
         if port == 0 {
             // The socket is using a random port, copy it so we can re-use it for IPv6.
             port = UdpSocket::local_addr(&udp_v4)?.port();
         }
 
-        let udp_v6 = UdpSocket::bind((params.addr_v6, port).into())?;
+        let udp_v6 = if params.port == 0 {
+            // When using a random port, the port chosen for IPv4 might already be in use on
+            // IPv6. Retry with a new random port for both sockets.
+            const MAX_RETRIES: u32 = 10;
+            let mut retries = 0;
+            loop {
+                match UdpSocket::bind((params.addr_v6, port).into()) {
+                    Ok(sock) => break sock,
+                    Err(err) if err.kind() == io::ErrorKind::AddrInUse && retries < MAX_RETRIES => {
+                        retries += 1;
+                        log::debug!(
+                            "IPv6 port {port} already in use, retrying ({retries}/{MAX_RETRIES})"
+                        );
+                        // Rebind IPv4 to get a new random port, then retry IPv6
+                        udp_v4 = UdpSocket::bind((params.addr_v4, 0).into())?;
+                        port = UdpSocket::local_addr(&udp_v4)?.port();
+                    }
+                    Err(err) => return Err(err),
+                }
+            }
+        } else {
+            UdpSocket::bind((params.addr_v6, port).into())?
+        };
 
         #[cfg(target_os = "linux")]
         if let Some(mark) = params.fwmark {
