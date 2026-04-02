@@ -31,7 +31,7 @@ either = "1.15.0"
 etherparse = "0.13"
 eyre = "0.6.12"
 futures = "0.3.31"
-gotatun = { path = "./gotatun", version = "0.5.0" }
+gotatun = { path = "./gotatun", version = "0.5.1" }
 hex = "0.4.3"
 hmac = "0.12.1"
 ip_network = "0.4.1"

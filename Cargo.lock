@@ -855,7 +855,7 @@ dependencies = [
 
 [[package]]
 name = "gotatun"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "aead",
  "base64",
@@ -900,7 +900,7 @@ dependencies = [
 
 [[package]]
 name = "gotatun-cli"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "clap 3.2.25",
  "daemonize",
