@@ -151,7 +151,7 @@ fn bind_v6_with_retry(
     let udp_v6 = loop {
         match UdpSocket::bind((addr_v6, port).into()) {
             Ok(sock) => break sock,
-            Err(err) if err.kind() == io::ErrorKind::AddrInUse && retries < BIND_MAX_RETRIES => {
+            Err(err) if is_bind_retry_error(&err) && retries < BIND_MAX_RETRIES => {
                 retries += 1;
                 log::debug!(
                     "IPv6 port {port} already in use, retrying ({retries}/{BIND_MAX_RETRIES})"
@@ -163,6 +163,19 @@ fn bind_v6_with_retry(
         }
     };
     Ok((udp_v4, udp_v6))
+}
+
+fn is_bind_retry_error(err: &io::Error) -> bool {
+    #[cfg(not(target_os = "windows"))]
+    {
+        err.kind() == io::ErrorKind::AddrInUse
+    }
+    // Windows returns PermissionDenied (WSAEACCES) when binding with SO_REUSEADDR to a port
+    // held by a socket without SO_REUSEADDR.
+    #[cfg(target_os = "windows")]
+    {
+        err.kind() == io::ErrorKind::AddrInUse || err.kind() == io::ErrorKind::PermissionDenied
+    }
 }
 
 #[cfg(unix)]
