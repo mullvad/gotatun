@@ -215,6 +215,11 @@ impl UapiServer {
         // granting full access to SYSTEM and Administrators only.
         let sddl: Vec<u16> = "O:SYD:(A;;GA;;;SY)(A;;GA;;;BA)\0".encode_utf16().collect();
         let mut sd = std::ptr::null_mut();
+        // SAFETY: `sddl` is a NUL-terminated UTF-16 string that outlives the call.
+        // `&mut sd` is a valid out-pointer; on success Windows writes a heap-allocated
+        // security descriptor into it which we immediately hand to `SecurityDescriptor`
+        // for RAII cleanup via `LocalFree`. The trailing size out-pointer is null
+        // because we don't need the length back.
         let ret = unsafe {
             ConvertStringSecurityDescriptorToSecurityDescriptorW(
                 sddl.as_ptr(),
@@ -229,7 +234,6 @@ impl UapiServer {
                 std::io::Error::last_os_error()
             );
         }
-        // Safety: sd is freed via SecurityDescriptor Drop
         let sd = SecurityDescriptor(sd);
 
         tokio::spawn(async move {
@@ -730,16 +734,20 @@ async fn on_api_set(
 #[cfg(windows)]
 struct SecurityDescriptor(*mut core::ffi::c_void);
 
+// SAFETY: `SecurityDescriptor` is thread safe.
 #[cfg(windows)]
-// Safety: The security descriptor is only read by the OS during pipe creation
-// and is not mutated after construction.
 unsafe impl Send for SecurityDescriptor {}
+// SAFETY: `SecurityDescriptor` is thread safe.
 #[cfg(windows)]
 unsafe impl Sync for SecurityDescriptor {}
 
 #[cfg(windows)]
 impl Drop for SecurityDescriptor {
     fn drop(&mut self) {
+        // SAFETY: `self.0` was allocated by Windows in
+        // `ConvertStringSecurityDescriptorToSecurityDescriptorW`, which documents that
+        // the caller must release the buffer with `LocalFree`. `SecurityDescriptor` is
+        // the sole owner of the pointer, so this drop runs exactly once per allocation.
         unsafe {
             windows_sys::Win32::Foundation::LocalFree(self.0 as _);
         }
@@ -757,6 +765,10 @@ fn enable_privilege(name: &str) -> eyre::Result<()> {
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
     let mut token = std::ptr::null_mut();
+    // SAFETY: `GetCurrentProcess` returns a pseudo-handle that is always valid and
+    // does not need to be closed. `&mut token` is a valid out-pointer; on success
+    // Windows writes a real process-token handle into it which we close below before
+    // returning from this function.
     let ret = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &mut token) };
     if ret == 0 {
         eyre::bail!(
@@ -770,8 +782,13 @@ fn enable_privilege(name: &str) -> eyre::Result<()> {
         LowPart: 0,
         HighPart: 0,
     };
+    // SAFETY: A null `lpSystemName` means "the local system" per the Win32 docs.
+    // `priv_name` is a NUL-terminated UTF-16 string that outlives the call, and
+    // `&mut luid` is a valid out-pointer to a stack-allocated `LUID`.
     let ret = unsafe { LookupPrivilegeValueW(std::ptr::null(), priv_name.as_ptr(), &mut luid) };
     if ret == 0 {
+        // SAFETY: `token` is a valid handle obtained from `OpenProcessToken` above
+        // and has not yet been closed.
         unsafe { CloseHandle(token) };
         eyre::bail!(
             "LookupPrivilegeValueW failed: {}",
@@ -786,9 +803,15 @@ fn enable_privilege(name: &str) -> eyre::Result<()> {
             Attributes: SE_PRIVILEGE_ENABLED,
         }],
     };
+    // SAFETY: `token` is a valid handle with `TOKEN_ADJUST_PRIVILEGES` access.
+    // `&tp` points to a fully-initialized `TOKEN_PRIVILEGES` whose `PrivilegeCount`
+    // matches its array length (1). We don't request the previous state, so the
+    // `BufferLength`, `PreviousState`, and `ReturnLength` parameters are all zero/null.
     let ret = unsafe {
         AdjustTokenPrivileges(token, 0, &tp, 0, std::ptr::null_mut(), std::ptr::null_mut())
     };
+    // SAFETY: `token` is the still-open handle from `OpenProcessToken` above; this
+    // is the sole close site on the success path.
     unsafe { CloseHandle(token) };
     if ret == 0 {
         eyre::bail!(
@@ -816,7 +839,12 @@ fn create_named_pipe(
         bInheritHandle: 0,
     };
 
-    // Safety: sa is a valid SECURITY_ATTRIBUTES pointing to our security descriptor.
+    // SAFETY: `create_with_security_attributes_raw` requires the pointer to outlive
+    // the call and to point at a valid `SECURITY_ATTRIBUTES`. `sa` lives on the stack
+    // for the entire duration of the call, its `nLength` is set correctly, and
+    // `lpSecurityDescriptor` borrows from `sd`, which the caller keeps alive (the
+    // `&SecurityDescriptor` borrow guarantees this for the lifetime of the function).
+    // The OS only reads the structure; it does not retain the pointer past return.
     unsafe {
         ServerOptions::new()
             .first_pipe_instance(first)
