@@ -10,6 +10,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+use crate::crypto::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use crate::{
     noise::errors::WireGuardError,
     noise::index_table::Index,
@@ -17,7 +18,6 @@ use crate::{
 };
 use bytes::{Buf, BytesMut};
 use parking_lot::Mutex;
-use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use std::sync::atomic::{AtomicU64, Ordering};
 use zerocopy::FromBytes;
 

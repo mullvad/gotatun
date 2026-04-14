@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- Add `ring` and `aws-lc-rs` Cargo features to both `gotatun` and
+  `gotatun-cli`, selecting the AEAD backend at compile time. `aws-lc-rs`
+  is the new default. `aws-lc-rs` wins if both features are enabled, and
+  a deprecation warning fires in that case to flag that `ring` is being
+  compiled and linked unnecessarily.
+
+### Changed
+- The default AEAD backend is now `aws-lc-rs`. Consumers that still want
+  `ring` can opt in by building with `--no-default-features --features ring`.
+- Make the `ring` dependency optional, gated behind the new `ring` feature.
 
 
 ## [0.5.1] - 2026-04-02

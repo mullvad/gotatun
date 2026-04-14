@@ -15,6 +15,7 @@
 // Warn on missing docs when running `cargo doc`
 #![cfg_attr(doc, warn(missing_docs))]
 
+mod crypto;
 #[cfg(feature = "device")]
 pub mod device;
 pub mod noise;

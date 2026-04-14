@@ -33,6 +33,7 @@ harness = false
 
 [dependencies]
 aead = { workspace = true }
+aws-lc-rs = { workspace = true, optional = true }
 base64 = { workspace = true }
 bitfield-struct = { workspace = true }
 blake2 = { workspace = true }
@@ -57,7 +58,7 @@ pcap-file = { workspace = true, optional = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 rand_core = { workspace = true, features = ["getrandom"] }
-ring = { workspace = true }
+ring = { workspace = true, optional = true }
 socket2 = { workspace = true, features = ["all"] }
 thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["sync", "rt", "time", "macros", "net"] }
@@ -96,8 +97,16 @@ nix = { workspace = true, default-features = false, features = [
 ] }
 
 [features]
-default = []
+default = ["aws-lc-rs"]
 daita = ["device", "dep:maybenot"]
+# Use the `ring` crate as the AEAD backend. Combine with
+# `default-features = false` to avoid also pulling in `aws-lc-rs`,
+# which would otherwise be compiled and linked unused.
+ring = ["dep:ring"]
+# Use the `aws-lc-rs` crate as the AEAD backend. Default. At least
+# one of `ring` and `aws-lc-rs` must be enabled; `aws-lc-rs` wins
+# if both are.
+aws-lc-rs = ["dep:aws-lc-rs"]
 # Add non-compliant UAPI support for DAITA.
 # See `UAPI.md` for details.
 daita-uapi = ["daita"]
