@@ -61,7 +61,7 @@ rand_core = { workspace = true, features = ["getrandom"] }
 ring = { workspace = true, optional = true }
 socket2 = { workspace = true, features = ["all"] }
 thiserror = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["sync", "rt", "time", "macros", "net"] }
+tokio = { workspace = true, features = ["sync", "rt", "time", "macros", "net", "io-util"] }
 tun = { workspace = true, default-features = false, features = ["async"], optional = true }
 typed-builder = { workspace = true }
 x25519-dalek = { workspace = true, features = [
@@ -83,7 +83,10 @@ windows-sys = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Networking",
   "Win32_Networking_WinSock",
+  "Win32_Security",
+  "Win32_Security_Authorization",
   "Win32_System_IO",
+  "Win32_System_Threading",
 ] }
 
 [target.'cfg(unix)'.dependencies]

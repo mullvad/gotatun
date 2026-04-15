@@ -86,6 +86,23 @@ impl TunDevice {
         Ok(tun)
     }
 
+    /// Construct from a name with an explicit path to `wintun.dll`.
+    ///
+    /// Use this on Windows when `wintun.dll` is not on `PATH` or in the executable directory.
+    #[cfg(windows)]
+    pub fn from_name_with_wintun_path(
+        name: &str,
+        wintun_path: &std::path::Path,
+    ) -> Result<Self, Error> {
+        let mut tun_config = tun::Configuration::default();
+        tun_config.tun_name(name);
+        tun_config.platform_config(|p| {
+            p.wintun_file(wintun_path.as_os_str());
+        });
+        let tun = tun::create_as_async(&tun_config).map_err(Error::OpenTun)?;
+        TunDevice::from_tun_device(tun)
+    }
+
     /// Construct from a [`tun::AsyncDevice`].
     pub fn from_tun_device(tun: tun::AsyncDevice) -> Result<Self, Error> {
         #[cfg(target_os = "linux")]
