@@ -17,6 +17,7 @@ license = "MPL-2.0"
 
 [workspace.dependencies]
 aead = "0.5.2"
+aws-lc-rs = "1.16.2"
 base64 = "0.22.1"
 bitfield-struct = "0.12.1"
 blake2 = "0.10.6"
@@ -31,7 +32,7 @@ either = "1.15.0"
 etherparse = "0.13"
 eyre = "0.6.12"
 futures = "0.3.31"
-gotatun = { path = "./gotatun", version = "0.5.1" }
+gotatun = { path = "./gotatun", version = "0.5.1", default-features = false }
 hex = "0.4.3"
 hmac = "0.12.1"
 ip_network = "0.4.1"

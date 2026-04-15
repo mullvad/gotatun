@@ -33,3 +33,11 @@ tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+[features]
+default = ["aws-lc-rs"]
+# Use the `ring` crate as the AEAD backend. Combine with
+# `--no-default-features` to avoid also pulling in `aws-lc-rs`.
+ring = ["gotatun/ring"]
+# Use the `aws-lc-rs` crate as the AEAD backend. Default.
+aws-lc-rs = ["gotatun/aws-lc-rs"]

@@ -5,6 +5,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: "--deny warnings"
 
 jobs:
   check-linux:
@@ -15,6 +16,9 @@ jobs:
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
 
       - name: Cache dependencies
         uses: actions/cache@v4
@@ -27,38 +31,11 @@ jobs:
 
       - name: Check all feature combinations
         run: |
-          # Extract features from Cargo.toml
-          readarray -t features < <(cargo metadata --no-deps --format-version=1 | jq -r '.packages[].features | keys[]')
-          echo "Features: ${features[*]}"
-
-          test_feature_combinations() {
-            local arr=("$@")
-            local n=${#arr[@]}
-
-            for ((i=0; i<$((1<<n)); i++)); do
-              combination=()
-              for ((j=0; j<n; j++)); do
-                if ((i & (1<<j))); then
-                  combination+=("${arr[j]}")
-                fi
-              done
-
-              if [ ${#combination[@]} -eq 0 ]; then
-                feature_str=""
-              else
-                feature_str=$(IFS=,; echo "${combination[*]}")
-              fi
-
-              echo "Testing with features: ${feature_str:-"none"}"
-              if [ -z "$feature_str" ]; then
-                cargo check --locked --workspace --no-default-features
-              else
-                cargo check --locked --workspace --no-default-features --features "$feature_str"
-              fi
-            done
-          }
-
-          test_feature_combinations "${features[@]}"
+          cargo hack check --locked --workspace \
+            --feature-powerset \
+            --at-least-one-of ring,aws-lc-rs \
+            --mutually-exclusive-features ring,aws-lc-rs \
+            --exclude-features default
 
   check-android:
     name: Check (Android)
@@ -67,7 +44,7 @@ jobs:
       matrix:
         features:
           - ""
-          - "--no-default-features"
+          - "--no-default-features --features ring"
           - "--all-features"
     steps:
       - uses: actions/checkout@v4
@@ -104,7 +81,7 @@ jobs:
             target
           key: ${{ runner.os }}-x86_64-linux-android-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Check with features ${{ matrix.features }}
+      - name: Check with features "${{ matrix.features }}"
         run: cargo check --locked --workspace --target x86_64-linux-android ${{ matrix.features }}
 
   check-other:
@@ -114,7 +91,7 @@ jobs:
         os: [windows-latest, macos-latest]
         features:
           - ""
-          - "--no-default-features"
+          - "--no-default-features --features ring"
           - "--all-features"
     runs-on: ${{ matrix.os }}
     steps:
@@ -132,7 +109,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Check with features ${{ matrix.features }}
+      - name: Check with features "${{ matrix.features }}"
         run: cargo check --locked --workspace ${{ matrix.features }}
 
   fmt:
@@ -173,7 +150,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run clippy
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features
 
   clippy-android:
     name: Clippy (Android)
@@ -215,7 +192,7 @@ jobs:
           key: ${{ runner.os }}-x86_64-linux-android-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run clippy
-        run: cargo clippy --locked --workspace --target x86_64-linux-android --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --target x86_64-linux-android --all-features
 
   test:
     name: Test
@@ -224,8 +201,8 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         features:
           - ""
+          - "--no-default-features --features ring"
           - "--all-features"
-          - "--no-default-features"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -242,5 +219,5 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Run tests with features ${{ matrix.features }}
+      - name: Run tests with features "${{ matrix.features }}"
         run: cargo test --locked --workspace ${{ matrix.features }}

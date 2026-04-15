@@ -17,6 +17,9 @@ jobs:
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
+
       - name: Cache cargo directories
         id: cache-cargo-restore
         uses: actions/cache@v4
@@ -28,22 +31,10 @@ jobs:
             target
             target/doc
 
-      - name: Check all feature combinations
-        run: |
-          # Extract features from Cargo.toml
-          readarray -t features < <(cargo metadata --no-deps --format-version=1 | jq -r '.packages[].features | keys[]')
-          echo "Features: ${features[*]}"
-
-          echo "Checking docs with all features and all dependencies"
-          cargo doc --locked --release -p gotatun --all-features
-
-          echo "Checking docs with no features (no-deps)"
-          cargo doc --locked --release -p gotatun --no-default-features --no-deps
-
-          for feature in ${features[*]}; do
-            echo "Checking docs with --features=$feature (no-deps)"
-            cargo doc --locked --release -p gotatun --no-default-features --no-deps --features "$feature"
-          done
+      - name: Check documentation for each feature
+        # This includes running with --all-features, and then one time for each individual feature
+        # But always have aws-lc-rs enabled, since gotatun does not build without an AEAD backend.
+        run: cargo hack doc --locked -p gotatun --each-feature --features aws-lc-rs
 
       # Cache cargo directories, even if the job failed.
       - name: Always cache cargo dirs
