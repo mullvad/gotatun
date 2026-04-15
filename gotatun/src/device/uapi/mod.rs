@@ -231,7 +231,7 @@ impl UapiServer {
                 }
                 first = false;
 
-                log::info!("New UAPI connection on named pipe");
+                log::debug!("New UAPI connection on named pipe");
 
                 let client = tx.clone();
                 tokio::spawn(async move {
@@ -704,7 +704,7 @@ async fn on_api_set(
 
 #[cfg(windows)]
 mod windows {
-    use windows_sys::Win32::Foundation::{CloseHandle, LUID};
+    use windows_sys::Win32::Foundation::{CloseHandle, FALSE, LUID};
     use windows_sys::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
     };
@@ -713,6 +713,7 @@ mod windows {
         TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
     };
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    use windows_sys::w;
 
     /// RAII wrapper for a security descriptor allocated by Windows APIs.
     /// Frees the memory via `LocalFree` on drop.
@@ -730,7 +731,7 @@ mod windows {
             // the caller must release the buffer with `LocalFree`. `SecurityDescriptor` is
             // the sole owner of the pointer, so this drop runs exactly once per allocation.
             unsafe {
-                windows_sys::Win32::Foundation::LocalFree(self.0 as _);
+                windows_sys::Win32::Foundation::LocalFree(self.0);
             }
         }
     }
@@ -740,16 +741,15 @@ mod windows {
         /// owned by SYSTEM (`O:SY`) with a DACL granting full access to SYSTEM and
         /// Administrators only.
         pub fn for_wireguard_pipe() -> eyre::Result<Self> {
-            let sddl: Vec<u16> = "O:SYD:(A;;GA;;;SY)(A;;GA;;;BA)\0".encode_utf16().collect();
             let mut sd = std::ptr::null_mut();
-            // SAFETY: `sddl` is a NUL-terminated UTF-16 string that outlives the call.
-            // `&mut sd` is a valid out-pointer; on success Windows writes a heap-allocated
-            // security descriptor into it which we immediately hand to `SecurityDescriptor`
-            // for RAII cleanup via `LocalFree`. The trailing size out-pointer is null
-            // because we don't need the length back.
+            // SAFETY: `w!` yields a `'static` NUL-terminated UTF-16 pointer that outlives
+            // the call. `&mut sd` is a valid out-pointer; on success Windows writes a
+            // heap-allocated security descriptor into it which we immediately hand to
+            // `SecurityDescriptor` for RAII cleanup via `LocalFree`. The trailing size
+            // out-pointer is null because we don't need the length back.
             let ret = unsafe {
                 ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                    sddl.as_ptr(),
+                    w!("O:SYD:(A;;GA;;;SY)(A;;GA;;;BA)"),
                     SDDL_REVISION_1,
                     &mut sd,
                     std::ptr::null_mut(),
@@ -812,7 +812,14 @@ mod windows {
         // matches its array length (1). We don't request the previous state, so the
         // `BufferLength`, `PreviousState`, and `ReturnLength` parameters are all zero/null.
         let ret = unsafe {
-            AdjustTokenPrivileges(token, 0, &tp, 0, std::ptr::null_mut(), std::ptr::null_mut())
+            AdjustTokenPrivileges(
+                token,
+                FALSE,
+                &tp,
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
         };
         // SAFETY: `token` is the still-open handle from `OpenProcessToken` above; this
         // is the sole close site on the success path.
@@ -842,6 +849,8 @@ mod windows {
             bInheritHandle: 0,
         };
 
+        let mut builder = ServerOptions::new();
+        builder.first_pipe_instance(first);
         // SAFETY: `create_with_security_attributes_raw` requires the pointer to outlive
         // the call and to point at a valid `SECURITY_ATTRIBUTES`. `sa` lives on the stack
         // for the entire duration of the call, its `nLength` is set correctly, and
@@ -849,9 +858,7 @@ mod windows {
         // `&SecurityDescriptor` borrow guarantees this for the lifetime of the function).
         // The OS only reads the structure; it does not retain the pointer past return.
         unsafe {
-            ServerOptions::new()
-                .first_pipe_instance(first)
-                .create_with_security_attributes_raw(pipe_path, &mut sa as *mut _ as *mut _)
+            builder.create_with_security_attributes_raw(pipe_path, &mut sa as *mut _ as *mut _)
         }
     }
 }

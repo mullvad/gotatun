@@ -14,6 +14,7 @@ use eyre::{Context, Result};
 use gotatun::device::uapi::UapiServer;
 use gotatun::device::{DefaultDeviceTransports, Device, DeviceBuilder};
 use gotatun::tun::tun_async_device::TunDevice;
+use std::fs::File;
 use std::path::PathBuf;
 use std::process::exit;
 use tracing::{Level, info};
@@ -69,7 +70,6 @@ fn run() -> Result<()> {
 fn setup_logging(args: &Args) -> Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
     match &args.log {
         Some(log_file) => {
-            use std::fs::File;
             let file = File::create(log_file)
                 .with_context(|| format!("Could not create log file {}", log_file.display()))?;
             let (non_blocking, guard) = tracing_appender::non_blocking(file);
