@@ -5,6 +5,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: "--deny warnings"
 
 jobs:
   check-linux:
@@ -173,7 +174,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run clippy
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features
 
   clippy-android:
     name: Clippy (Android)
@@ -215,7 +216,7 @@ jobs:
           key: ${{ runner.os }}-x86_64-linux-android-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run clippy
-        run: cargo clippy --locked --workspace --target x86_64-linux-android --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --target x86_64-linux-android --all-features
 
   test:
     name: Test
