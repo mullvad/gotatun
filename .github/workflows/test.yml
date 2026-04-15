@@ -225,7 +225,6 @@ jobs:
         features:
           - ""
           - "--all-features"
-          - "--no-default-features"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
