@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is the new default. `aws-lc-rs` wins if both features are enabled, and
   then `ring` is built and linked for nothing.
 
+#### Windows
+- Add support for GotaTun CLI on Windows
+
 ### Changed
 - The default AEAD backend is now `aws-lc-rs`. Consumers that still want
   `ring` can opt in by building with `--no-default-features --features ring`.

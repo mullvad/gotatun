@@ -34,6 +34,15 @@ tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+clap = { workspace = true, features = ["derive", "env"] }
+eyre = { workspace = true }
+gotatun = { workspace = true, features = ["device", "tun"] }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true }
+
 [features]
 default = ["aws-lc-rs"]
 # Use the `ring` crate as the AEAD backend. Combine with

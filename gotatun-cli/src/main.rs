@@ -16,13 +16,21 @@
 #[cfg(unix)]
 mod unix;
 
+// Windows implementation
+#[cfg(windows)]
+mod windows;
+
 #[cfg(unix)]
 fn main() {
     unix::main();
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn main() {
-    // Empty main function for Windows
-    unimplemented!("GotaTun CLI is not supported on Windows");
+    windows::main();
+}
+
+#[cfg(not(any(unix, windows)))]
+fn main() {
+    unimplemented!("GotaTun CLI is not supported on this platform");
 }

@@ -127,54 +127,7 @@ impl UapiClient {
         RW: Send + Sync + 'static,
     {
         std::thread::spawn(move || {
-            let r = BufReader::new(&rw);
-
-            let make_request = |s: &str| {
-                let request = Request::from_str(s).wrap_err("Failed to parse command")?;
-
-                let Some(response) = self.send_sync(request).ok() else {
-                    bail!("Server hung up");
-                };
-
-                if let Err(e) = writeln!(&rw, "{response}") {
-                    log::error!("Failed to write API response: {e}");
-                }
-
-                Ok(())
-            };
-
-            let mut lines = String::new();
-
-            for line in r.lines() {
-                let Ok(line) = line else {
-                    if !lines.is_empty()
-                        && let Err(e) = make_request(&lines)
-                    {
-                        log::error!("Failed to handle UAPI request: {e:#}");
-                        return;
-                    }
-                    return;
-                };
-
-                // Final line of a command is empty, so if this one is not, we add it to the
-                // `lines` buffer and wait for more.
-                if !line.is_empty() {
-                    lines.push_str(&line);
-                    lines.push('\n');
-                    continue;
-                }
-
-                if lines.is_empty() {
-                    continue;
-                }
-
-                if let Err(e) = make_request(&lines) {
-                    log::error!("Failed to handle UAPI request: {e:#}");
-                    return;
-                }
-
-                lines.clear();
-            }
+            run_uapi_protocol_sync(self, &rw, &rw);
         });
     }
 }
@@ -199,7 +152,7 @@ impl UapiServer {
         uid: Option<Uid>,
         gid: Option<Gid>,
     ) -> eyre::Result<Self> {
-        use std::os::unix::net::UnixListener;
+        use tokio::net::UnixListener;
 
         let path = format!("{SOCK_DIR}/{name}.sock");
 
@@ -219,21 +172,76 @@ impl UapiServer {
 
         let (tx, rx) = UapiServer::new();
 
-        std::thread::spawn(move || {
+        tokio::spawn(async move {
             loop {
-                let Ok((stream, _)) = api_listener.accept() else {
+                let Ok((stream, _)) = api_listener.accept().await else {
                     break;
                 };
 
                 log::info!("New UAPI connection on unix socket");
 
-                tx.clone().wrap_read_write(stream);
+                let client = tx.clone();
+                tokio::spawn(async move {
+                    let (r, w) = stream.into_split();
+                    run_uapi_protocol(client, r, w).await;
+                });
             }
         });
 
         Ok(rx)
+    }
 
-        //self.cleanup_paths.push(path.clone());
+    /// Spawn a named pipe server at `\\.\pipe\ProtectedPrefix\Administrators\WireGuard\<name>`. This pipe speaks the official
+    /// [configuration protocol](https://www.wireguard.com/xplatform/#configuration-protocol).
+    ///
+    /// This is the Windows equivalent of [`UapiServer::default_unix_socket`].
+    ///
+    /// Must be called from within a tokio runtime context.
+    #[cfg(windows)]
+    pub fn default_named_pipe(name: &str) -> eyre::Result<Self> {
+        let pipe_path = format!(r"\\.\pipe\ProtectedPrefix\Administrators\WireGuard\{name}");
+        let (tx, rx) = UapiServer::new();
+
+        // Enable SeRestorePrivilege so we can set the pipe owner to SYSTEM
+        // even when running as a regular (elevated) administrator.
+        // wireguard-tools' wg.exe verifies the pipe owner is SYSTEM before connecting.
+        windows::enable_privilege("SeRestorePrivilege")?;
+
+        let sd = windows::SecurityDescriptor::for_wireguard_pipe()?;
+
+        tokio::spawn(async move {
+            // Windows named pipes require a new server instance per accepted client.
+            // The first instance must set first_pipe_instance(true) to ensure exclusive creation.
+            let mut first = true;
+            loop {
+                let server = windows::create_named_pipe(&pipe_path, &sd, first);
+                let server = match server {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::error!("Failed to create named pipe: {e}");
+                        break;
+                    }
+                };
+                match server.connect().await {
+                    Ok(()) => {}
+                    Err(e) => {
+                        log::error!("Failed to accept named pipe connection: {e}");
+                        break;
+                    }
+                }
+                first = false;
+
+                log::debug!("New UAPI connection on named pipe");
+
+                let client = tx.clone();
+                tokio::spawn(async move {
+                    let (r, w) = tokio::io::split(server);
+                    run_uapi_protocol(client, r, w).await;
+                });
+            }
+        });
+
+        Ok(rx)
     }
 
     /// Create an [`UapiServer`] from a reader+writer that speaks the official
@@ -258,6 +266,125 @@ impl UapiServer {
 
         Some((request, response_tx))
     }
+}
+
+/// Drives a single UAPI connection to completion.
+///
+/// Reads WireGuard text-protocol commands from `r`, dispatches them through `client`, and writes
+/// responses to `w`. Used by both the Unix (via [`UapiClient::wrap_read_write`]) and Windows (via
+/// [`UapiServer::default_named_pipe`]) code paths.
+async fn run_uapi_protocol(
+    client: UapiClient,
+    r: impl tokio::io::AsyncRead + Unpin,
+    mut w: impl tokio::io::AsyncWrite + Unpin,
+) {
+    use tokio::io::AsyncBufReadExt;
+
+    let mut reader = tokio::io::BufReader::new(r).lines();
+    let mut buf = String::new();
+
+    loop {
+        let line = match reader.next_line().await {
+            Ok(Some(line)) => line,
+            Ok(None) | Err(_) => {
+                if !buf.is_empty() {
+                    if let Err(e) = dispatch_request(&client, &mut w, &buf).await {
+                        log::error!("Failed to handle UAPI request: {e:#}");
+                    }
+                }
+                return;
+            }
+        };
+
+        // Final line of a command is empty, so if this one is not, we add it to the
+        // `buf` buffer and wait for more.
+        if !line.is_empty() {
+            buf.push_str(&line);
+            buf.push('\n');
+            continue;
+        }
+
+        if buf.is_empty() {
+            continue;
+        }
+
+        if let Err(e) = dispatch_request(&client, &mut w, &buf).await {
+            log::error!("Failed to handle UAPI request: {e:#}");
+            return;
+        }
+
+        buf.clear();
+    }
+}
+
+async fn dispatch_request(
+    client: &UapiClient,
+    w: &mut (impl tokio::io::AsyncWrite + Unpin),
+    s: &str,
+) -> eyre::Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    let request = Request::from_str(s).wrap_err("Failed to parse command")?;
+
+    let Some(response) = client.send(request).await.ok() else {
+        bail!("Server hung up");
+    };
+
+    let response_str = format!("{response}\n");
+    if let Err(e) = w.write_all(response_str.as_bytes()).await {
+        log::error!("Failed to write API response: {e}");
+    }
+
+    Ok(())
+}
+
+/// Synchronous counterpart of [`run_uapi_protocol`] for use with blocking [`Read`]+[`Write`]
+/// streams (see [`UapiClient::wrap_read_write`]).
+fn run_uapi_protocol_sync(client: UapiClient, r: impl Read, mut w: impl Write) {
+    let r = BufReader::new(r);
+    let mut buf = String::new();
+
+    for line in r.lines() {
+        let Ok(line) = line else {
+            if !buf.is_empty() {
+                if let Err(e) = dispatch_request_sync(&client, &mut w, &buf) {
+                    log::error!("Failed to handle UAPI request: {e:#}");
+                }
+            }
+            return;
+        };
+
+        if !line.is_empty() {
+            buf.push_str(&line);
+            buf.push('\n');
+            continue;
+        }
+
+        if buf.is_empty() {
+            continue;
+        }
+
+        if let Err(e) = dispatch_request_sync(&client, &mut w, &buf) {
+            log::error!("Failed to handle UAPI request: {e:#}");
+            return;
+        }
+
+        buf.clear();
+    }
+}
+
+fn dispatch_request_sync(client: &UapiClient, w: &mut impl Write, s: &str) -> eyre::Result<()> {
+    let request = Request::from_str(s).wrap_err("Failed to parse command")?;
+
+    let Some(response) = client.send_sync(request).ok() else {
+        bail!("Server hung up");
+    };
+
+    if let Err(e) = writeln!(w, "{response}") {
+        log::error!("Failed to write API response: {e}");
+    }
+
+    Ok(())
 }
 
 impl Debug for UapiServer {
@@ -573,4 +700,162 @@ async fn on_api_set(
     }
 
     (SetResponse { errno: 0 }, reconfigure)
+}
+
+#[cfg(windows)]
+mod windows {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::Foundation::{FALSE, LUID};
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows_sys::Win32::Security::{
+        AdjustTokenPrivileges, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED,
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    use windows_sys::w;
+
+    /// RAII wrapper for a security descriptor allocated by Windows APIs.
+    /// Frees the memory via `LocalFree` on drop.
+    pub struct SecurityDescriptor(*mut core::ffi::c_void);
+
+    // SAFETY: `SecurityDescriptor` is thread safe.
+    unsafe impl Send for SecurityDescriptor {}
+    // SAFETY: `SecurityDescriptor` is thread safe.
+    unsafe impl Sync for SecurityDescriptor {}
+
+    impl Drop for SecurityDescriptor {
+        fn drop(&mut self) {
+            // SAFETY: `self.0` was allocated by Windows in
+            // `ConvertStringSecurityDescriptorToSecurityDescriptorW`, which documents that
+            // the caller must release the buffer with `LocalFree`. `SecurityDescriptor` is
+            // the sole owner of the pointer, so this drop runs exactly once per allocation.
+            unsafe {
+                windows_sys::Win32::Foundation::LocalFree(self.0);
+            }
+        }
+    }
+
+    impl SecurityDescriptor {
+        /// Build the security descriptor used for the WireGuard UAPI named pipe:
+        /// owned by SYSTEM (`O:SY`) with a DACL granting full access to SYSTEM and
+        /// Administrators only.
+        pub fn for_wireguard_pipe() -> eyre::Result<Self> {
+            let mut sd = std::ptr::null_mut();
+            // SAFETY: `w!` yields a `'static` NUL-terminated UTF-16 pointer that outlives
+            // the call. `&mut sd` is a valid out-pointer; on success Windows writes a
+            // heap-allocated security descriptor into it which we immediately hand to
+            // `SecurityDescriptor` for RAII cleanup via `LocalFree`. The trailing size
+            // out-pointer is null because we don't need the length back.
+            let ret = unsafe {
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    w!("O:SYD:(A;;GA;;;SY)(A;;GA;;;BA)"),
+                    SDDL_REVISION_1,
+                    &mut sd,
+                    std::ptr::null_mut(),
+                )
+            };
+            if ret == 0 {
+                eyre::bail!(
+                    "ConvertStringSecurityDescriptorToSecurityDescriptorW failed: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+            Ok(SecurityDescriptor(sd))
+        }
+    }
+
+    /// Enable a Windows privilege (e.g. `SeRestorePrivilege`) on the current process token.
+    pub fn enable_privilege(name: &str) -> eyre::Result<()> {
+        let mut raw_token = std::ptr::null_mut();
+        // SAFETY: `GetCurrentProcess` returns a pseudo-handle that is always valid and
+        // does not need to be closed. `&mut raw_token` is a valid out-pointer; on success
+        // Windows writes a real process-token handle into it.
+        let ret = unsafe {
+            OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &mut raw_token)
+        };
+        if ret == 0 {
+            eyre::bail!(
+                "OpenProcessToken failed: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+        // SAFETY: `raw_token` is an owned process-token handle that may be freed via [`CloseHandle`](https://docs.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-closehandle).
+        let token = unsafe { OwnedHandle::from_raw_handle(raw_token) };
+
+        let priv_name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+        let mut luid = LUID {
+            LowPart: 0,
+            HighPart: 0,
+        };
+        // SAFETY: A null `lpSystemName` means "the local system" per the Win32 docs.
+        // `priv_name` is a NUL-terminated UTF-16 string that outlives the call, and
+        // `&mut luid` is a valid out-pointer to a stack-allocated `LUID`.
+        let ret = unsafe { LookupPrivilegeValueW(std::ptr::null(), priv_name.as_ptr(), &mut luid) };
+        if ret == 0 {
+            eyre::bail!(
+                "LookupPrivilegeValueW failed: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+
+        let tp = TOKEN_PRIVILEGES {
+            PrivilegeCount: 1,
+            Privileges: [windows_sys::Win32::Security::LUID_AND_ATTRIBUTES {
+                Luid: luid,
+                Attributes: SE_PRIVILEGE_ENABLED,
+            }],
+        };
+        // SAFETY: `token` is a valid handle with `TOKEN_ADJUST_PRIVILEGES` access. `&tp`
+        // points to a fully-initialized `TOKEN_PRIVILEGES` whose `PrivilegeCount` matches its
+        // its array length (1). We don't request the previous state, so the `BufferLength`,
+        // `PreviousState`, and `ReturnLength` parameters are all zero/null.
+        let ret = unsafe {
+            AdjustTokenPrivileges(
+                token.as_raw_handle(),
+                FALSE,
+                &tp,
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        if ret == 0 {
+            eyre::bail!(
+                "AdjustTokenPrivileges failed: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Create a named pipe with the given security descriptor using tokio's `ServerOptions`.
+    pub fn create_named_pipe(
+        pipe_path: &str,
+        sd: &SecurityDescriptor,
+        first: bool,
+    ) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
+        use tokio::net::windows::named_pipe::ServerOptions;
+        use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
+
+        let mut sa = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: sd.0,
+            bInheritHandle: 0,
+        };
+
+        let mut builder = ServerOptions::new();
+        builder.first_pipe_instance(first);
+        // SAFETY: `create_with_security_attributes_raw` requires the pointer to outlive
+        // the call and to point at a valid `SECURITY_ATTRIBUTES`. `sa` lives on the stack
+        // for the entire duration of the call, its `nLength` is set correctly, and
+        // `lpSecurityDescriptor` borrows from `sd`, which the caller keeps alive (the
+        // `&SecurityDescriptor` borrow guarantees this for the lifetime of the function).
+        // The OS only reads the structure; it does not retain the pointer past return.
+        unsafe {
+            builder.create_with_security_attributes_raw(pipe_path, &mut sa as *mut _ as *mut _)
+        }
+    }
 }
