@@ -704,7 +704,8 @@ async fn on_api_set(
 
 #[cfg(windows)]
 mod windows {
-    use windows_sys::Win32::Foundation::{CloseHandle, FALSE, LUID};
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::Foundation::{FALSE, LUID};
     use windows_sys::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
     };
@@ -767,19 +768,21 @@ mod windows {
 
     /// Enable a Windows privilege (e.g. `SeRestorePrivilege`) on the current process token.
     pub fn enable_privilege(name: &str) -> eyre::Result<()> {
-        let mut token = std::ptr::null_mut();
+        let mut raw_token = std::ptr::null_mut();
         // SAFETY: `GetCurrentProcess` returns a pseudo-handle that is always valid and
-        // does not need to be closed. `&mut token` is a valid out-pointer; on success
-        // Windows writes a real process-token handle into it which we close below before
-        // returning from this function.
-        let ret =
-            unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &mut token) };
+        // does not need to be closed. `&mut raw_token` is a valid out-pointer; on success
+        // Windows writes a real process-token handle into it.
+        let ret = unsafe {
+            OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &mut raw_token)
+        };
         if ret == 0 {
             eyre::bail!(
                 "OpenProcessToken failed: {}",
                 std::io::Error::last_os_error()
             );
         }
+        // SAFETY: `raw_token` is an owned process-token handle.
+        let token = unsafe { OwnedHandle::from_raw_handle(raw_token) };
 
         let priv_name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
         let mut luid = LUID {
@@ -791,9 +794,6 @@ mod windows {
         // `&mut luid` is a valid out-pointer to a stack-allocated `LUID`.
         let ret = unsafe { LookupPrivilegeValueW(std::ptr::null(), priv_name.as_ptr(), &mut luid) };
         if ret == 0 {
-            // SAFETY: `token` is a valid handle obtained from `OpenProcessToken` above
-            // and has not yet been closed.
-            unsafe { CloseHandle(token) };
             eyre::bail!(
                 "LookupPrivilegeValueW failed: {}",
                 std::io::Error::last_os_error()
@@ -807,13 +807,13 @@ mod windows {
                 Attributes: SE_PRIVILEGE_ENABLED,
             }],
         };
-        // SAFETY: `token` is a valid handle with `TOKEN_ADJUST_PRIVILEGES` access.
-        // `&tp` points to a fully-initialized `TOKEN_PRIVILEGES` whose `PrivilegeCount`
-        // matches its array length (1). We don't request the previous state, so the
-        // `BufferLength`, `PreviousState`, and `ReturnLength` parameters are all zero/null.
+        // SAFETY: `token` is a valid handle with `TOKEN_ADJUST_PRIVILEGES` access. `&tp`
+        // points to a fully-initialized `TOKEN_PRIVILEGES` whose `PrivilegeCount` matches its
+        // its array length (1). We don't request the previous state, so the `BufferLength`,
+        // `PreviousState`, and `ReturnLength` parameters are all zero/null.
         let ret = unsafe {
             AdjustTokenPrivileges(
-                token,
+                token.as_raw_handle(),
                 FALSE,
                 &tp,
                 0,
@@ -821,9 +821,6 @@ mod windows {
                 std::ptr::null_mut(),
             )
         };
-        // SAFETY: `token` is the still-open handle from `OpenProcessToken` above; this
-        // is the sole close site on the success path.
-        unsafe { CloseHandle(token) };
         if ret == 0 {
             eyre::bail!(
                 "AdjustTokenPrivileges failed: {}",
