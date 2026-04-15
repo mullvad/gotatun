@@ -781,7 +781,7 @@ mod windows {
                 std::io::Error::last_os_error()
             );
         }
-        // SAFETY: `raw_token` is an owned process-token handle.
+        // SAFETY: `raw_token` is an owned process-token handle that may be freed via [`CloseHandle`](https://docs.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-closehandle).
         let token = unsafe { OwnedHandle::from_raw_handle(raw_token) };
 
         let priv_name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
