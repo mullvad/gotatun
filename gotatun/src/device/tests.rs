@@ -14,10 +14,14 @@ use std::{future::ready, time::Duration};
 use futures::{StreamExt, future::pending};
 use mock::MockEavesdropper;
 use rand::{SeedableRng, rngs::StdRng};
-use tokio::{join, select, time::sleep};
+use tokio::{
+    join, select,
+    time::{sleep, timeout},
+};
 use zerocopy::IntoBytes;
 
 use crate::noise::index_table::IndexTable;
+use crate::packet::{Ip, Packet};
 
 pub mod mock;
 
@@ -179,9 +183,99 @@ async fn test_endpoint_roaming() {
     ping_pong("1.2.3.4".parse().unwrap()).await;
 }
 
+#[derive(Clone, Copy)]
+enum PeerUpdateApi {
+    Modify,
+    Update,
+}
+
+#[tokio::test]
+#[test_log::test]
+async fn modify_peer_updates_live_preshared_key() {
+    assert_peer_psk_update_changes_live_handshake(PeerUpdateApi::Modify).await;
+}
+
+#[tokio::test]
+#[test_log::test]
+async fn update_peer_updates_live_preshared_key() {
+    assert_peer_psk_update_changes_live_handshake(PeerUpdateApi::Update).await;
+}
+
 /// The number of packets we send through the tunnel
 fn packet_count() -> usize {
     mock::packets_of_every_size().len()
+}
+
+async fn assert_peer_psk_update_changes_live_handshake(api: PeerUpdateApi) {
+    let (mut alice, mut bob, _eve) = mock::device_pair().await;
+    let packet = mock::packet(b"Hello!");
+    let preshared_key = [0xA5; 32];
+
+    apply_peer_psk_update(&mut alice, api, Some(preshared_key)).await;
+    send_and_expect_blocked(&alice, &mut bob, &packet).await;
+
+    apply_peer_psk_update(&mut bob, api, Some(preshared_key)).await;
+    // Reset Alice's failed in-flight handshake so the next packet starts a fresh exchange.
+    apply_peer_psk_update(&mut alice, api, Some([0x5A; 32])).await;
+    apply_peer_psk_update(&mut alice, api, Some(preshared_key)).await;
+
+    send_and_expect_delivery(&alice, &mut bob, &packet).await;
+}
+
+async fn apply_peer_psk_update(
+    device: &mut mock::MockDevice,
+    api: PeerUpdateApi,
+    preshared_key: Option<[u8; 32]>,
+) {
+    let mut peers = device.device.peers().await;
+    assert_eq!(peers.len(), 1, "expected exactly one peer");
+
+    let mut peer = peers.pop().expect("missing peer").peer;
+    let updated = match api {
+        PeerUpdateApi::Modify => device
+            .device
+            .modify_peer(&peer.public_key, |peer_mut| {
+                peer_mut.set_preshared_key(preshared_key);
+            })
+            .await
+            .expect("modify_peer should succeed"),
+        PeerUpdateApi::Update => {
+            peer.preshared_key = preshared_key;
+            device
+                .device
+                .update_peer(peer)
+                .await
+                .expect("update_peer should succeed")
+        }
+    };
+
+    assert!(updated, "peer update should affect an existing peer");
+}
+
+async fn send_and_expect_blocked(
+    sender: &mock::MockDevice,
+    receiver: &mut mock::MockDevice,
+    packet: &Packet<Ip>,
+) {
+    sender.app_tx.send(packet.clone()).await;
+    assert!(
+        timeout(Duration::from_millis(500), receiver.app_rx.recv())
+            .await
+            .is_err(),
+        "packet should not be delivered while peers disagree on the live PSK"
+    );
+}
+
+async fn send_and_expect_delivery(
+    sender: &mock::MockDevice,
+    receiver: &mut mock::MockDevice,
+    packet: &Packet<Ip>,
+) {
+    sender.app_tx.send(packet.clone()).await;
+    let received = timeout(Duration::from_secs(1), receiver.app_rx.recv())
+        .await
+        .expect("expected packet delivery once both live PSKs match");
+    assert_eq!(received.as_bytes(), packet.as_bytes());
 }
 
 /// Helper method to test that packets can be sent from one [`Device`] to another.
