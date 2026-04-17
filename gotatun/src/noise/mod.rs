@@ -927,8 +927,10 @@ mod tests {
     fn per_ip_rate_limiting_isolation() {
         let (mut my_tun, their_tun) = create_two_tuns();
 
-        let attacker_ip = Ipv4Addr::new(10, 0, 0, 1);
-        let legit_ip = Ipv4Addr::new(10, 0, 0, 2);
+        // Same port on both endpoints so the IP is the only varying factor.
+        const PORT: u16 = 51820;
+        let attacker = SocketAddr::new(Ipv4Addr::new(10, 0, 0, 1).into(), PORT);
+        let legit = SocketAddr::new(Ipv4Addr::new(10, 0, 0, 2).into(), PORT);
 
         // Exhaust the rate limit for the attacker IP
         for _ in 0..HANDSHAKE_RATE_LIMIT {
@@ -937,7 +939,7 @@ mod tests {
                 .expect("expected handshake init");
             their_tun
                 .rate_limiter
-                .verify_handshake(attacker_ip.into(), init)
+                .verify_handshake(attacker, init)
                 .expect("should be under limit");
             MockClock::advance(Duration::from_micros(1));
         }
@@ -948,9 +950,7 @@ mod tests {
             .expect("expected handshake init");
         assert!(
             matches!(
-                their_tun
-                    .rate_limiter
-                    .verify_handshake(attacker_ip.into(), init),
+                their_tun.rate_limiter.verify_handshake(attacker, init),
                 Err(TunnResult::WriteToNetwork(WgKind::CookieReply(_)))
             ),
             "attacker IP should be rate limited"
@@ -962,7 +962,7 @@ mod tests {
             .expect("expected handshake init");
         their_tun
             .rate_limiter
-            .verify_handshake(legit_ip.into(), init)
+            .verify_handshake(legit, init)
             .expect("legitimate IP should not be rate limited");
     }
 
