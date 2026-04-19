@@ -219,9 +219,18 @@ impl<R: RngCore + Send> Tunn<R> {
     pub fn handle_incoming_packet(&mut self, packet: WgKind) -> TunnResult {
         match packet {
             WgKind::Data(p) => self.handle_data(p),
-            WgKind::HandshakeInit(p) => self.handle_handshake_init(p),
-            WgKind::HandshakeResp(p) => self.handle_handshake_response(p),
-            WgKind::CookieReply(p) => self.handle_cookie_reply(&p),
+            WgKind::HandshakeInit(p) => {
+                cold_path();
+                self.handle_handshake_init(p)
+            }
+            WgKind::HandshakeResp(p) => {
+                cold_path();
+                self.handle_handshake_response(p)
+            }
+            WgKind::CookieReply(p) => {
+                cold_path();
+                self.handle_cookie_reply(&p)
+            }
         }
         .unwrap_or_else(TunnResult::from)
     }
