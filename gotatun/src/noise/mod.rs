@@ -198,18 +198,22 @@ impl<R: RngCore + Send> Tunn<R> {
     /// Returns `Err(original_packet)` if there is no active session.
     pub fn encapsulate_with_session(&mut self, packet: Packet) -> Result<Packet<WgData>, Packet> {
         let current = self.current;
-        if let Some(ref session) = self.sessions[current % N_SESSIONS] {
-            // Send the packet using an established session
-            let packet = session.format_packet_data(packet);
-            self.timer_tick(TimerName::TimeLastPacketSent);
-            // Exclude Keepalive packets from timer update.
-            if !packet.is_keepalive() {
-                self.timer_tick(TimerName::TimeLastDataPacketSent);
+        match self.sessions[current % N_SESSIONS] {
+            Some(ref session) => {
+                // Send the packet using an established session
+                let packet = session.format_packet_data(packet);
+                self.timer_tick(TimerName::TimeLastPacketSent);
+                // Exclude Keepalive packets from timer update.
+                if !packet.is_keepalive() {
+                    self.timer_tick(TimerName::TimeLastDataPacketSent);
+                }
+                self.tx_bytes += packet.as_bytes().len();
+                Ok(packet)
             }
-            self.tx_bytes += packet.as_bytes().len();
-            Ok(packet)
-        } else {
-            Err(packet)
+            None => {
+                cold_path();
+                Err(packet)
+            }
         }
     }
 
