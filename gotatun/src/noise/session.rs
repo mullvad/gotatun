@@ -57,7 +57,7 @@ struct ReceivingKeyCounterValidator {
 
 impl ReceivingKeyCounterValidator {
     #[inline(always)]
-    fn set_bit(&mut self, idx: u64) {
+    const fn set_bit(&mut self, idx: u64) {
         let bit_idx = idx % N_BITS;
         let word = (bit_idx / WORD_SIZE) as usize;
         let bit = (bit_idx % WORD_SIZE) as usize;
@@ -65,7 +65,7 @@ impl ReceivingKeyCounterValidator {
     }
 
     #[inline(always)]
-    fn clear_bit(&mut self, idx: u64) {
+    const fn clear_bit(&mut self, idx: u64) {
         let bit_idx = idx % N_BITS;
         let word = (bit_idx / WORD_SIZE) as usize;
         let bit = (bit_idx % WORD_SIZE) as usize;
@@ -74,7 +74,7 @@ impl ReceivingKeyCounterValidator {
 
     /// Clear the word that contains idx
     #[inline(always)]
-    fn clear_word(&mut self, idx: u64) {
+    const fn clear_word(&mut self, idx: u64) {
         let bit_idx = idx % N_BITS;
         let word = (bit_idx / WORD_SIZE) as usize;
         self.bitmap[word] = 0;
@@ -82,7 +82,7 @@ impl ReceivingKeyCounterValidator {
 
     /// Returns true if bit is set, false otherwise
     #[inline(always)]
-    fn check_bit(&self, idx: u64) -> bool {
+    const fn check_bit(&self, idx: u64) -> bool {
         let bit_idx = idx % N_BITS;
         let word = (bit_idx / WORD_SIZE) as usize;
         let bit = (bit_idx % WORD_SIZE) as usize;
@@ -91,7 +91,7 @@ impl ReceivingKeyCounterValidator {
 
     /// Returns true if the counter was not yet received, and is not too far back
     #[inline(always)]
-    fn will_accept(&self, counter: u64) -> Result<(), WireGuardError> {
+    const fn will_accept(&self, counter: u64) -> Result<(), WireGuardError> {
         if counter >= self.next {
             // As long as the counter is growing no replay took place for sure
             return Ok(());
