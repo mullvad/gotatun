@@ -597,7 +597,6 @@ impl<T: DeviceTransports> DeviceState<T> {
                     // Update the peer endpoint if we received any authenticated packet
                     peer.set_endpoint(addr);
                 }
-                TunnResult::Err(_) => continue,
                 // Flush pending queue
                 TunnResult::WriteToNetwork(packet) => {
                     // Register sender_idx from outgoing handshake packets
@@ -665,6 +664,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                         break;
                     }
                 }
+                TunnResult::Err(_) => continue,
             }
         }
 
