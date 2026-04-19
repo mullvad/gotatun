@@ -509,6 +509,7 @@ impl Packet {
 
         let len = wg.as_bytes().len();
         match (wg.packet_type, len) {
+            (WgPacketType::Data, WgData::OVERHEAD..) => Ok(WgKind::Data(self.cast())),
             (WgPacketType::HandshakeInit, WgHandshakeInit::LEN) => {
                 Ok(WgKind::HandshakeInit(self.cast()))
             }
@@ -516,7 +517,6 @@ impl Packet {
                 Ok(WgKind::HandshakeResp(self.cast()))
             }
             (WgPacketType::CookieReply, WgCookieReply::LEN) => Ok(WgKind::CookieReply(self.cast())),
-            (WgPacketType::Data, WgData::OVERHEAD..) => Ok(WgKind::Data(self.cast())),
             _ => bail!("Not a wireguard packet, bad type/size."),
         }
     }
