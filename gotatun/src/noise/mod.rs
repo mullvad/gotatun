@@ -36,6 +36,7 @@ use crate::packet::{Packet, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeR
 use crate::tun::MtuWatcher;
 use crate::x25519;
 
+use core::hint::cold_path;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
@@ -183,6 +184,7 @@ impl<R: RngCore + Send> Tunn<R> {
         match self.encapsulate_with_session(packet) {
             Ok(encapsulated_packet) => Some(encapsulated_packet.into()),
             Err(packet) => {
+                cold_path();
                 // If there is no session, queue the packet for future retry
                 self.queue_packet(packet);
                 // Initiate a new handshake if none is in progress

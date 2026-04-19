@@ -17,8 +17,9 @@ use crate::{
     packet::{Packet, WgData, WgDataHeader, WgKind},
 };
 use bytes::{Buf, BytesMut};
+use core::hint::cold_path;
+use core::sync::atomic::{AtomicU64, Ordering};
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
 use zerocopy::FromBytes;
 
 pub struct Session {
@@ -237,6 +238,7 @@ impl Session {
         // this won't panic since we've correctly initialized a WgData packet
         let packet = buf.try_into_wg().expect("is a wireguard packet");
         let WgKind::Data(packet) = packet else {
+            cold_path();
             unreachable!("is a wireguard data packet");
         };
 
@@ -249,6 +251,7 @@ impl Session {
         mut packet: Packet<WgData>,
     ) -> Result<Packet, WireGuardError> {
         if packet.header.receiver_idx.get() != self.receiving_index.value() {
+            cold_path();
             return Err(WireGuardError::WrongIndex);
         }
 
