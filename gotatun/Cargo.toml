@@ -59,9 +59,9 @@ rand = { workspace = true }
 rand_chacha = { workspace = true }
 rand_core = { workspace = true, features = ["getrandom"] }
 ring = { workspace = true, optional = true }
-socket2 = { workspace = true, features = ["all"] }
+socket2 = { workspace = true, features = ["all"], optional = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["sync", "rt", "time", "macros", "net", "io-util"] }
+tokio = { workspace = true, features = ["sync", "rt", "time", "macros", "io-util"] }
 tokio-util = { version = "0.7.18", default-features = false }
 tracing = { workspace = true }
 tun = { workspace = true, default-features = false, features = ["async"], optional = true }
@@ -115,7 +115,8 @@ aws-lc-rs = ["dep:aws-lc-rs"]
 # Add non-compliant UAPI support for DAITA.
 # See `UAPI.md` for details.
 daita-uapi = ["daita"]
-device = []
+device = ["tokio/net", "socket"]
+socket = ["dep:socket2", "tokio/net"]
 pcap = ["dep:pcap-file"]
 tun = ["dep:tun"]
 # UDP GRO appears to be broken on Windows.
