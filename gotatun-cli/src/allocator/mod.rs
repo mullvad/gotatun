@@ -8,7 +8,6 @@
 //   Copyright (c) Mullvad VPN AB. All rights reserved.
 //
 // SPDX-License-Identifier: MPL-2.0
-#![cfg(feature = "mimalloc")]
 
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
