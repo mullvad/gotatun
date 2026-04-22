@@ -47,7 +47,7 @@ tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [features]
-default = ["aws-lc-rs"]
+default = ["aws-lc-rs", "mimalloc"]
 # Use the `aws-lc-rs` crate as the AEAD backend. Default.
 aws-lc-rs = ["gotatun/aws-lc-rs"]
 # Use mimalloc as allocator instead of system default.
