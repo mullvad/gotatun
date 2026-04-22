@@ -24,6 +24,7 @@ use crate::packet::{Packet, PacketBufPool};
 
 pub mod buffer;
 pub mod channel;
+#[cfg(feature = "socket")]
 pub mod socket;
 
 /// An abstraction of `UdpSocket::bind`.
