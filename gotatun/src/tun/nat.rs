@@ -14,8 +14,6 @@
 //! [`NatIpRecv`] rewrites the source IP on TUN read.
 //! [`NatIpSend`] rewrites the destination IP on TUN write.
 
-// TODO: May need state to make sure outer tunnel cannot talk to port "owned" by inner
-
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
