@@ -21,6 +21,9 @@ use std::io;
 
 pub mod buffer;
 pub mod channel;
+pub mod merge;
+pub mod nat;
+pub mod router;
 
 #[cfg(feature = "pcap")]
 pub mod pcap;

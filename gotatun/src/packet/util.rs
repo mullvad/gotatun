@@ -100,6 +100,43 @@ pub fn checksum_udp<H: IntoBytes + Immutable>(header: H, payload: &[u8]) -> u16 
     csum
 }
 
+/// RFC 1624 incremental checksum update.
+///
+/// Given the old checksum and the old/new values of the changed 16-bit words,
+/// compute the new checksum without scanning the entire packet.
+///
+/// HC' = ~(~HC + ~m + m')  where HC is the old checksum, m is old data, m' is new data.
+pub fn incremental_checksum_update(
+    old_csum: u16,
+    old_addr: big_endian::U32,
+    new_addr: big_endian::U32,
+) -> u16 {
+    let mut sum = u32::from(!old_csum);
+    sum += u32::from(!(old_addr.get() >> 16) as u16);
+    sum += u32::from(!(old_addr.get() & 0xffff) as u16);
+    sum += u32::from((new_addr.get() >> 16) as u16);
+    sum += u32::from((new_addr.get() & 0xffff) as u16);
+    finalize_csum(sum)
+}
+
+/// RFC 1624 incremental checksum update for a 128-bit IPv6 address.
+///
+/// HC' = ~(~HC + ~m + m')  where HC is the old checksum, m is old data, m' is new data.
+pub fn incremental_checksum_update_v6(
+    old_csum: u16,
+    old_addr: big_endian::U128,
+    new_addr: big_endian::U128,
+) -> u16 {
+    let mut sum = u32::from(!old_csum);
+    let old = old_addr.get();
+    let new = new_addr.get();
+    for i in 0..8u32 {
+        sum += u32::from(!((old >> (i * 16)) as u16));
+        sum += u32::from((new >> (i * 16)) as u16);
+    }
+    finalize_csum(sum)
+}
+
 fn checksum_payload(bytes: &[u8]) -> u32 {
     let (words, rest) = <[big_endian::U16]>::ref_from_prefix(bytes).unwrap();
 
