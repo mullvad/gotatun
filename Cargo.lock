@@ -954,8 +954,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
- "tracing",
- "tracing-appender",
  "tracing-subscriber",
  "tun",
  "typed-builder",
