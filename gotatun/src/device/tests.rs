@@ -25,9 +25,9 @@ use x25519_dalek::{PublicKey, StaticSecret};
 use crate::device::{DeviceBuilder, Peer};
 use crate::packet::PacketBufPool;
 use crate::tun::{
-    IpRecv,
+    IpRecv, IpSend,
     nat::{NatIpRecv, NatIpSend},
-    router::TunRxRouter,
+    router::{TunRxRouter, TunTxRouter},
 };
 use crate::udp::channel::{UdpChannelFactory, UdpChannelV4, UdpChannelV6};
 
@@ -228,6 +228,99 @@ async fn test_tun_router() {
     let received = default_recv.recv(&mut pool).await.unwrap().next().unwrap();
     assert_eq!(received.destination(), Some(other_dst.into()));
     assert_eq!(received.payload(), Some(b"hello default".as_slice()));
+}
+
+/// Demonstrate that a malicious outer-tunnel peer can spoof packets that
+/// *appear* to come from inside the inner tunnel — and that wiring
+/// [`TunTxRouter`] with `inner_allowed_ips` blocks the spoof.
+///
+/// Scenario: the outer WG decapsulates a packet whose source IP is inside the
+/// inner tunnel's allowed-IP range, but whose UDP source-socket does *not*
+/// match the inner WG endpoint. Pre-fix, the [`TunTxRouter`] would route this
+/// straight to the local TUN - letting the outer peer impersonate any host
+/// behind the inner tunnel. With the fix, it is dropped.
+#[tokio::test]
+#[test_log::test]
+async fn tun_tx_router_blocks_spoofed_inner_source() {
+    use std::net::SocketAddr;
+
+    use crate::packet::{Ip, Packet};
+    use ipnetwork::IpNetwork;
+
+    // A tiny `IpSend` that records every packet it receives.
+    #[derive(Clone)]
+    struct RecordingIpSend(mpsc::Sender<Packet<Ip>>);
+    impl IpSend for RecordingIpSend {
+        async fn send(&mut self, packet: Packet<Ip>) -> std::io::Result<()> {
+            self.0.send(packet).await.unwrap();
+            Ok(())
+        }
+    }
+
+    let inner_allowed: IpNetwork = "10.100.0.0/24".parse().unwrap();
+    let inner_tun_endpoint: SocketAddr = "203.0.113.1:51820".parse().unwrap();
+
+    // The forged packet: src is *inside* the inner allowed range. Legitimately,
+    // a packet with this src can only reach the local stack via the inner WG
+    // device (which decrypts it, then NATs the dest). If it shows up at the
+    // outer device's IpSend, the outer peer must have minted it.
+    let forged_src: Ipv4Addr = "10.100.0.5".parse().unwrap();
+    let local_dst: Ipv4Addr = "10.0.0.1".parse().unwrap();
+    let forged = || mock::packet_with_addrs(forged_src, local_dst, b"spoofed reply");
+
+    // --- Without the filter: the hijack works. ---
+    {
+        let (inner_tx, mut inner_rx) = mpsc::channel(8);
+        let (outer_tx, mut outer_rx) = mpsc::channel(8);
+        let mut router = TunTxRouter::new(
+            RecordingIpSend(inner_tx),
+            RecordingIpSend(outer_tx),
+            inner_tun_endpoint,
+            &[], // no filter — the pre-fix behavior
+        );
+        router.send(forged()).await.unwrap();
+        assert!(
+            outer_rx.try_recv().is_ok(),
+            "without inner_allowed_ips, the outer peer's spoofed packet \
+             reaches the local TUN — this is the hijack"
+        );
+        assert!(inner_rx.try_recv().is_err());
+    }
+
+    // --- With the filter: the hijack is blocked. ---
+    {
+        let (inner_tx, mut inner_rx) = mpsc::channel(8);
+        let (outer_tx, mut outer_rx) = mpsc::channel(8);
+        let mut router = TunTxRouter::new(
+            RecordingIpSend(inner_tx),
+            RecordingIpSend(outer_tx),
+            inner_tun_endpoint,
+            &[inner_allowed],
+        );
+        router.send(forged()).await.unwrap();
+        assert!(
+            outer_rx.try_recv().is_err(),
+            "spoofed packet with src inside inner_allowed_ips must NOT reach the TUN"
+        );
+        assert!(
+            inner_rx.try_recv().is_err(),
+            "spoofed packet must also not be forwarded to the inner WG"
+        );
+
+        // Sanity: a packet with an unrelated source (a legitimate direct
+        // outer-tunnel response) still reaches the outer TUN.
+        let legit_src: Ipv4Addr = "8.8.8.8".parse().unwrap();
+        router
+            .send(mock::packet_with_addrs(
+                legit_src,
+                local_dst,
+                b"legit response",
+            ))
+            .await
+            .unwrap();
+        let received = outer_rx.try_recv().expect("legit traffic must pass");
+        assert_eq!(received.source(), Some(legit_src.into()));
+    }
 }
 
 /// Test [`NatIpRecv`] and [`NatIpSend`]
