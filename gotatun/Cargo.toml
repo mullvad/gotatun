@@ -31,6 +31,10 @@ name = "crypto_benches"
 name = "throughput_benches"
 harness = false
 
+[[example]]
+name = "multihop-router"
+required-features = ["device", "tun"]
+
 [dependencies]
 aead = { workspace = true }
 aws-lc-rs = { workspace = true, optional = true }
