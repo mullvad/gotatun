@@ -132,31 +132,62 @@ impl<SourceTunRx: IpRecv> TunRxRouter<SourceTunRx> {
 /// An [`IpSend`] combined from two [`IpSend`]s. If the source equals `inner_tun_endpoint`,
 /// then `send` will forward the packet to `inner_tx` (e.g., a [`TunChannelTx`](crate::tun::channel::TunChannelTx)).
 /// Otherwise, it is forwarded to `outer_tx` (e.g., a real TUN device).
+///
+/// Packets whose source IP falls inside any of the configured `inner_allowed_ips`
+/// are silently dropped. This prevents the outer tunnel's peer from forging packets
+/// that *appear* to originate inside the inner tunnel: such packets must only ever
+/// reach the local stack via the inner WireGuard device, never via the outer one.
 // TODO: Can we generalize this to map any number of endpoints to other channels?
 pub struct TunTxRouter<Inner: IpSend, Outer: IpSend> {
     inner_tx: Inner,
     outer_tx: Outer,
     inner_tun_endpoint: SocketAddr,
+    inner_allowed_ips: IpNetworkTable<()>,
 }
 
 impl<Inner: IpSend, Outer: IpSend> TunTxRouter<Inner, Outer> {
-    /// Create a new `DemuxIpSend`.
+    /// Create a new `TunTxRouter`.
     ///
     /// # Arguments
-    /// * `inner_tx` - Destination for packets matching inner tunnel addresse
+    /// * `inner_tx` - Destination for packets matching inner tunnel addresses
     /// * `outer_tx` - Destination for all other packets
-    /// * `inner_tun_addr` - IP address of the inner WireGuard tunnel
-    pub fn new(inner_tx: Inner, outer_tx: Outer, inner_tun_endpoint: SocketAddr) -> Self {
+    /// * `inner_tun_endpoint` - UDP socket address of the inner WireGuard endpoint
+    /// * `inner_allowed_ips` - Source IPs the inner tunnel is authoritative for.
+    ///   Decapsulated packets with a source IP in this set are dropped, since the
+    ///   outer peer would otherwise be able to spoof them. Pass an empty slice only
+    ///   if no inner tunnel is wired up to this router (no spoofing surface).
+    pub fn new(
+        inner_tx: Inner,
+        outer_tx: Outer,
+        inner_tun_endpoint: SocketAddr,
+        inner_allowed_ips: &[IpNetwork],
+    ) -> Self {
+        let mut table = IpNetworkTable::new();
+        for net in inner_allowed_ips {
+            let net = ip_network::IpNetwork::new_truncate(net.ip(), net.prefix())
+                .expect("cidr is valid length");
+            table.insert(net, ());
+        }
         Self {
             inner_tx,
             outer_tx,
             inner_tun_endpoint,
+            inner_allowed_ips: table,
         }
     }
 }
 
 impl<Inner: IpSend, Outer: IpSend> IpSend for TunTxRouter<Inner, Outer> {
     async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
+        if let Some(src_ip) = packet.source()
+            && self.inner_allowed_ips.longest_match(src_ip).is_some()
+        {
+            log::trace!(
+                "Dropping decapsulated outer-tunnel packet with src {src_ip} \
+                 inside inner_allowed_ips (forgery / hijack attempt)"
+            );
+            return Ok(());
+        }
         if let Some(src) = extract_udp_src(&packet) {
             if self.inner_tun_endpoint == src {
                 return self.inner_tx.send(packet).await;

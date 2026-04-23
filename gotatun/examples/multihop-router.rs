@@ -275,8 +275,16 @@ async fn main() -> eyre::Result<()> {
     // Outer device IpRecv: merge direct + inner encrypted
     let outer_ip_recv = MergingIpRecv::new(default_output, bridge_tun_rx, packet_pool);
 
-    // Outer device IpSend: split decrypted packets into two streams
-    let outer_ip_send = TunTxRouter::new(bridge_tun_tx, tun.clone(), inner_tun_endpoint);
+    // Outer device IpSend: split decrypted packets into two streams.
+    // `inner_allowed_ip` is passed so that the outer peer cannot forge packets
+    // that *appear* to originate inside the inner tunnel (such packets must
+    // only ever arrive via the inner WG path).
+    let outer_ip_send = TunTxRouter::new(
+        bridge_tun_tx,
+        tun.clone(),
+        inner_tun_endpoint,
+        &[inner_allowed_ip],
+    );
 
     // NAT: rewrite src/dst IPs between inner and outer tunnel addresses
     let tun_send =
