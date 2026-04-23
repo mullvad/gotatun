@@ -55,6 +55,7 @@ pub struct NatIpSend<S: IpSend> {
 }
 
 impl<R: IpRecv> NatIpRecv<R> {
+    /// Wrap `inner`, rewriting packets whose source IPv4 is `from` to use `to` instead.
     pub fn new(inner: R, from: Ipv4Addr, to: Ipv4Addr) -> Self {
         Self {
             inner,
@@ -65,6 +66,7 @@ impl<R: IpRecv> NatIpRecv<R> {
         }
     }
 
+    /// Also rewrite packets whose source IPv6 is `from` to use `to` instead.
     pub fn with_v6(mut self, from: Ipv6Addr, to: Ipv6Addr) -> Self {
         self.from_v6 = Some(from);
         self.to_v6 = Some(to);
@@ -73,6 +75,7 @@ impl<R: IpRecv> NatIpRecv<R> {
 }
 
 impl<S: IpSend> NatIpSend<S> {
+    /// Wrap `inner`, rewriting packets whose destination IPv4 is `from` to use `to` instead.
     pub fn new(inner: S, from: Ipv4Addr, to: Ipv4Addr) -> Self {
         Self {
             inner,
@@ -83,6 +86,7 @@ impl<S: IpSend> NatIpSend<S> {
         }
     }
 
+    /// Also rewrite packets whose destination IPv6 is `from` to use `to` instead.
     pub fn with_v6(mut self, from: Ipv6Addr, to: Ipv6Addr) -> Self {
         self.from_v6 = Some(from);
         self.to_v6 = Some(to);
