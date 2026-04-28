@@ -32,6 +32,7 @@ nix = { workspace = true, default-features = false, features = [
   "uio",
   "user",
 ] }
+tikv-jemallocator = { workspace = true, default-features = false, optional = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
@@ -50,6 +51,8 @@ tracing-subscriber = { workspace = true }
 default = ["aws-lc-rs"]
 # Use the `aws-lc-rs` crate as the AEAD backend. Default.
 aws-lc-rs = ["gotatun/aws-lc-rs"]
+# Use jemalloc as allocator instead of system default.
+jemalloc = ["dep:tikv-jemallocator"]
 # Use mimalloc as allocator instead of system default.
 mimalloc = ["dep:mimalloc"]
 # Use the `ring` crate as the AEAD backend. Combine with

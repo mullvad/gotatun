@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Enable doc_cfg feature for docs.rs.
   https://doc.rust-lang.org/unstable-book/language-features/doc-cfg.html
-- Add `mimalloc` as an optional, alternative memory allocator.
+- Add `mimalloc` and `jemalloc` as optional, alternative memory allocators.
 
 
 ## [0.6.0] - 2026-04-30
