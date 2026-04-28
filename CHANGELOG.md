@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `gotatun-cli`, selecting the AEAD backend at compile time. `aws-lc-rs`
   is the new default. `aws-lc-rs` wins if both features are enabled, and
   then `ring` is built and linked for nothing.
-- Add `mimalloc` as an optional, alternative memory allocator.
+- Add `mimalloc` and `jemalloc` as optional, alternative memory allocators.
 
 #### Windows
 - Add support for GotaTun CLI on Windows

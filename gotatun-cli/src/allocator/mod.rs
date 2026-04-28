@@ -10,4 +10,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
 #[global_allocator]
+#[cfg(feature = "mimalloc")]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+#[global_allocator]
+#[cfg(feature = "jemalloc")]
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;

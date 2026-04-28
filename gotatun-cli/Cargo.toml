@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 mimalloc = { workspace = true, default-features = false, optional = true }
+tikv-jemallocator = { workspace = true, default-features = false, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 clap = { workspace = true, features = ["derive", "env"] }
@@ -50,6 +51,8 @@ tracing-subscriber = { workspace = true }
 default = ["aws-lc-rs"]
 # Use the `aws-lc-rs` crate as the AEAD backend. Default.
 aws-lc-rs = ["gotatun/aws-lc-rs"]
+# Use jemalloc as allocator instead of system default.
+jemalloc = ["dep:tikv-jemallocator"]
 # Use mimalloc as allocator instead of system default.
 mimalloc = ["dep:mimalloc"]
 # Use the `ring` crate as the AEAD backend. Combine with

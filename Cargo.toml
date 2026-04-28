@@ -54,6 +54,7 @@ ring = "0.17.14"
 socket2 = "0.6.0"
 test-log = "0.2.19"
 thiserror = "1"
+tikv-jemallocator = { version = "0.6", default-features = false }
 tokio = "1.43.0"
 tokio-stream = "0.1.18"
 tracing = "0.1.40"

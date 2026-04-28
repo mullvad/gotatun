@@ -11,7 +11,13 @@
 // SPDX-License-Identifier: MPL-2.0
 
 // Common imports that are used on both platforms
-#[cfg(feature = "mimalloc")]
+
+// Only use an alternative allocator if one is explicitly chosen (i.e. not when compiling with
+// 'all-features').
+#[cfg(all(
+    any(feature = "mimalloc", feature = "jemalloc"),
+    not(all(feature = "mimalloc", feature = "jemalloc"))
+))]
 mod allocator;
 
 // Unix implementation
