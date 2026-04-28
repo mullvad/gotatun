@@ -11,7 +11,11 @@
 
 //! Generic buffered IP send and receive implementations.
 
-use std::{io, sync::Arc, time::Duration};
+use std::{
+    io::{self, ErrorKind},
+    sync::Arc,
+    time::Duration,
+};
 
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
@@ -116,8 +120,10 @@ impl<I: IpRecv> BufferedIpRecv<I> {
                     }
                     Err(e) => {
                         log::error!("Error receiving IP packet: {e}");
-                        // exit?
-                        continue;
+                        match e.kind() {
+                            ErrorKind::UnexpectedEof | ErrorKind::BrokenPipe => return,
+                            _ => (),
+                        }
                     }
                 }
             }
