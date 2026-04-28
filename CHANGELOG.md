@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Make tunnel stats counters more consistent with other WG implementations.
 
+#### Windows
+- Stop tunnel if WinTun read fails due to unexpected EOF.
+
 ### Security
 - Include source port in cookie MAC input. The WireGuard whitepaper states that the cookie
   should be computed using the remote endpoint's address, being both the IP and port.
