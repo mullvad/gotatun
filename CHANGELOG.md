@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Make tunnel stats counters more consistent with other WG implementations.
+- Exit gracefully when TUN device is deleted externally.
 
 ### Security
 - Include source port in cookie MAC input. The WireGuard whitepaper states that the cookie
