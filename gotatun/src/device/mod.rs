@@ -177,12 +177,8 @@ impl<T: DeviceTransports> Connection<T> {
         let buffered_udp_tx_v4 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp4_tx.clone());
         let buffered_udp_tx_v6 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp6_tx.clone());
 
-        let buffered_udp_rx_v4 = BufferedUdpReceive::new::<
-            <T::UdpTransportFactory as UdpTransportFactory>::RecvV4,
-        >(MAX_PACKET_BUFS, udp4_rx, pool.clone());
-        let buffered_udp_rx_v6 = BufferedUdpReceive::new::<
-            <T::UdpTransportFactory as UdpTransportFactory>::RecvV6,
-        >(MAX_PACKET_BUFS, udp6_rx, pool.clone());
+        let buffered_udp_rx_v4 = BufferedUdpReceive::new(MAX_PACKET_BUFS, udp4_rx, pool.clone());
+        let buffered_udp_rx_v6 = BufferedUdpReceive::new(MAX_PACKET_BUFS, udp6_rx, pool.clone());
 
         // Start DAITA/hooks tasks
         #[cfg(feature = "daita")]
