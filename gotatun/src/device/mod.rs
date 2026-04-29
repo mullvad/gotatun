@@ -27,6 +27,7 @@ pub mod uapi;
 
 use crate::noise::index_table::IndexTable;
 use builder::Nul;
+use futures::TryFutureExt;
 use std::collections::HashMap;
 use std::io::{self};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
@@ -34,8 +35,8 @@ use std::ops::BitOrAssign;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::join;
-use tokio::sync::Mutex;
 use tokio::sync::RwLock;
+use tokio::sync::{Mutex, watch};
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
@@ -89,6 +90,7 @@ pub enum Error {
 #[derive(Clone)]
 pub struct Device<T: DeviceTransports> {
     inner: Arc<RwLock<DeviceState<T>>>,
+    fatal_error: watch::Receiver<Option<Error>>,
 }
 
 /// Entry point for building a [`Device`].
@@ -129,6 +131,10 @@ pub(crate) struct DeviceState<T: DeviceTransports> {
 
     /// The task that responds to API requests.
     api: Option<Task>,
+
+    /// If an unrecoverable error occurs (such as the TUN device being deleted),
+    /// it will be stored here and propagated to all [`Device`] handles.
+    fatal_error: watch::Sender<Option<Error>>,
 }
 
 pub(crate) struct Connection<T: DeviceTransports> {
@@ -192,6 +198,17 @@ impl<T: DeviceTransports> Connection<T> {
             .await?;
         }
 
+        let fatal_error = device.fatal_error.clone();
+        let register_fatal_error = move |e| {
+            fatal_error.send_if_modified(|option| {
+                let has_error = option.is_some();
+                if !has_error {
+                    *option = Some(e);
+                }
+                !has_error
+            })
+        };
+
         // Start device tasks
         let outgoing = Task::spawn(
             "handle_outgoing",
@@ -201,7 +218,8 @@ impl<T: DeviceTransports> Connection<T> {
                 buffered_udp_tx_v4.clone(),
                 buffered_udp_tx_v6.clone(),
                 pool.clone(),
-            ),
+            )
+            .map_err(register_fatal_error.clone()),
         );
         let timers = Task::spawn(
             "handle_timers",
@@ -211,7 +229,6 @@ impl<T: DeviceTransports> Connection<T> {
                 buffered_udp_tx_v6.clone(),
             ),
         );
-
         let incoming_ipv4 = Task::spawn(
             "handle_incoming ipv4",
             DeviceState::handle_incoming(
@@ -220,7 +237,8 @@ impl<T: DeviceTransports> Connection<T> {
                 buffered_udp_tx_v4,
                 buffered_udp_rx_v4,
                 pool.clone(),
-            ),
+            )
+            .map_err(register_fatal_error.clone()),
         );
         let incoming_ipv6 = Task::spawn(
             "handle_incoming ipv6",
@@ -230,7 +248,8 @@ impl<T: DeviceTransports> Connection<T> {
                 buffered_udp_tx_v6,
                 buffered_udp_rx_v6,
                 pool.clone(),
-            ),
+            )
+            .map_err(register_fatal_error.clone()),
         );
 
         debug_assert!(device.connection.is_none());
@@ -266,6 +285,14 @@ impl<T: DeviceTransports> Device<T> {
         if let Some(connection) = device.connection.take() {
             connection.stop().await;
         }
+    }
+
+    /// Wait until an unrecoverable error occurs.
+    pub async fn wait(&mut self) {
+        self.fatal_error
+            .wait_for(|err| err.is_some())
+            .await
+            .expect("Sender will not be dropped while Self exists");
     }
 }
 
@@ -664,9 +691,9 @@ impl<T: DeviceTransports> DeviceState<T> {
                         continue;
                     }
 
-                    if let Err(_err) = tun_tx.send(packet).await {
+                    if let Err(e) = tun_tx.send(packet).await {
                         log::trace!("buffered_tun_send.send failed");
-                        break;
+                        return Err(Error::IoError(e));
                     }
                 }
             }
@@ -682,10 +709,10 @@ impl<T: DeviceTransports> DeviceState<T> {
         udp4: impl UdpSend,
         udp6: impl UdpSend,
         mut packet_pool: PacketBufPool,
-    ) {
+    ) -> Result<(), Error> {
         let mut tun_mtu = {
             let Some(device) = device.upgrade() else {
-                return;
+                return Ok(());
             };
             let device = device.read().await;
             device.tun_rx_mtu.clone()
@@ -696,7 +723,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                 Ok(packets) => packets,
                 Err(e) => {
                     log::error!("Unexpected error on tun interface: {e:?}");
-                    break;
+                    return Err(Error::IoError(e));
                 }
             };
 
@@ -707,7 +734,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                 };
 
                 let Some(device_arc) = device.upgrade() else {
-                    return;
+                    return Ok(());
                 };
 
                 let device_guard = device_arc.read().await;

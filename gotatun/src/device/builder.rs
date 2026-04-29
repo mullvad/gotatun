@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, watch};
 use x25519_dalek::StaticSecret;
 
 use crate::device::Error;
@@ -255,7 +255,10 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             rate_limiter: None,
             port: self.port,
             connection: None,
+            fatal_error: watch::Sender::new(None),
         };
+
+        let fatal_error = state.fatal_error.subscribe();
 
         if let Some(private_key) = self.private_key {
             let _ = state.set_key(private_key).await;
@@ -279,6 +282,6 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             Connection::set_up(inner.clone()).await?;
         }
 
-        Ok(Device { inner })
+        Ok(Device { inner, fatal_error })
     }
 }

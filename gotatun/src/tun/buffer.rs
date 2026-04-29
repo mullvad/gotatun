@@ -76,7 +76,7 @@ impl BufferedIpSend {
             while let Some(packet) = rx.recv().await {
                 if let Err(e) = inner.send(packet).await {
                     if is_fatal_tun_error(&e) {
-                        log::error!("TUN device was deleted, shutting down: {e}");
+                        log::error!("TUN device was deleted: {e}");
                         break;
                     }
                     log::error!("Error sending IP packet: {e}");
@@ -156,7 +156,7 @@ impl<I: IpRecv> BufferedIpRecv<I> {
                     }
                     Err(e) => {
                         if is_fatal_tun_error(&e) {
-                            log::error!("TUN device was deleted, shutting down: {e}");
+                            log::error!("TUN device was deleted: {e}");
                             break;
                         }
                         log::error!("Error receiving IP packet: {e}");
