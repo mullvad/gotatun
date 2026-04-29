@@ -61,7 +61,7 @@ fn make_single_fragment(
     flags.set_more_fragments(more_fragments);
     flags.set_fragment_offset(offset);
     ipv4.header.flags_and_fragment_offset = flags;
-    ipv4.payload.copy_from_slice(payload);
+    ipv4.payload_mut().unwrap().copy_from_slice(payload);
 
     Packet::from_bytes(buf)
         .try_into_ipvx()

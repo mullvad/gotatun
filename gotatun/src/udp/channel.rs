@@ -331,7 +331,7 @@ fn create_ipv4_payload_inner(
     ipv4.header.identification = identification.into();
     ipv4.header.header_checksum = checksum(&[ipv4.header.as_bytes()]).into();
 
-    let udp = &mut ipv4.payload;
+    let udp = ipv4.payload_mut().expect("packet has valid IHL");
     udp.header.source_port = source_port.into();
     udp.header.destination_port = destination_port.into();
     udp.header.length = udp_len.into();
@@ -423,7 +423,7 @@ mod tests {
         let packet = create_ipv4_payload(src_ip, src_port, dst_ip, dst_port, payload);
 
         assert_eq!(
-            packet.payload.header.checksum.get(),
+            packet.payload().unwrap().header.checksum.get(),
             0xDEC6,
             "UDP checksum invalid"
         );
@@ -460,12 +460,12 @@ mod tests {
         let packet = create_ipv4_payload(src_ip, src_port, dst_ip, dst_port, &payload);
 
         // Change the payload such that the output of the checksum function would be 0
-        payload = *packet.payload.header.checksum.as_ref();
+        payload = *packet.payload().unwrap().header.checksum.as_ref();
         let packet = create_ipv4_payload(src_ip, src_port, dst_ip, dst_port, &payload);
 
         // Assert that the checksum of `0` is represented as `0xffff`
         assert_eq!(
-            packet.payload.header.checksum.get(),
+            packet.payload().unwrap().header.checksum.get(),
             0xffff,
             "UDP checksum invalid"
         );

@@ -182,22 +182,21 @@ fn rewrite_source_ipv4(ipv4: &mut Ipv4<[u8]>, from: Ipv4Addr, to: Ipv4Addr) {
     if ipv4.header.source() != from {
         return;
     }
-    if ipv4.header.ihl() != 5 {
-        return;
-    }
 
     let protocol = ipv4.header.protocol;
 
     ipv4.header.source_address = big_endian::U32::from_bytes(to.octets());
     ipv4.header.recompute_checksum();
-    update_transport_checksum_v4(&mut ipv4.payload, protocol, &from.octets(), &to.octets());
+
+    let Some(payload) = ipv4.payload_mut() else {
+        return;
+    };
+
+    update_transport_checksum_v4(payload, protocol, &from.octets(), &to.octets());
 }
 
 fn rewrite_dest_ipv4(ipv4: &mut Ipv4<[u8]>, from: Ipv4Addr, to: Ipv4Addr) {
     if ipv4.header.destination() != from {
-        return;
-    }
-    if ipv4.header.ihl() != 5 {
         return;
     }
 
@@ -205,7 +204,11 @@ fn rewrite_dest_ipv4(ipv4: &mut Ipv4<[u8]>, from: Ipv4Addr, to: Ipv4Addr) {
     ipv4.header.destination_address = big_endian::U32::from_bytes(to.octets());
     ipv4.header.recompute_checksum();
 
-    update_transport_checksum_v4(&mut ipv4.payload, protocol, &from.octets(), &to.octets());
+    let Some(payload) = ipv4.payload_mut() else {
+        return;
+    };
+
+    update_transport_checksum_v4(payload, protocol, &from.octets(), &to.octets());
 }
 
 fn rewrite_source_ipv6(ipv6: &mut Ipv6<[u8]>, from: Ipv6Addr, to: Ipv6Addr) {
@@ -296,7 +299,8 @@ mod tests {
         {
             let ipv4 = Ipv4::<[u8]>::mut_from_bytes(&mut buf).unwrap();
             ipv4.header = Ipv4Header::new_for_length(src, dst, IpNextProtocol::Udp, udp_len as u16);
-            let udp = crate::packet::Udp::<[u8]>::mut_from_bytes(&mut ipv4.payload).unwrap();
+            let udp =
+                crate::packet::Udp::<[u8]>::mut_from_bytes(ipv4.payload_mut().unwrap()).unwrap();
             udp.header.source_port = 1234u16.into();
             udp.header.destination_port = 5678u16.into();
             udp.header.length = (udp_len as u16).into();
@@ -313,15 +317,15 @@ mod tests {
         // Compute valid UDP checksum (pseudo-header + UDP).
         {
             let ipv4 = Ipv4::<[u8]>::ref_from_bytes(&buf).unwrap();
-            let udp = Udp::<[u8]>::ref_from_bytes(&ipv4.payload).unwrap();
+            let udp = Udp::<[u8]>::ref_from_bytes(ipv4.payload().unwrap()).unwrap();
             let pseudo = PseudoHeaderV4::from_udp(
                 ipv4.header.source_address,
                 ipv4.header.destination_address,
                 udp,
             );
-            let cksum = checksum_udp(pseudo, &ipv4.payload);
+            let cksum = checksum_udp(pseudo, ipv4.payload().unwrap());
             let ipv4 = Ipv4::<[u8]>::mut_from_bytes(&mut buf).unwrap();
-            let udp = Udp::<[u8]>::mut_from_bytes(&mut ipv4.payload).unwrap();
+            let udp = Udp::<[u8]>::mut_from_bytes(ipv4.payload_mut().unwrap()).unwrap();
             udp.header.checksum = cksum.into();
         }
 
@@ -375,7 +379,7 @@ mod tests {
 
     fn verify_udp_checksum_v4(buf: &[u8]) -> bool {
         let ipv4 = Ipv4::<[u8]>::ref_from_bytes(buf).unwrap();
-        let udp = Udp::<[u8]>::ref_from_bytes(&ipv4.payload).unwrap();
+        let udp = Udp::<[u8]>::ref_from_bytes(ipv4.payload().unwrap()).unwrap();
         if udp.header.checksum.get() == 0 {
             return true;
         }
@@ -384,7 +388,7 @@ mod tests {
             ipv4.header.destination_address,
             udp,
         );
-        checksum(&[pseudo.as_bytes(), &ipv4.payload]) == 0
+        checksum(&[pseudo.as_bytes(), ipv4.payload().unwrap()]) == 0
     }
 
     fn verify_udp_checksum_v6(buf: &[u8]) -> bool {
@@ -495,7 +499,8 @@ mod tests {
         {
             let ipv4 = Ipv4::<[u8]>::mut_from_bytes(&mut buf).unwrap();
             ipv4.header = Ipv4Header::new_for_length(src, dst, IpNextProtocol::Udp, udp_len as u16);
-            let udp = crate::packet::Udp::<[u8]>::mut_from_bytes(&mut ipv4.payload).unwrap();
+            let udp =
+                crate::packet::Udp::<[u8]>::mut_from_bytes(ipv4.payload_mut().unwrap()).unwrap();
             udp.header.source_port = 1234u16.into();
             udp.header.destination_port = 5678u16.into();
             udp.header.length = (udp_len as u16).into();
@@ -513,7 +518,7 @@ mod tests {
 
         let buf = packet.as_bytes();
         let ipv4 = Ipv4::<[u8]>::ref_from_bytes(buf).unwrap();
-        let udp = Udp::<[u8]>::ref_from_bytes(&ipv4.payload).unwrap();
+        let udp = Udp::<[u8]>::ref_from_bytes(ipv4.payload().unwrap()).unwrap();
         // UDP checksum should still be zero.
         assert_eq!(udp.header.checksum.get(), 0);
         // But source should be rewritten.
@@ -534,21 +539,21 @@ mod tests {
 
         let buf = packet.as_bytes();
         let ipv4 = Ipv4::<[u8]>::ref_from_bytes(buf).unwrap();
-        let incremental_cksum = Udp::<[u8]>::ref_from_bytes(&ipv4.payload)
+        let incremental_cksum = Udp::<[u8]>::ref_from_bytes(ipv4.payload().unwrap())
             .unwrap()
             .header
             .checksum
             .get();
 
         // Verify the checksum is valid by summing pseudo-header + UDP; should fold to 0.
-        let udp = Udp::<[u8]>::ref_from_bytes(&ipv4.payload).unwrap();
+        let udp = Udp::<[u8]>::ref_from_bytes(ipv4.payload().unwrap()).unwrap();
         let pseudo = PseudoHeaderV4::from_udp(
             ipv4.header.source_address,
             ipv4.header.destination_address,
             udp,
         );
         assert_eq!(
-            checksum(&[pseudo.as_bytes(), &ipv4.payload]),
+            checksum(&[pseudo.as_bytes(), ipv4.payload().unwrap()]),
             0,
             "incremental checksum {incremental_cksum:#06x} is invalid"
         );
