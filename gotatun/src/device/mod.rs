@@ -87,7 +87,6 @@ pub enum Error {
 }
 
 /// A reference-counted handle to a WireGuard device.
-#[derive(Clone)]
 pub struct Device<T: DeviceTransports> {
     inner: Arc<RwLock<DeviceState<T>>>,
     fatal_error: watch::Receiver<Option<Error>>,
