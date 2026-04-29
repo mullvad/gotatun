@@ -306,7 +306,7 @@ mod test {
             Ipv4Addr::new(1, 1, 1, 1),
             Ipv4Addr::new(2, 2, 2, 2),
             IpNextProtocol::Udp,
-            &ip_packet.payload,
+            ip_packet.payload().unwrap(),
         );
         ip_packet.header = ipv4_header;
 

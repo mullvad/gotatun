@@ -89,9 +89,9 @@ impl Ip {
     /// Returns `None` if the version field is not `4` or `6`, or if the packet is too small.
     /// Other than that, no checks are done to ensure this is a valid ip packet.
     pub fn payload(&self) -> Option<&[u8]> {
-        Some(match self.as_v4_or_v6()? {
-            Either::Left(ipv4) => &ipv4.payload,
-            Either::Right(ipv6) => &ipv6.payload,
-        })
+        match self.as_v4_or_v6()? {
+            Either::Left(ipv4) => ipv4.payload(),
+            Either::Right(ipv6) => Some(&ipv6.payload),
+        }
     }
 }

@@ -380,28 +380,16 @@ impl Packet<Ipv4> {
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv4<Udp>>> {
         let ip = self.deref();
 
-        // We validate the IHL here, instead of in the `try_into_ipvx` method,
-        // because there we can still parse the part of the Ipv4 header that is always present
-        // and ignore the options. To parse the UDP packet, we must know that the IHL is 5,
-        // otherwise it will not start at the right offset.
-        match ip.header.ihl() {
-            5 => {}
-            6.. => {
-                return Err(eyre!("IP header: {:?}", ip.header))
-                    .wrap_err(eyre!("IPv4 packets with options are not supported"));
-            }
-            ihl @ ..5 => {
-                return Err(eyre!("IP header: {:?}", ip.header))
-                    .wrap_err(eyre!("Bad IHL value: {ihl}"));
-            }
-        }
-
         if ip.header.fragment_offset() != 0 || ip.header.more_fragments() {
             eyre::bail!("IPv4 packet is a fragment: {:?}", ip.header);
         }
 
-        validate_udp(ip.header.next_protocol(), &ip.payload)
-            .wrap_err_with(|| eyre!("IP header: {:?}", ip.header))?;
+        validate_udp(
+            ip.header.next_protocol(),
+            &ip.payload()
+                .ok_or_else(|| eyre!("Bad IHL value in IP header: {:?}", ip.header))?,
+        )
+        .wrap_err_with(|| eyre!("IP header: {:?}", ip.header))?;
 
         // we have asserted that the packet is a valid IPv4 UDP packet.
         // update `_kind` to reflect this.
