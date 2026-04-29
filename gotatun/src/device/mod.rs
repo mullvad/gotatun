@@ -43,7 +43,6 @@ use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::{Tunn, TunnResult};
 use crate::packet::{PacketBufPool, WgKind};
 use crate::task::Task;
-use crate::tun::buffer::{BufferedIpRecv, BufferedIpSend};
 use crate::tun::{IpRecv, IpSend, MtuWatcher};
 use crate::udp::buffer::{BufferedUdpReceive, BufferedUdpSend};
 use crate::udp::{UdpRecv, UdpSend, UdpTransportFactory, UdpTransportFactoryParams};
@@ -162,9 +161,13 @@ impl<T: DeviceTransports> Connection<T> {
         }
 
         let (udp4_tx, udp4_rx, udp6_tx, udp6_rx) = device.open_listen_socket().await?;
-        let buffered_ip_rx =
-            BufferedIpRecv::new(MAX_PACKET_BUFS, pool.clone(), Arc::clone(&device.tun_rx)).await;
-        let buffered_ip_tx = BufferedIpSend::new(MAX_PACKET_BUFS, Arc::clone(&device.tun_tx));
+        let (buffered_ip_tx, buffered_ip_rx) = crate::tun::buffer::channel(
+            MAX_PACKET_BUFS,
+            pool.clone(),
+            Arc::clone(&device.tun_tx),
+            Arc::clone(&device.tun_rx),
+        )
+        .await;
 
         let buffered_udp_tx_v4 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp4_tx.clone());
         let buffered_udp_tx_v6 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp6_tx.clone());

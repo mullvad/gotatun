@@ -938,6 +938,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tun",
  "typed-builder",
  "windows-sys 0.61.2",
