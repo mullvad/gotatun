@@ -22,7 +22,7 @@ use std::{
 
 use crate::packet::{Packet, PacketBufPool};
 
-pub mod buffer;
+pub(crate) mod buffer;
 pub mod channel;
 pub mod socket;
 
