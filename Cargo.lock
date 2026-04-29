@@ -901,7 +901,7 @@ dependencies = [
 
 [[package]]
 name = "gotatun"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "aead",
  "aws-lc-rs",
@@ -941,14 +941,14 @@ dependencies = [
  "tokio-util",
  "tun",
  "typed-builder",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
  "x25519-dalek",
  "zerocopy",
 ]
 
 [[package]]
 name = "gotatun-cli"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "clap 3.2.25",
  "daemonize",
