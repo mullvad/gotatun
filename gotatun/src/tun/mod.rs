@@ -19,6 +19,7 @@ use crate::packet::{Ip, Packet, PacketBufPool};
 use std::future::{Future, pending};
 use std::io;
 
+#[cfg(feature = "device")]
 pub(crate) mod buffer;
 pub mod channel;
 
