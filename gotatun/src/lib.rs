@@ -23,6 +23,7 @@ pub mod packet;
 pub mod tun;
 pub mod udp;
 
+#[cfg(feature = "device")]
 mod task;
 
 #[cfg(not(feature = "mock_instant"))]
