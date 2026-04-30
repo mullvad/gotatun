@@ -22,6 +22,27 @@ use tokio::{
     sync::{Mutex, mpsc},
     time::timeout,
 };
+use tokio_util::sync::CancellationToken;
+
+/// Create a pair of [`BufferedIpSend`] and [`BufferedIpRecv`] with `capacity`.
+///
+/// This takes an `Arc<Mutex<S>>` and `Arc<Mutex<R>>` because the inner `S` and `R` will be re-used
+/// after [BufferedIpSend] or [BufferedIpRecv] is dropped. We will take the mutex lock when this
+/// function is called, and hold onto it for the lifetime of the sender or receiver.
+///
+/// # Panics
+/// Panics if one of the locks is already taken.
+pub async fn channel<S: IpSend, R: IpRecv>(
+    capacity: usize,
+    pool: PacketBufPool,
+    send: Arc<Mutex<S>>,
+    recv: Arc<Mutex<R>>,
+) -> (BufferedIpSend, BufferedIpRecv<R>) {
+    let token = CancellationToken::new();
+    let buffer_send = BufferedIpSend::new(capacity, send, token.clone());
+    let buffer_recv = BufferedIpRecv::new(capacity, pool, recv, token).await;
+    (buffer_send, buffer_recv)
+}
 
 /// An [`IpSend`] that wraps another [`IpSend`] to provide buffering.
 ///
@@ -42,10 +63,12 @@ impl BufferedIpSend {
     ///
     /// # Panics
     /// Panics if the lock is already taken.
-    pub fn new<I: IpSend>(capacity: usize, inner: Arc<Mutex<I>>) -> Self {
+    fn new<I: IpSend>(capacity: usize, inner: Arc<Mutex<I>>, token: CancellationToken) -> Self {
         let (tx, mut rx) = mpsc::channel::<Packet<Ip>>(capacity);
 
-        let task = Task::spawn("buffered IP send", async move {
+        let drop_guard = token.clone().drop_guard();
+
+        let task = async move {
             let mut inner = timeout(Duration::from_secs(5), inner.lock())
                 .await
                 .expect("Deadlock on IpSend. There must be no more than one IpSend active at any given time.");
@@ -53,12 +76,18 @@ impl BufferedIpSend {
             while let Some(packet) = rx.recv().await {
                 if let Err(e) = inner.send(packet).await {
                     if is_fatal_tun_error(&e) {
-                        log::error!("TUN device was deleted, shutting down: {e}");
+                        log::error!("TUN device was deleted: {e}");
                         break;
                     }
                     log::error!("Error sending IP packet: {e}");
                 }
             }
+
+            drop(drop_guard);
+        };
+
+        let task = Task::spawn("buffered IP send", async move {
+            token.run_until_cancelled_owned(task).await;
         });
 
         Self {
@@ -96,7 +125,12 @@ impl<I: IpRecv> BufferedIpRecv<I> {
     /// This takes an `Arc<Mutex<I>>` because the inner `I` will be re-used after [Self] is
     /// dropped. We will take the mutex lock when this function is called, and hold onto it for the
     /// lifetime of [Self]. Will panic if the lock is already taken.
-    pub async fn new(capacity: usize, mut pool: PacketBufPool, inner: Arc<Mutex<I>>) -> Self {
+    async fn new(
+        capacity: usize,
+        mut pool: PacketBufPool,
+        inner: Arc<Mutex<I>>,
+        token: CancellationToken,
+    ) -> Self {
         let (tx, rx) = mpsc::channel::<Packet<Ip>>(capacity);
 
         // We use a timeout instead of a try_lock().expect() because there may still be an old
@@ -108,7 +142,9 @@ impl<I: IpRecv> BufferedIpRecv<I> {
 
         let mtu = inner.mtu();
 
-        let task = Task::spawn("buffered IP recv", async move {
+        let drop_guard = token.clone().drop_guard();
+
+        let task = async move {
             loop {
                 match inner.recv(&mut pool).await {
                     Ok(packets) => {
@@ -120,13 +156,17 @@ impl<I: IpRecv> BufferedIpRecv<I> {
                     }
                     Err(e) => {
                         if is_fatal_tun_error(&e) {
-                            log::error!("TUN device was deleted, shutting down: {e}");
+                            log::error!("TUN device was deleted: {e}");
                             break;
                         }
                         log::error!("Error receiving IP packet: {e}");
                     }
                 }
             }
+            drop(drop_guard);
+        };
+        let task = Task::spawn("buffered IP recv", async move {
+            token.run_until_cancelled_owned(task).await;
         });
 
         Self {

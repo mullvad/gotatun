@@ -125,7 +125,7 @@ pub struct BufferedUdpReceive {
 
 impl BufferedUdpReceive {
     /// Wrap a [`UdpRecv`] into a [`BufferedUdpReceive`] with `capacity`.
-    pub fn new<U: UdpRecv + 'static>(
+    pub fn new(
         capacity: usize,
         mut udp_rx: impl UdpRecv + 'static,
         mut recv_pool: PacketBufPool,

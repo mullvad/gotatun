@@ -22,7 +22,7 @@ use std::os::unix::net::UnixDatagram;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use tokio::signal::unix::{SignalKind, signal};
-use tracing::{Level, info};
+use tracing::{Level, error, info};
 
 mod drop_privileges;
 
@@ -173,11 +173,12 @@ fn with_tokio_runtime(f: impl Future<Output = Result<()>>) -> Result<()> {
     rt.block_on(f)
 }
 
-async fn wait_for_shutdown(device: Device<DefaultDeviceTransports>) {
+async fn wait_for_shutdown(mut device: Device<DefaultDeviceTransports>) {
     let mut sigint = signal(SignalKind::interrupt()).expect("Failed to set up SIGINT handler");
     let mut sigterm = signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler");
 
     tokio::select! {
+        _ = device.wait() => error!("An error occured. Shutting down."),
         _ = sigint.recv() => info!("SIGINT received"),
         _ = sigterm.recv() => info!("SIGTERM received"),
     }

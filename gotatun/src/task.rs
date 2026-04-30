@@ -48,6 +48,7 @@ where
 }
 
 impl Task {
+    #[cfg(any(feature = "device", feature = "tun"))]
     #[track_caller]
     pub fn spawn<Fut, O>(name: &'static str, fut: Fut) -> Self
     where

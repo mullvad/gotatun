@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ring` can opt in by building with `--no-default-features --features ring`.
 - Make the `ring` dependency optional, gated behind the new `ring` feature.
 
+### Removed
+- Remove `tun::buffer` and `udp::buffer` modules.
+- `Device` is no longer `Clone`.
+
 ### Fixed
 - Make tunnel stats counters more consistent with other WG implementations.
 - Exit gracefully when TUN device is deleted externally.

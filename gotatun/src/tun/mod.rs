@@ -19,7 +19,8 @@ use crate::packet::{Ip, Packet, PacketBufPool};
 use std::future::{Future, pending};
 use std::io;
 
-pub mod buffer;
+#[cfg(feature = "device")]
+pub(crate) mod buffer;
 pub mod channel;
 
 #[cfg(feature = "pcap")]
