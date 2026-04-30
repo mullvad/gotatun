@@ -1,10 +1,10 @@
 [package]
 name = "gotatun-cli"
+description = "an implementation of the WireGuard® protocol designed for portability and speed"
 version = "0.6.0"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "an implementation of the WireGuard® protocol designed for portability and speed"
 readme.workspace = true
 repository.workspace = true
 license.workspace = true
