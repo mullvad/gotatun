@@ -22,6 +22,7 @@ use std::{
 
 use crate::packet::{Packet, PacketBufPool};
 
+#[cfg(feature = "device")]
 pub(crate) mod buffer;
 pub mod channel;
 pub mod socket;
