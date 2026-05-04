@@ -347,11 +347,8 @@ impl Packet<Ip> {
                 decode_owned(
                     self,
                     Ipv4Decoder {
-                        version: todo!(),
-                        ihl: todo!(),
-                        checksum: todo!(),
-                        length: todo!(),
-                        truncate: todo!(),
+                        checksum: false,
+                        ..Ipv4Decoder::EVERYTHING
                     },
                 )
                 .map(Either::Left)
