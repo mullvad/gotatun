@@ -299,8 +299,7 @@ mod fragmentation {
             bytes.buf_mut().reserve(additional_bytes_needed);
             for frag in remaining_fragments {
                 bytes.buf_mut().extend_from_slice(
-                    &frag
-                        .payload()
+                    frag.payload()
                         .expect("fragments with invalid IHL are skipped"),
                 );
             }

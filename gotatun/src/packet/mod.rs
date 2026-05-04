@@ -386,7 +386,7 @@ impl Packet<Ipv4> {
 
         validate_udp(
             ip.header.next_protocol(),
-            &ip.payload()
+            ip.payload()
                 .ok_or_else(|| eyre!("Bad IHL value in IP header: {:?}", ip.header))?,
         )
         .wrap_err_with(|| eyre!("IP header: {:?}", ip.header))?;
