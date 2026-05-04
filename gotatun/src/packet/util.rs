@@ -9,6 +9,8 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+use std::mem::offset_of;
+
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
 use crate::packet::{IpNextProtocol, Udp};
@@ -89,6 +91,14 @@ pub fn checksum(payload: &[&[u8]]) -> u16 {
     finalize_csum(sum)
 }
 
+/// Compute an "Internet checksum" for IPv4.
+/// This skips the checksum field, so it works for even if non-zero.
+pub fn checksum_ipv4(payload: &[u8]) -> u16 {
+    const SKIP_WORD: usize =
+        offset_of!(crate::packet::Ipv4Header, header_checksum) / size_of::<u16>();
+    let sum = checksum_payload_with_skip(payload, SKIP_WORD);
+    finalize_csum(sum)
+}
 /// Compute an "Internet checksum" with an additional header and a final
 /// inversion of all bits if the checksum is all zeros. This is used for UDP checksums
 /// because 0 means "no checksum" in UDP + IPv4.
@@ -104,6 +114,23 @@ fn checksum_payload(bytes: &[u8]) -> u32 {
     let (words, rest) = <[big_endian::U16]>::ref_from_prefix(bytes).unwrap();
 
     let mut sum: u32 = words.iter().map(|w| u32::from(w.get())).sum();
+    if let [b] = rest {
+        // Zero-pad if odd number of bytes
+        sum += u32::from(u16::from_be_bytes([*b, 0]));
+    }
+
+    sum
+}
+
+fn checksum_payload_with_skip(bytes: &[u8], skip_word_index: usize) -> u32 {
+    let (words, rest) = <[big_endian::U16]>::ref_from_prefix(bytes).unwrap();
+
+    let mut sum: u32 = words
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i == skip_word_index)
+        .map(|(_, w)| u32::from(w.get()))
+        .sum();
     if let [b] = rest {
         // Zero-pad if odd number of bytes
         sum += u32::from(u16::from_be_bytes([*b, 0]));

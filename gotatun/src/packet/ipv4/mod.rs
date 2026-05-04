@@ -323,12 +323,6 @@ impl Ipv4Header {
             header_checksum: big_endian::U16::ZERO,
         }
     }
-
-    /// Update the checksum for this IP header.
-    pub fn recompute_checksum(&mut self) {
-        self.header_checksum = 0u16.into();
-        self.header_checksum = super::util::checksum(&[self.as_bytes()]).into();
-    }
 }
 
 impl Ipv4Header {
@@ -388,6 +382,11 @@ impl Ipv4Header {
     /// packet. Note that the value returned is in units of 8 bytes.
     pub const fn fragment_offset(&self) -> u16 {
         self.flags_and_fragment_offset.fragment_offset()
+    }
+
+    /// Compute expected header checksum.
+    pub fn compute_checksum(&self) -> u16 {
+        crate::packet::util::checksum_ipv4(self.as_bytes())
     }
 }
 
