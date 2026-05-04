@@ -323,6 +323,12 @@ impl Ipv4Header {
             header_checksum: big_endian::U16::ZERO,
         }
     }
+
+    /// Update the checksum for this IP header.
+    pub fn recompute_checksum(&mut self) {
+        self.header_checksum = 0u16.into();
+        self.header_checksum = super::util::checksum(&[self.as_bytes()]).into();
+    }
 }
 
 impl Ipv4Header {
