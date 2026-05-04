@@ -16,7 +16,7 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endi
 mod protocol;
 pub use protocol::*;
 
-use super::util::size_must_be;
+use super::{CheckedPayload, util::size_must_be};
 
 /// An IPv4 packet.
 ///
@@ -29,7 +29,7 @@ pub struct Ipv4<Payload: ?Sized = [u8]> {
     /// IPv4 header.
     pub header: Ipv4Header,
     /// IPv4 payload.
-    pub payload: Payload,
+    payload: Payload,
 }
 
 /// A bitfield struct containing the IPv4 fields `version` and `ihl`.
@@ -201,11 +201,37 @@ impl Ipv4Header {
     pub const fn fragment_offset(&self) -> u16 {
         self.flags_and_fragment_offset.fragment_offset()
     }
+
+    /// Update the checksum for this IP header.
+    pub fn recompute_checksum(&mut self) {
+        self.header_checksum = 0u16.into();
+        self.header_checksum = super::util::checksum(&[self.as_bytes()]).into();
+    }
 }
 
 impl Ipv4 {
     /// Maximum possible length of an IPv4 packet.
     pub const MAX_LEN: usize = 65535;
+}
+
+impl<Payload: ?Sized + CheckedPayload> Ipv4<Payload> {
+    /// Return a slice into the payload, taking IP options into account.
+    ///
+    /// If the IHL is less than 5, this returns `None`.
+    pub fn payload(&self) -> Option<&Payload> {
+        let payload_offset = 4 * self.header.ihl().checked_sub(5)? as usize;
+        let (_, payload) = self.as_bytes().split_at_checked(payload_offset)?;
+        Payload::ref_from_bytes(payload).ok()
+    }
+
+    /// Return a slice into the payload, taking IP options into account.
+    ///
+    /// If the IHL is less than 5, this returns `None`.
+    pub fn payload_mut(&mut self) -> Option<&mut Payload> {
+        let payload_offset = 4 * self.header.ihl().checked_sub(5)? as usize;
+        let (_, payload) = self.as_mut_bytes().split_at_mut_checked(payload_offset)?;
+        Payload::mut_from_bytes(payload).ok()
+    }
 }
 
 impl Debug for Ipv4Header {
@@ -267,7 +293,7 @@ mod tests {
         assert_eq!(header.destination(), Ipv4Addr::new(1, 2, 3, 4));
 
         assert_eq!(
-            packet.payload.len() + Ipv4Header::LEN,
+            packet.payload().unwrap().len() + Ipv4Header::LEN,
             usize::from(header.total_len)
         );
     }

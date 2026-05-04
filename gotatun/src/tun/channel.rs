@@ -184,7 +184,7 @@ mod fragmentation {
 
             // All fragments except the last must have a length that is a multiple of 8
             // bytes, and the last fragment must not exceed the maximum IPv4 length.
-            let fragment_len = ipv4_packet.payload.len();
+            let fragment_len = ipv4_packet.payload()?.len();
             if (more_fragments && fragment_len % 8 != 0)
                 || fragment_len + fragment_offset as usize * 8 > Ipv4::MAX_LEN
             {
@@ -229,7 +229,10 @@ mod fragmentation {
             // the previous and next fragments.
             if let Some(prev_i) = i.checked_sub(1)
                 && let prev_frag_offset = &fragments[prev_i].header.fragment_offset()
-                && let prev_frag_len = &fragments[prev_i].payload.len()
+                && let prev_frag_len = &fragments[prev_i]
+                    .payload()
+                    .expect("fragments with invalid IHL are skipped above")
+                    .len()
                 && prev_frag_offset + (prev_frag_len / 8) as u16 > fragment_offset
             {
                 log::trace!(
@@ -261,9 +264,13 @@ mod fragmentation {
             // The fragments must be consecutive, i.e. each fragment must begin where the previous
             // one ended. Note that fragment offset is given in units of 8 bytes.
             let fragment_offsets = fragments.iter().map(|f| f.header.fragment_offset());
-            let fragment_ends = fragments
-                .iter()
-                .map(|f| f.header.fragment_offset() + (f.payload.len() / 8) as u16);
+            let fragment_ends = fragments.iter().map(|f| {
+                f.header.fragment_offset()
+                    + (f.payload()
+                        .expect("fragments with invalid IHL are skipped above")
+                        .len()
+                        / 8) as u16
+            });
             if !fragment_offsets
                 .skip(1)
                 .eq(fragment_ends.take(fragments.len() - 1))
@@ -271,8 +278,12 @@ mod fragmentation {
                 return None;
             }
 
-            let len =
-                last.header.fragment_offset() as usize * 8 + last.payload.len() + Ipv4Header::LEN;
+            let len = last.header.fragment_offset() as usize * 8
+                + last
+                    .payload()
+                    .expect("fragments with invalid IHL are skipped")
+                    .len()
+                + Ipv4Header::LEN;
             let (_, packet_fragments) = fragment_map
                 .remove(frag_pos)
                 .expect("The same fragment as we accessed above must exist");
@@ -287,7 +298,10 @@ mod fragmentation {
             let additional_bytes_needed = len.saturating_sub(bytes.buf_mut().len());
             bytes.buf_mut().reserve(additional_bytes_needed);
             for frag in remaining_fragments {
-                bytes.buf_mut().extend_from_slice(&frag.payload);
+                bytes.buf_mut().extend_from_slice(
+                    frag.payload()
+                        .expect("fragments with invalid IHL are skipped"),
+                );
             }
 
             // The header of the first packet is updated to reflect that the packet is no
@@ -359,7 +373,9 @@ mod fragmentation {
             flags.set_more_fragments(more_fragments);
             flags.set_fragment_offset(offset);
             ipv4.header.flags_and_fragment_offset = flags;
-            ipv4.payload.copy_from_slice(payload);
+            ipv4.payload_mut()
+                .expect("Ipv4Header constructor yield valid IHL")
+                .copy_from_slice(payload);
 
             Packet::from_bytes(buf)
                 .try_into_ipvx()
@@ -434,15 +450,15 @@ mod fragmentation {
                     let udp_packet = ip_packet.try_into_udp().unwrap();
                     log::debug!(
                         "Reassembled UDP payload (ascii): {:?}",
-                        String::from_utf8_lossy(&udp_packet.payload.payload)
+                        String::from_utf8_lossy(&udp_packet.payload().unwrap().payload)
                     );
 
                     if id == id1 {
                         assert_eq!(*count, 3, "Should reassemble on last fragment");
-                        assert_eq!(udp_packet.payload.as_bytes(), &payload1[..]);
+                        assert_eq!(udp_packet.payload().unwrap().as_bytes(), &payload1[..]);
                     } else {
                         assert_eq!(*count, 4, "Should reassemble on last fragment");
-                        assert_eq!(udp_packet.payload.as_bytes(), &payload2[..]);
+                        assert_eq!(udp_packet.payload().unwrap().as_bytes(), &payload2[..]);
                     }
                     assert_eq!(udp_packet.header.fragment_offset(), 0);
                     assert!(!udp_packet.header.more_fragments());
@@ -488,10 +504,10 @@ mod fragmentation {
                     let udp_packet = ip_packet.try_into_udp().unwrap();
                     log::debug!(
                         "Reassembled UDP payload (ascii): {:?}",
-                        String::from_utf8_lossy(&udp_packet.payload.payload)
+                        String::from_utf8_lossy(&udp_packet.payload().unwrap().payload)
                     );
                     assert_eq!(count, 3, "Should reassemble on last fragment");
-                    assert_eq!(udp_packet.payload.as_bytes(), &payload[..]);
+                    assert_eq!(udp_packet.payload().unwrap().as_bytes(), &payload[..]);
                     assert_eq!(udp_packet.header.fragment_offset(), 0);
                     assert!(!udp_packet.header.more_fragments());
                     assert_eq!(udp_packet.header.source(), src);
