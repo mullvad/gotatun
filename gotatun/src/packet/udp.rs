@@ -11,7 +11,7 @@
 
 use std::fmt;
 
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
 use crate::packet::{DecodeAs, DecodeError};
 
@@ -63,17 +63,23 @@ impl fmt::Debug for UdpHeader {
 }
 
 pub struct UdpValidator {
-    pub checksum: bool,
+    pub length: bool,
+    pub checksum: bool, // TODO: should this be here?
 }
 
 impl DecodeAs<Udp> for [u8] {
     type Decoder = UdpValidator;
 
-    fn validate(&self, v: Self::Decoder) -> Result<usize, DecodeError> {
-        if v.checksum {
-            // TODO
-            return Err(DecodeError::BadChecksum);
+    fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
+        let udp = Udp::<[u8]>::try_ref_from_bytes(self)?;
+
+        if d.length {
+            let udp_len = usize::from(udp.header.length.get());
+            if self.len() != udp_len {
+                return Err(DecodeError::InvalidValue("UDP Header Lenght"));
+            }
         }
+
         Ok(self.len())
     }
 }

@@ -11,13 +11,15 @@
 
 use bitfield_struct::bitfield;
 use eyre::eyre;
-use std::{fmt::Debug, net::Ipv4Addr};
+use std::{fmt::Debug, mem::offset_of, net::Ipv4Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
 mod protocol;
 pub use protocol::*;
 
-use crate::packet::{DecodeAs, DecodeError, Udp, UdpValidator, decode_ref};
+use crate::packet::{
+    DecodeAs, DecodeError, PseudoHeaderV4, Udp, UdpHeader, UdpValidator, decode_ref,
+};
 
 use super::util::size_must_be;
 
@@ -28,7 +30,7 @@ use super::util::size_must_be;
 /// [Read more](crate::packet)
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
-pub struct Ipv4<Payload: ?Sized = Ipv4Options<[u8]>> {
+pub struct Ipv4<Payload: ?Sized = [u8]> {
     /// IPv4 header.
     pub header: Ipv4Header,
     /// IPv4 payload.
@@ -77,8 +79,7 @@ impl DecodeAs<Ipv4<Ipv4Options<[u8]>>> for [u8] {
         }
 
         if d.checksum {
-            // TODO: is this correct? ANSWER: NO. IT IS NOT CORRECT
-            let expected_csum = todo!();
+            let expected_csum = ipv4.header.compute_checksum();
             if ipv4.header.header_checksum.get() != expected_csum {
                 return Err(DecodeError::BadChecksum);
             }
@@ -158,9 +159,12 @@ impl DecodeAs<Ipv4<[u8]>> for [u8] {
     }
 }
 
-struct IpPayloadDecoder<Inner> {
-    ip_next_protocol: bool,
-    inner: Inner,
+pub struct IpPayloadDecoder<Inner> {
+    /// Assert that [`IpNextHeader`] matches the payload.
+    pub ip_next_protocol: bool,
+    /// Assert that the IP packet is not a fragment.
+    pub fragment: bool, // TODO: name
+    pub inner: Inner,
 }
 
 impl DecodeAs<Ipv4<Udp>> for Ipv4<[u8]> {
@@ -170,19 +174,50 @@ impl DecodeAs<Ipv4<Udp>> for Ipv4<[u8]> {
         if d.ip_next_protocol && self.header.next_protocol() != IpNextProtocol::Udp {
             return Err(DecodeError::InvalidProtocol);
         }
+
+        if d.fragment {
+            if self.header.fragment_offset() != 0 || self.header.more_fragments() {
+                return Err(DecodeError::InvalidValue(
+                    "fragment_offset / more_fragments",
+                ));
+            }
+        }
+
+        if d.inner.checksum {
+            let header = PseudoHeaderV4::from_bytes(
+                self.header.source_address,
+                self.header.destination_address,
+                IpNextProtocol::Udp,
+                self.payload.as_bytes(),
+            );
+            let expected_csum = crate::packet::util::checksum_udp_with_skip(
+                header,
+                self.payload.as_bytes(),
+                offset_of!(UdpHeader, checksum) / size_of::<u16>(),
+            );
+            let udp = Udp::<[u8]>::try_ref_from_bytes(&self.payload)?;
+            if expected_csum != udp.header.checksum.get() {
+                return Err(DecodeError::InvalidValue("UDP checksum"));
+            }
+        }
+
         let len = DecodeAs::<Udp>::validate(&self.payload, d.inner)?;
         Ok(len + Ipv4Header::LEN)
     }
 }
 
 fn example_ipv4_udp(bytes: &[u8]) -> &Ipv4<super::Udp> {
-    let ipv4: &Ipv4 = decode_ref(bytes, Ipv4Decoder::EVERYTHING).unwrap();
+    let ipv4: &Ipv4<Ipv4Options> = decode_ref(bytes, Ipv4Decoder::EVERYTHING).unwrap();
     let ipv4: &Ipv4<[u8]> = decode_ref(ipv4, ()).unwrap();
     let ipv4: &Ipv4<super::Udp> = decode_ref(
         ipv4,
         IpPayloadDecoder {
             ip_next_protocol: false,
-            inner: UdpValidator { checksum: false },
+            fragment: false,
+            inner: UdpValidator {
+                length: true,
+                checksum: true,
+            },
         },
     )
     .unwrap();
