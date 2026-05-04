@@ -11,7 +11,9 @@
 
 use std::fmt;
 
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
+
+use crate::packet::{DecodeAs, DecodeError};
 
 use super::util::size_must_be;
 
@@ -57,5 +59,44 @@ impl fmt::Debug for UdpHeader {
             .field("length", &self.length.get())
             .field("checksum", &self.checksum.get())
             .finish()
+    }
+}
+
+/// A [`Decoder`] for [`Udp`] datagrams.
+pub struct UdpDecoder {
+    /// Validate UDP length field.
+    pub length: bool,
+    /// Validate UDP checksum field. Only applies if decoding into an IP packet.
+    pub checksum: bool,
+}
+
+impl UdpDecoder {
+    /// Validate as *much* as possible about the UDP packet.
+    pub const CHECK_ALL: Self = Self {
+        length: true,
+        checksum: true,
+    };
+
+    /// Validate as *little* as possible about the UDP packet.
+    pub const UNCHECKED: Self = Self {
+        length: false,
+        checksum: false,
+    };
+}
+
+impl DecodeAs<Udp> for [u8] {
+    type Decoder = UdpDecoder;
+
+    fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
+        let udp = Udp::<[u8]>::try_ref_from_bytes(self)?;
+
+        if self.length {
+            let udp_len = usize::from(udp.header.length.get());
+            if self.len() != udp_len {
+                return Err(DecodeError::InvalidValue("UDP Length"));
+            }
+        }
+
+        Ok(self.len())
     }
 }
