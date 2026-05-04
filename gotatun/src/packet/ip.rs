@@ -15,7 +15,7 @@ use bitfield_struct::bitfield;
 use either::Either;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
-use crate::packet::{Ipv4, Ipv6};
+use crate::packet::{DecodeAs, Ipv4, Ipv4Decoder, Ipv6};
 
 /// A packet bitfield-struct containing the `version`-field that is shared between IPv4 and IPv6.
 #[bitfield(u8)]
@@ -42,8 +42,32 @@ pub struct Ip {
     pub rest: [u8],
 }
 
+impl DecodeAs<Ipv4> for Ip {
+    type Decoder = Ipv4Decoder;
+
+    fn validate(&self, d: Self::Decoder) -> Result<usize, super::DecodeError> {
+        DecodeAs::<Ipv4>::validate(self.as_bytes(), d)
+    }
+}
+impl DecodeAs<Ipv4<[u8]>> for Ip {
+    type Decoder = Ipv4Decoder;
+
+    fn validate(&self, d: Self::Decoder) -> Result<usize, super::DecodeError> {
+        DecodeAs::<Ipv4<[u8]>>::validate(self.as_bytes(), d)
+    }
+}
+
+impl DecodeAs<Ipv6> for Ip {
+    type Decoder = Ipv6Decoder;
+
+    fn validate(&self, d: Self::Decoder) -> Result<usize, super::DecodeError> {
+        DecodeAs::<Ipv6>::validate(self.as_bytes(), d)
+    }
+}
+
 impl Ip {
-    fn as_v4_or_v6(&self) -> Option<Either<&Ipv4, &Ipv6>> {
+    // TODO
+    fn as_v4_or_v6(&self) -> Option<Either<&Ipv4<[u8]>, &Ipv6>> {
         let b = self.as_bytes();
         match self.header.version() {
             4 => Ipv4::<[u8]>::ref_from_bytes(b).ok().map(Either::Left),

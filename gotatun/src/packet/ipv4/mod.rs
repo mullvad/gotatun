@@ -34,7 +34,7 @@ pub struct Ipv4<Payload: ?Sized = Ipv4Options<[u8]>> {
     pub payload: Payload,
 }
 
-pub struct Ipv4Validator {
+pub struct Ipv4Decoder {
     /// Fail if IP version field is wrong.
     pub version: bool,
     /// Fail if IHL is invalid (<5 or too big).
@@ -47,7 +47,7 @@ pub struct Ipv4Validator {
     pub truncate: bool,
 }
 
-impl Ipv4Validator {
+impl Ipv4Decoder {
     pub const EVERYTHING: Self = Self {
         version: true,
         ihl: true,
@@ -66,7 +66,7 @@ impl Ipv4Validator {
 }
 
 impl DecodeAs<Ipv4<Ipv4Options<[u8]>>> for [u8] {
-    type Decoder = Ipv4Validator;
+    type Decoder = Ipv4Decoder;
 
     fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
         let ipv4: &Ipv4 = Ipv4::try_ref_from_bytes(self)?;
@@ -119,7 +119,7 @@ impl DecodeAs<Ipv4<[u8]>> for Ipv4<Ipv4Options<[u8]>> {
 }
 
 impl DecodeAs<Ipv4<[u8]>> for [u8] {
-    type Decoder = Ipv4Validator;
+    type Decoder = Ipv4Decoder;
     fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
         let ipv4: &Ipv4 = Ipv4::try_ref_from_bytes(self)?;
 
@@ -158,7 +158,7 @@ impl DecodeAs<Ipv4<[u8]>> for [u8] {
 }
 
 struct IpPayloadDecoder<Inner> {
-    check_next_protocol: bool,
+    ip_next_protocol: bool,
     inner: Inner,
 }
 
@@ -166,10 +166,8 @@ impl DecodeAs<Ipv4<Udp>> for Ipv4<[u8]> {
     type Decoder = IpPayloadDecoder<UdpValidator>;
 
     fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
-        if d.check_next_protocol {
-            if self.header.next_protocol() != IpNextProtocol::Udp {
-                return Err(DecodeError::InvalidProtocol);
-            }
+        if d.ip_next_protocol && self.header.next_protocol() != IpNextProtocol::Udp {
+            return Err(DecodeError::InvalidProtocol);
         }
         let len = DecodeAs::<Udp>::validate(&self.payload, d.inner)?;
         Ok(len + Ipv4Header::LEN)
@@ -177,12 +175,12 @@ impl DecodeAs<Ipv4<Udp>> for Ipv4<[u8]> {
 }
 
 fn example_ipv4_udp(bytes: &[u8]) -> &Ipv4<super::Udp> {
-    let ipv4: &Ipv4 = decode_ref(bytes, Ipv4Validator::EVERYTHING).unwrap();
+    let ipv4: &Ipv4 = decode_ref(bytes, Ipv4Decoder::EVERYTHING).unwrap();
     let ipv4: &Ipv4<[u8]> = decode_ref(ipv4, ()).unwrap();
     let ipv4: &Ipv4<super::Udp> = decode_ref(
         ipv4,
         IpPayloadDecoder {
-            check_next_protocol: false,
+            ip_next_protocol: false,
             inner: UdpValidator { checksum: false },
         },
     )

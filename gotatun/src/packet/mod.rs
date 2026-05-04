@@ -312,9 +312,23 @@ impl Packet<Ip> {
     /// - The IP version field is `4` or `6`
     /// - The IPv4 packet is smaller than [`Ipv4Header::total_len`].
     /// - The IPv6 payload is smaller than [`Ipv6Header::payload_length`].
-    pub fn try_into_ipvx(mut self) -> eyre::Result<Either<Packet<Ipv4>, Packet<Ipv6>>> {
+    pub fn try_into_ipvx(mut self) -> eyre::Result<Either<Packet<Ipv4<[u8]>>, Packet<Ipv6>>> {
         match self.header.version() {
             4 => {
+                decode_owned(
+                    self,
+                    Ipv4Decoder {
+                        version: todo!(),
+                        ihl: todo!(),
+                        checksum: todo!(),
+                        length: todo!(),
+                        truncate: todo!(),
+                    },
+                )
+                .map(Either::Left)
+                .map_err(Into::into)
+
+                /*
                 let buf_len = self.buf().len();
 
                 let ipv4 = Ipv4::<[u8]>::ref_from_bytes(self.buf())
@@ -342,6 +356,7 @@ impl Packet<Ip> {
                 // we have asserted that the packet is a valid IPv4 packet.
                 // update `_kind` to reflect this.
                 Ok(Either::Left(self.cast::<Ipv4>()))
+                */
             }
             6 => {
                 let ipv6 = Ipv6::<[u8]>::ref_from_bytes(self.buf())
