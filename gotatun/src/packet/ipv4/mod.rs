@@ -375,6 +375,11 @@ impl Ipv4Header {
     pub const fn fragment_offset(&self) -> u16 {
         self.flags_and_fragment_offset.fragment_offset()
     }
+
+    /// Compute expected header checksum.
+    pub fn compute_checksum(&self) -> u16 {
+        crate::packet::util::checksum_ipv4_with_skip(self.as_bytes())
+    }
 }
 
 impl Ipv4 {
