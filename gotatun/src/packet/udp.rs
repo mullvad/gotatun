@@ -13,6 +13,8 @@ use std::fmt;
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
+use crate::packet::{DecodeAs, DecodeError};
+
 use super::util::size_must_be;
 
 /// A UDP packet.
@@ -57,5 +59,21 @@ impl fmt::Debug for UdpHeader {
             .field("length", &self.length.get())
             .field("checksum", &self.checksum.get())
             .finish()
+    }
+}
+
+pub struct UdpValidator {
+    pub checksum: bool,
+}
+
+impl DecodeAs<Udp> for [u8] {
+    type Decoder = UdpValidator;
+
+    fn validate(&self, v: Self::Decoder) -> Result<usize, DecodeError> {
+        if v.checksum {
+            // TODO
+            return Err(DecodeError::BadChecksum);
+        }
+        Ok(self.len())
     }
 }

@@ -65,6 +65,7 @@ use either::Either;
 use eyre::{Context, bail, eyre};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
+mod decode;
 mod ip;
 mod ipv4;
 mod ipv6;
@@ -73,6 +74,7 @@ mod udp;
 mod util;
 mod wg;
 
+pub use decode::*;
 pub use ip::*;
 pub use ipv4::*;
 pub use ipv6::*;
@@ -378,6 +380,8 @@ impl Packet<Ipv4> {
     /// - the IHL is not `5`
     /// - UDP validation fails
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv4<Udp>>> {
+        Ok(decode_owned(self, UdpValidator { checksum: false })?)
+        /*
         let ip = self.deref();
 
         // We validate the IHL here, instead of in the `try_into_ipvx` method,
@@ -406,6 +410,7 @@ impl Packet<Ipv4> {
         // we have asserted that the packet is a valid IPv4 UDP packet.
         // update `_kind` to reflect this.
         Ok(self.cast::<Ipv4<Udp>>())
+        */
     }
 }
 

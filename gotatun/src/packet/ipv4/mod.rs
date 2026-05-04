@@ -11,10 +11,12 @@
 
 use bitfield_struct::bitfield;
 use std::{fmt::Debug, net::Ipv4Addr};
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
 mod protocol;
 pub use protocol::*;
+
+use crate::packet::{DecodeAs, DecodeError, Udp, UdpValidator, decode_ref};
 
 use super::util::size_must_be;
 
@@ -25,11 +27,192 @@ use super::util::size_must_be;
 /// [Read more](crate::packet)
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
-pub struct Ipv4<Payload: ?Sized = [u8]> {
+pub struct Ipv4<Payload: ?Sized = Ipv4Options<[u8]>> {
     /// IPv4 header.
     pub header: Ipv4Header,
     /// IPv4 payload.
     pub payload: Payload,
+}
+
+pub struct Ipv4Validator {
+    /// Fail if IP version field is wrong.
+    pub version: bool,
+    /// Fail if IHL is invalid (<5 or too big).
+    pub ihl: bool,
+    /// Fail if IPv4 header checksum is incorrect.
+    pub checksum: bool,
+    /// Fail if IPv4 header length is invalid or too big.
+    pub length: bool,
+    /// Truncate the buffer if it's longer than header lengths.
+    pub truncate: bool,
+}
+
+impl Ipv4Validator {
+    pub const EVERYTHING: Self = Self {
+        version: true,
+        ihl: true,
+        checksum: true,
+        length: true,
+        truncate: true,
+    };
+
+    pub const NOTHING: Self = Self {
+        version: false,
+        ihl: false,
+        checksum: false,
+        length: false,
+        truncate: false,
+    };
+}
+
+impl DecodeAs<Ipv4<Ipv4Options<[u8]>>> for [u8] {
+    type Decoder = Ipv4Validator;
+
+    fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
+        let ipv4: &Ipv4 = Ipv4::try_ref_from_bytes(self)?;
+
+        if d.version && ipv4.header.version() != 4 {
+            return Err(DecodeError::InvalidIpVersion);
+        }
+
+        if d.checksum {
+            // TODO: is this correct? ANSWER: NO. IT IS NOT CORRECT
+            let expected_csum = todo!();
+            if ipv4.header.header_checksum.get() != expected_csum {
+                return Err(DecodeError::BadChecksum);
+            }
+        }
+
+        let total_len = usize::from(ipv4.header.total_len.get());
+        if d.length || d.truncate {
+            if total_len > self.len() {
+                return Err(DecodeError::HeaderTooBig);
+            } else if total_len < Ipv4Header::LEN {
+                return Err(DecodeError::HeaderTooSmall);
+            }
+        }
+
+        if d.ihl {
+            let ihl = usize::from(ipv4.header.ihl());
+            if ihl < 5 {
+                return Err(DecodeError::InvalidValue("IHL"));
+            } else if ihl * size_of::<u32>() > self.len() {
+                return Err(DecodeError::InvalidValue("IHL"));
+            }
+        }
+
+        let len = if d.truncate { total_len } else { self.len() };
+
+        Ok(len)
+    }
+}
+
+impl DecodeAs<Ipv4<[u8]>> for Ipv4<Ipv4Options<[u8]>> {
+    type Decoder = ();
+    fn validate(&self, _: Self::Decoder) -> Result<usize, DecodeError> {
+        if self.header.ihl() == 5 {
+            Ok(self.as_bytes().len())
+        } else {
+            Err(DecodeError::InvalidValue("IHL"))
+        }
+    }
+}
+
+impl DecodeAs<Ipv4<[u8]>> for [u8] {
+    type Decoder = Ipv4Validator;
+    fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
+        let ipv4: &Ipv4 = Ipv4::try_ref_from_bytes(self)?;
+
+        if d.version && ipv4.header.version() != 4 {
+            return Err(DecodeError::InvalidIpVersion);
+        }
+
+        if d.checksum {
+            // TODO: is this correct? ANSWER: NO. IT IS NOT CORRECT
+            let expected_csum = todo!();
+            if ipv4.header.header_checksum.get() != expected_csum {
+                return Err(DecodeError::BadChecksum);
+            }
+        }
+
+        let total_len = usize::from(ipv4.header.total_len.get());
+        if d.length || d.truncate {
+            if total_len > self.len() {
+                return Err(DecodeError::HeaderTooBig);
+            } else if total_len < Ipv4Header::LEN {
+                return Err(DecodeError::HeaderTooSmall);
+            }
+        }
+
+        if d.ihl {
+            let ihl = usize::from(ipv4.header.ihl());
+            if ihl != 5 {
+                return Err(DecodeError::InvalidValue("IHL"));
+            }
+        }
+
+        let len = if d.truncate { total_len } else { self.len() };
+
+        Ok(len)
+    }
+}
+
+struct IpPayloadDecoder<Inner> {
+    check_next_protocol: bool,
+    inner: Inner,
+}
+
+impl DecodeAs<Ipv4<Udp>> for Ipv4<[u8]> {
+    type Decoder = IpPayloadDecoder<UdpValidator>;
+
+    fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
+        if d.check_next_protocol {
+            if self.header.next_protocol() != IpNextProtocol::Udp {
+                return Err(DecodeError::InvalidProtocol);
+            }
+        }
+        let len = DecodeAs::<Udp>::validate(&self.payload, d.inner)?;
+        Ok(len + Ipv4Header::LEN)
+    }
+}
+
+fn example_ipv4_udp(bytes: &[u8]) -> &Ipv4<super::Udp> {
+    let ipv4: &Ipv4 = decode_ref(bytes, Ipv4Validator::EVERYTHING).unwrap();
+    let ipv4: &Ipv4<[u8]> = decode_ref(ipv4, ()).unwrap();
+    let ipv4: &Ipv4<super::Udp> = decode_ref(
+        ipv4,
+        IpPayloadDecoder {
+            check_next_protocol: false,
+            inner: UdpValidator { checksum: false },
+        },
+    )
+    .unwrap();
+
+    ipv4
+}
+
+/*
+fn example_ipv4_udp_owned(bytes: Packet<[u8]>) -> Packet<Ipv4<Udp>> {
+    let ipv4: Ipv4Builder = Ipv4::builder(bytes)
+        .validate_checksum()
+        .truncate_length()
+        .etc();
+
+    let ipv4: Packet<Ipv4<[u8]>> = ipv4.go()?;
+
+    let ipv4: Packet<Ipv4<Udp>> = ipv4.convert_payload::<Udp>()
+        .validate_checksum()
+        .go()?;
+
+    ipv4
+}
+*/
+
+#[repr(C)]
+#[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
+pub struct Ipv4Options<T: ?Sized = [u8]> {
+    _pd: std::marker::PhantomData<T>,
+    options: [u8],
 }
 
 /// A bitfield struct containing the IPv4 fields `version` and `ihl`.
