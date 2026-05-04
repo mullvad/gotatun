@@ -164,14 +164,8 @@ impl Ipv4<Tcp> {
     #[must_use]
     pub fn calculate_tcp_checksum(&self) -> u16 {
         let tcp = &self.payload;
-        pnet_packet::util::ipv4_checksum(
-            tcp.as_bytes(),
-            8,
-            &[],
-            &self.header.source(),
-            &self.header.destination(),
-            pnet_packet::ip::IpNextHeaderProtocols::Tcp,
-        )
+        // TODO:
+        todo!()
     }
 
     /// Calculate and set the TCP checksum for this packet.
@@ -185,14 +179,8 @@ impl Ipv6<Tcp> {
     #[must_use]
     pub fn calculate_tcp_checksum(&self) -> u16 {
         let tcp = &self.payload;
-        pnet_packet::util::ipv6_checksum(
-            tcp.as_bytes(),
-            8,
-            &[],
-            &self.header.source(),
-            &self.header.destination(),
-            pnet_packet::ip::IpNextHeaderProtocols::Tcp,
-        )
+        // TODO:
+        todo!()
     }
 
     /// Calculate and set the TCP checksum for this packet.
