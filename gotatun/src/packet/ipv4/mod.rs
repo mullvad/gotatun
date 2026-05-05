@@ -203,42 +203,6 @@ impl DecodeAs<Ipv4<Udp>> for Ipv4<[u8]> {
     }
 }
 
-fn example_ipv4_udp(bytes: &[u8]) -> &Ipv4<super::Udp> {
-    let ipv4: &Ipv4<Ipv4Options> = decode_ref(bytes, Ipv4Decoder::CHECK_ALL).unwrap();
-    let ipv4: &Ipv4<[u8]> = decode_ref(ipv4, ()).unwrap();
-    let ipv4: &Ipv4<super::Udp> = decode_ref(
-        ipv4,
-        IpPayloadDecoder {
-            ip_next_protocol: false,
-            dont_fragment: false,
-            inner: UdpDecoder {
-                length: true,
-                checksum: true,
-            },
-        },
-    )
-    .unwrap();
-
-    ipv4
-}
-
-/*
-fn example_ipv4_udp_owned(bytes: Packet<[u8]>) -> Packet<Ipv4<Udp>> {
-    let ipv4: Ipv4Builder = Ipv4::builder(bytes)
-        .validate_checksum()
-        .truncate_length()
-        .etc();
-
-    let ipv4: Packet<Ipv4<[u8]>> = ipv4.go()?;
-
-    let ipv4: Packet<Ipv4<Udp>> = ipv4.convert_payload::<Udp>()
-        .validate_checksum()
-        .go()?;
-
-    ipv4
-}
-*/
-
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Ipv4Options<T: ?Sized = [u8]> {
