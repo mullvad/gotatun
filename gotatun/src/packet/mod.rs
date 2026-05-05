@@ -383,7 +383,7 @@ impl Packet<Ipv4> {
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv4<Udp>>> {
         let decoder = IpPayloadDecoder {
             ip_next_protocol: true,
-            fragment: true,
+            dont_fragment: true,
             inner: UdpDecoder {
                 length: true,
                 checksum: false,
@@ -442,7 +442,7 @@ impl Packet<Ipv6> {
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv6<Udp>>> {
         let decoder = IpPayloadDecoder {
             ip_next_protocol: true,
-            fragment: true, // TODO: is this relevant or ipv6?
+            dont_fragment: true, // TODO: is this relevant or ipv6?
             inner: UdpDecoder {
                 length: true,
                 checksum: false,
