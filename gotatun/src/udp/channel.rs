@@ -25,9 +25,9 @@ use zerocopy::IntoBytes;
 
 use crate::{
     packet::{
-        IpNextProtocol, IpPayloadDecoder, Ipv4, Ipv4Decoder, Ipv4Header, Ipv6, Ipv6Decoder,
-        Ipv6Header, Packet, PacketBufPool, PseudoHeaderV4, PseudoHeaderV6, Udp, UdpHeader,
-        checksum, checksum_udp, decode_owned,
+        IpNextProtocol, Ipv4, Ipv4Decoder, Ipv4Header, Ipv4PayloadDecoder, Ipv6, Ipv6Decoder,
+        Ipv6Header, Ipv6PayloadDecoder, Packet, PacketBufPool, PseudoHeaderV4, PseudoHeaderV6, Udp,
+        UdpHeader, checksum, checksum_udp, decode_owned,
     },
     tun::{
         MtuWatcher,
@@ -325,7 +325,7 @@ fn create_ipv4_payload_inner(
 
     let packet = Packet::from_bytes(BytesMut::zeroed(usize::from(total_len)));
     let mut ipv4 = decode_owned::<_, Ipv4>(packet, Ipv4Decoder::UNCHECKED)
-        .and_then(|p| decode_owned::<_, Ipv4<Udp>>(p, IpPayloadDecoder::UNCHECKED))
+        .and_then(|p| decode_owned::<_, Ipv4<Udp>>(p, Ipv4PayloadDecoder::UNCHECKED))
         .expect("buffer is big enough");
 
     ipv4.header =
@@ -362,7 +362,7 @@ fn create_ipv6_payload(
 
     let packet = Packet::from_bytes(BytesMut::zeroed(usize::from(total_len)));
     let mut ipv6 = decode_owned::<_, Ipv6>(packet, Ipv6Decoder::UNCHECKED)
-        .and_then(|p| decode_owned::<_, Ipv6<Udp>>(p, IpPayloadDecoder::UNCHECKED))
+        .and_then(|p| decode_owned::<_, Ipv6<Udp>>(p, Ipv6PayloadDecoder::UNCHECKED))
         .expect("buffer is big enough");
 
     ipv6.header.set_version(6);
