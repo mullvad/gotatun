@@ -13,7 +13,7 @@ use std::fmt;
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
-use crate::packet::{Decoder, DecodeError};
+use crate::packet::{DecodeError, Decoder};
 
 use super::util::size_must_be;
 

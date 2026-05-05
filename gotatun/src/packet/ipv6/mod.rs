@@ -188,10 +188,8 @@ impl Decoder<[u8], Ipv6<[u8]>> for Ipv6Decoder {
         }
 
         let total_len = ipv6.header.total_length();
-        if d.length || d.truncate {
-            if total_len > bytes.len() {
-                return Err(DecodeError::InvalidValue("total length"));
-            }
+        if (d.length || d.truncate) && total_len > bytes.len() {
+            return Err(DecodeError::InvalidValue("total length"));
         }
 
         let len = if d.truncate { total_len } else { bytes.len() };

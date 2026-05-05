@@ -85,10 +85,8 @@ impl Decoder<[u8], Ipv4<Ipv4Options<[u8]>>> for Ipv4Decoder {
         }
 
         let total_len = usize::from(ipv4.header.total_len.get());
-        if d.length || d.truncate {
-            if total_len > bytes.len() || total_len < Ipv4Header::LEN {
-                return Err(DecodeError::InvalidValue("total_len"));
-            }
+        if (d.length || d.truncate) && (total_len > bytes.len() || total_len < Ipv4Header::LEN) {
+            return Err(DecodeError::InvalidValue("total_len"));
         }
 
         if d.ihl {
@@ -131,10 +129,8 @@ impl Decoder<[u8], Ipv4<[u8]>> for Ipv4Decoder {
         }
 
         let total_len = usize::from(ipv4.header.total_len.get());
-        if d.length || d.truncate {
-            if total_len > bytes.len() || total_len < Ipv4Header::LEN {
-                return Err(DecodeError::InvalidValue("total_len"));
-            }
+        if (d.length || d.truncate) && (total_len > bytes.len() || total_len < Ipv4Header::LEN) {
+            return Err(DecodeError::InvalidValue("total_len"));
         }
 
         if d.ihl {
