@@ -44,6 +44,7 @@ pub struct Ip {
     pub rest: [u8],
 }
 
+/// [`Decoder`] for any IP packet ([`Ipv4`] or [`Ipv6`]).
 pub struct IpDecoder {
     /// Validate that the IP version is 4 or 6.
     pub version: bool,
