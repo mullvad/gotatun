@@ -426,10 +426,6 @@ where
             .ok_or(eyre!("IHL larger than header"))
     }
 
-    fn options_bytes(&self) -> eyre::Result<&[u8]> {
-        Ok(self.options_and_payload_bytes()?.0)
-    }
-
     fn payload_bytes(&self) -> eyre::Result<&[u8]> {
         Ok(self.options_and_payload_bytes()?.1)
     }
