@@ -23,9 +23,12 @@ use super::util::size_must_be;
 
 /// An IPv4 packet.
 ///
-/// This is a dynamically sized zerocopy type, which means you can compose packet types like
-/// `Ipv4<Udp<WgData>>` and cast them to/from byte slices using [`FromBytes`] and [`IntoBytes`].
-/// [Read more](crate::packet)
+/// This is a dynamically sized [`zerocopy`] type which allows for cheap conversions.
+/// The generic payload allows you to compose packet types like `Ipv4<Udp<WgData>>`.
+///
+/// Use [`Ipv4Decoder`] and [`Ipv4PayloadDecoder`] for parsing into these packet types from
+/// byte slices and such. You can also use [`FromBytes`] and [`IntoBytes`] if you want minimal
+/// validation [Read more](crate::packet).
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv4<Payload: ?Sized = [u8]> {
@@ -35,10 +38,12 @@ pub struct Ipv4<Payload: ?Sized = [u8]> {
     pub payload: Payload,
 }
 
+/// A [`Decoder`] from an [`Ipv4`] with [`Ipv4Options`] into an [`Ipv4`] without options.
 pub struct Ipv4AssumeNoOptions;
 
+/// An [`Ipv4`] [`Decoder`].
 pub struct Ipv4Decoder {
-    /// Fail if IP version field is wrong.
+    /// Fail if IP version field is not `4`.
     pub version: bool,
     /// Fail if IHL is invalid (<5 or too big).
     pub ihl: bool,
@@ -51,6 +56,7 @@ pub struct Ipv4Decoder {
 }
 
 impl Ipv4Decoder {
+    /// Validate as *much* as possible about the decoded packet.
     pub const CHECK_ALL: Self = Self {
         version: true,
         ihl: true,
@@ -59,6 +65,7 @@ impl Ipv4Decoder {
         truncate: true,
     };
 
+    /// Validate as *little* as possible about the decoded packet.
     pub const UNCHECKED: Self = Self {
         version: false,
         ihl: false,
@@ -146,6 +153,7 @@ impl Decoder<[u8], Ipv4<[u8]>> for Ipv4Decoder {
     }
 }
 
+/// A [`Decoder`] for [`Ipv4::payload`] into a transport protocol like [`Udp`].
 pub struct Ipv4PayloadDecoder<Inner> {
     /// Assert that [`IpNextHeader`] matches the payload.
     pub ip_next_protocol: bool,
@@ -155,12 +163,14 @@ pub struct Ipv4PayloadDecoder<Inner> {
 }
 
 impl Ipv4PayloadDecoder<UdpDecoder> {
+    /// Validate as *much* as possible about the decoded UDP payload.
     pub const CHECK_ALL: Self = Self {
         ip_next_protocol: true,
         dont_fragment: true,
         inner: UdpDecoder::CHECK_ALL,
     };
 
+    /// Validate as *little* as possible about the decoded UDP payload.
     pub const UNCHECKED: Self = Self {
         ip_next_protocol: false,
         dont_fragment: false,

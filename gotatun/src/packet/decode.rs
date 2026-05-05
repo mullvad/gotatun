@@ -4,29 +4,28 @@ use crate::packet::Packet;
 
 use super::CheckedPayload;
 
-/// A trait that enables byte-wise conversion between one packet type and another through zerocopy.
+/// A trait that enables byte-wise conversion from one packet type to another through zerocopy.
+/// See [`crate::packet::Ipv4Decoder`] for an example.
 ///
 /// # Validation
-/// This trait asserts, at minimum, that `Self` can be transmuted into `Target`, but
+/// This trait asserts, at minimum, that `Src` can be soundly transmuted into `Dst`, but
 /// does not necessarily assert that the value resulting from the conversion is sane.
-///
-/// [`DecodeAs::validate`] _should_ perform validation, subject to configuration by the [`DecodeAs::Decoder`].
 pub trait Decoder<Src, Dst>
 where
     Src: IntoBytes + Immutable + KnownLayout + ?Sized,
     Dst: TryFromBytes + Immutable + KnownLayout + ?Sized,
 {
-    /// Validate that `Self` is a valid instance of `Target`.
+    /// Validate that the `Src` is a valid instance of `Dst`.
     ///
-    /// The returned `usize` indicated the byte-wise length of `Target`,
-    /// since it may be smaller than `Self`.
+    /// The returned `usize` indicated the byte-wise length of `Dst`,
+    /// since it may be smaller than `Src`.
     fn validate(&self, s: &Src) -> Result<usize, DecodeError>;
 
     /// Try to decode the `&Src` packet as `&Dst`.
-    ///
-    /// `Src` must be decodeable as `Dst` using [`DecodeAs`].
-    ///
     /// See also: [`decode_mut`], [`decode_owned`].
+    ///
+    /// # Errors
+    /// -
     fn decode_ref<'a>(&self, source: &'a Src) -> Result<&'a Dst, DecodeError> {
         let len = self.validate(source)?;
         let bytes = &source.as_bytes()[..len];
