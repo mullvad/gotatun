@@ -465,7 +465,7 @@ mod tests {
     use zerocopy::{FromBytes, IntoBytes, big_endian};
 
     use super::{IpPayloadDecoder, Ipv4, Ipv4Decoder, Ipv4Header};
-    use crate::packet::{IpNextProtocol, Udp, UdpDecoder, UdpHeader, decode_ref};
+    use crate::packet::{DecodeError, IpNextProtocol, Udp, UdpDecoder, UdpHeader, decode_ref};
     use std::net::Ipv4Addr;
 
     const EXAMPLE_IPV4_ICMP: &[u8] = &[
@@ -498,6 +498,7 @@ mod tests {
         0x20, 0x74, 0x68, 0x65, 0x72, 0x65, 0x21,
     ];
 
+    /// Test that [`decode_ref`] can decode a valid IPv4/UDP packet.
     #[test]
     fn ipv4_decode_and_validate() {
         let ipv4: &Ipv4 =
@@ -515,6 +516,23 @@ mod tests {
         assert_eq!(ipv4_udp.as_bytes(), EXAMPLE_IPV4_UDP_RAW);
     }
 
+    /// Test that [`decode_ref`] errors on a bad IPv4 checksum.
+    #[test]
+    fn ipv4_decode_invalid_checksum() {
+        let mut ipv4 = EXAMPLE_IPV4_UDP;
+        ipv4.header.header_checksum.set(1234);
+
+        let _ipv4_with_bad_checksum: &Ipv4 =
+            decode_ref(ipv4.as_bytes(), Ipv4Decoder::UNCHECKED).expect("Validation is disabled");
+
+        let Err(DecodeError::BadChecksum) =
+            decode_ref::<_, Ipv4>(ipv4.as_bytes(), Ipv4Decoder::CHECK_ALL)
+        else {
+            panic!("Must fail with checksum error");
+        };
+    }
+
+    /// Test that the [`Ipv4`] type has the expected bytewise layout.
     #[test]
     fn ipv4_layout() {
         assert_eq!(EXAMPLE_IPV4_UDP.as_bytes(), EXAMPLE_IPV4_UDP_RAW);
