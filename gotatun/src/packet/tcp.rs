@@ -7,10 +7,17 @@ use crate::packet::{IpNextProtocol, PseudoHeaderV4, PseudoHeaderV6, util::size_m
 
 use super::{Ipv4, Ipv6};
 
+/// A TCP packet.
+///
+/// This is a dynamically sized zerocopy type, which means you can compose packet types like
+/// `Ipv6<Tcp<T>>` and cast them to/from byte slices using [`FromBytes`] and [`IntoBytes`].
+/// [Read more](crate::packet)
 #[repr(C)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Tcp<OptionsAndPayload: ?Sized = [u8]> {
+    /// TCP header.
     pub header: TcpHeader,
+    /// TCP options and payload.
     pub options_and_payload: OptionsAndPayload,
 }
 
@@ -24,33 +31,56 @@ impl fmt::Debug for Tcp {
     }
 }
 
+/// A TCP header.
 #[repr(C, packed)]
 #[derive(Clone, Copy, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct TcpHeader {
+    /// TCP source port.
     pub source_port: big_endian::U16,
+    /// TCP destination port.
     pub destination_port: big_endian::U16,
+    /// Sequence number.
     pub seq_num: big_endian::U32,
+    /// Acknowledgement number.
     pub ack_num: big_endian::U32,
+    /// Offset to the payload.
     pub data_offset: TcpDataOffset,
+    /// TCP flags.
     pub flags: TcpFlags,
+    /// Size of the receive window that the segment sender is willing to receive (in window size
+    /// units).
     pub window: big_endian::U16,
+    /// TCP checksum. This can be computed using [crate::packet::util::checksum]:
     pub checksum: big_endian::U16,
+    /// When URG flag is set, an offset from the sequence number indicating the last urgent data
+    /// byte.
     pub urgent_pointer: big_endian::U16,
 }
 
+/// TCP flags.
 #[bitfield(u8, order = Msb)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct TcpFlags {
+    /// Congestion window reduced (W). Set by sender to indicate that it received a segment
+    /// with ECE flag set (due to congestion).
     pub cwr: bool,
+    /// ECN-Echo (E). If SYN is set, indicates peer is ECN capable. Otherwise, indicates congestion.
     pub ece: bool,
+    /// Indicates that the Urgent pointer field is significant (U).
     pub urg: bool,
+    /// Indicates that the Acknowledgement field is significant (.).
     pub ack: bool,
+    /// Push function (P). Asks to push buffered data.
     pub psh: bool,
+    /// Reset connection (R).
     pub rst: bool,
+    /// Sync sequence numbers (S).
     pub syn: bool,
+    /// Final packet from sender (F).
     pub fin: bool,
 }
 
+/// TCP data offset.
 #[bitfield(u8, order = Msb)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct TcpDataOffset {
@@ -75,56 +105,73 @@ impl TcpHeader {
     /// Length of a [TcpHeader]. Not including TCP options.
     pub const LEN: usize = size_must_be::<TcpHeader>(20);
 
+    /// See [Self::fin].
     pub const fn fin(&self) -> bool {
         self.flags.fin()
     }
+    /// See [Self::syn].
     pub const fn syn(&self) -> bool {
         self.flags.syn()
     }
+    /// See [Self::rst].
     pub const fn rst(&self) -> bool {
         self.flags.rst()
     }
+    /// See [Self::psh].
     pub const fn psh(&self) -> bool {
         self.flags.psh()
     }
+    /// See [Self::ack].
     pub const fn ack(&self) -> bool {
         self.flags.ack()
     }
+    /// See [Self::urg].
     pub const fn urg(&self) -> bool {
         self.flags.urg()
     }
+    /// See [Self::ece].
     pub const fn ece(&self) -> bool {
         self.flags.ece()
     }
+    /// See [Self::cwr].
     pub const fn cwr(&self) -> bool {
         self.flags.cwr()
     }
 
+    /// See [Self::fin].
     pub const fn set_fin(&mut self, value: bool) {
         self.flags.set_fin(value);
     }
+    /// See [Self::syn].
     pub const fn set_syn(&mut self, value: bool) {
         self.flags.set_syn(value);
     }
+    /// See [Self::rst].
     pub const fn set_rst(&mut self, value: bool) {
         self.flags.set_rst(value);
     }
+    /// See [Self::psh].
     pub const fn set_psh(&mut self, value: bool) {
         self.flags.set_psh(value);
     }
+    /// See [Self::ack].
     pub const fn set_ack(&mut self, value: bool) {
         self.flags.set_ack(value);
     }
+    /// See [Self::urg].
     pub const fn set_urg(&mut self, value: bool) {
         self.flags.set_urg(value);
     }
+    /// See [Self::ece].
     pub const fn set_ece(&mut self, value: bool) {
         self.flags.set_ece(value);
     }
+    /// See [Self::cwr].
     pub const fn set_cwr(&mut self, value: bool) {
         self.flags.set_cwr(value);
     }
 
+    /// Payload offset.
     pub const fn data_offset(&self) -> u8 {
         self.data_offset.data_offset()
     }
