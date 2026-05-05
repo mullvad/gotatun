@@ -167,13 +167,13 @@ pub struct IpPayloadDecoder<Inner> {
 impl IpPayloadDecoder<UdpDecoder> {
     pub const CHECK_ALL: Self = Self {
         ip_next_protocol: true,
-        fragment: true,
+        dont_fragment: true,
         inner: UdpDecoder::CHECK_ALL,
     };
 
     pub const UNCHECKED: Self = Self {
         ip_next_protocol: false,
-        fragment: false,
+        dont_fragment: false,
         inner: UdpDecoder::UNCHECKED,
     };
 }
