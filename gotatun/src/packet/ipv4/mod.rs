@@ -159,6 +159,7 @@ pub struct Ipv4PayloadDecoder<Inner> {
     pub ip_next_protocol: bool,
     /// Assert that the IP packet is not a fragment.
     pub dont_fragment: bool,
+    /// Decoder for the inner transport protocol
     pub inner: Inner,
 }
 

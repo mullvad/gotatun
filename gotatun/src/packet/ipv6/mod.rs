@@ -18,9 +18,12 @@ use super::{DecodeError, Decoder, IpNextProtocol, Udp, UdpDecoder, util::size_mu
 
 /// An IPv6 packet.
 ///
-/// This is a dynamically sized zerocopy type, which means you can compose packet types like
-/// `Ipv6<Udp<WgData>>` and cast them to/from byte slices using [`FromBytes`] and [`IntoBytes`].
-/// [Read more](crate::packet)
+/// This is a dynamically sized [`zerocopy`] type which allows for cheap conversions.
+/// The generic payload allows you to compose packet types like `Ipv6<Udp<WgData>>`.
+///
+/// Use [`Ipv6Decoder`] and [`Ipv6PayloadDecoder`] for parsing into these packet types from
+/// byte slices and such. You can also use [`FromBytes`] and [`IntoBytes`] if you want minimal
+/// validation [Read more](crate::packet).
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Ipv6<Payload: ?Sized = [u8]> {
@@ -153,6 +156,7 @@ impl Debug for Ipv6Header {
     }
 }
 
+/// An [`Ipv6`] [`Decoder`].
 pub struct Ipv6Decoder {
     /// Fail if version field is not `6`.
     pub version: bool,
@@ -165,12 +169,14 @@ pub struct Ipv6Decoder {
 }
 
 impl Ipv6Decoder {
+    /// Validate as *much* as possible about the decoded packet.
     pub const CHECK_ALL: Self = Self {
         version: true,
         length: true,
         truncate: true,
     };
 
+    /// Validate as *little* as possible about the decoded packet.
     pub const UNCHECKED: Self = Self {
         version: false,
         length: false,
@@ -209,18 +215,22 @@ impl Decoder<Ipv6<[u8]>, Ipv6<Udp>> for Ipv6PayloadDecoder<UdpDecoder> {
     }
 }
 
+/// A [`Decoder`] for [`Ipv6::payload`] into a transport protocol like [`Udp`].
 pub struct Ipv6PayloadDecoder<Inner> {
     /// Assert that [`IpNextHeader`] matches the payload.
     pub ip_next_protocol: bool,
+    /// Decoder for the inner transport protocol
     pub inner: Inner,
 }
 
 impl Ipv6PayloadDecoder<UdpDecoder> {
+    /// Validate as *much* as possible about the decoded UDP payload.
     pub const CHECK_ALL: Self = Self {
         ip_next_protocol: true,
         inner: UdpDecoder::CHECK_ALL,
     };
 
+    /// Validate as *little* as possible about the decoded UDP payload.
     pub const UNCHECKED: Self = Self {
         ip_next_protocol: false,
         inner: UdpDecoder::UNCHECKED,
