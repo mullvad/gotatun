@@ -59,12 +59,12 @@ impl<S, D: ?Sized + TryFromBytes> From<zerocopy::TryCastError<S, D>> for DecodeE
 /// `Src` must be decodeable as `Dst` using [`DecodeAs`].
 ///
 /// See also: [`decode_mut`], [`decode_owned`].
-pub fn decode_ref<Src, Dst>(source: &Src, validator: Src::Decoder) -> Result<&Dst, DecodeError>
+pub fn decode_ref<Src, Dst>(source: &Src, decoder: Src::Decoder) -> Result<&Dst, DecodeError>
 where
     Src: DecodeAs<Dst> + ?Sized,
     Dst: FromBytes + KnownLayout + Immutable + ?Sized,
 {
-    let len = source.validate(validator)?;
+    let len = source.validate(decoder)?;
     let bytes = &source.as_bytes()[..len];
     Ok(Dst::try_ref_from_bytes(bytes)?)
 }
@@ -74,14 +74,17 @@ where
 /// `Src` must be decodeable as `Dst` using [`DecodeAs`].
 ///
 /// See also: [`decode_ref`], [`decode_owned`].
-pub fn decode_mut<V, T>(source: &mut V, validator: V::Decoder) -> Result<&mut T, DecodeError>
+pub fn decode_mut<Src, Dst>(
+    source: &mut Src,
+    decoder: Src::Decoder,
+) -> Result<&mut Dst, DecodeError>
 where
-    V: DecodeAs<T> + FromBytes + ?Sized,
-    T: IntoBytes + FromBytes + KnownLayout + Immutable + ?Sized,
+    Src: DecodeAs<Dst> + FromBytes + ?Sized,
+    Dst: IntoBytes + FromBytes + KnownLayout + Immutable + ?Sized,
 {
-    let len = source.validate(validator)?;
+    let len = source.validate(decoder)?;
     let bytes = &mut source.as_mut_bytes()[..len];
-    Ok(T::try_mut_from_bytes(bytes)?)
+    Ok(Dst::try_mut_from_bytes(bytes)?)
 }
 
 /// Try to decode the `Packet<Src>` packet as `Packet<Dst>`.
@@ -89,15 +92,15 @@ where
 /// `Src` must be decodeable as `Dst` using [`DecodeAs`].
 ///
 /// See also: [`decode_ref`], [`decode_mut`].
-pub fn decode_owned<V, T>(
-    source: Packet<V>,
-    validator: V::Decoder,
-) -> Result<Packet<T>, DecodeError>
+pub fn decode_owned<Src, Dst>(
+    source: Packet<Src>,
+    decoder: Src::Decoder,
+) -> Result<Packet<Dst>, DecodeError>
 where
-    V: DecodeAs<T> + FromBytes + ?Sized + super::CheckedPayload,
-    T: IntoBytes + FromBytes + KnownLayout + Immutable + super::CheckedPayload + ?Sized,
+    Src: DecodeAs<Dst> + FromBytes + ?Sized + super::CheckedPayload,
+    Dst: IntoBytes + FromBytes + KnownLayout + Immutable + super::CheckedPayload + ?Sized,
 {
-    let len = source.validate(validator)?;
+    let len = source.validate(decoder)?;
     let mut source = source.into_bytes();
     source.truncate(len);
     Ok(source.cast())
