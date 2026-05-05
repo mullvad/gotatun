@@ -33,7 +33,7 @@ where
     fn validate(&self, s: &Src) -> Result<usize, DecodeError>;
 
     /// Try to decode the `&Src` packet as `&Dst`.
-    /// See also: [`decode_mut`], [`decode_owned`].
+    /// See also: [`Decoder::decode_mut`], [`Decoder::decode_owned`].
     ///
     /// # Errors
     /// -
@@ -47,7 +47,7 @@ where
     ///
     /// `Src` must be decodeable as `Dst` using [`DecodeAs`].
     ///
-    /// See also: [`decode_ref`], [`decode_owned`].
+    /// See also: [`Self::decode_ref`], [`Self::decode_owned`].
     fn decode_mut<'a>(&self, source: &'a mut Src) -> Result<&'a mut Dst, DecodeError>
     where
         Src: FromBytes,
@@ -62,7 +62,7 @@ where
     ///
     /// `Src` must be decodeable as `Dst` using [`DecodeAs`].
     ///
-    /// See also: [`decode_ref`], [`decode_mut`].
+    /// See also: [`Self::decode_ref`], [`Self::decode_mut`].
     fn decode_owned(&self, source: Packet<Src>) -> Result<Packet<Dst>, DecodeError>
     where
         Src: CheckedPayload,
@@ -75,7 +75,7 @@ where
     }
 }
 
-/// An error returned by [`decode_ref`] and friends.
+/// An error returned by [`Decoder::decode_ref`] and friends.
 #[derive(Debug, thiserror::Error)]
 pub enum DecodeError {
     /// Invalid value.
