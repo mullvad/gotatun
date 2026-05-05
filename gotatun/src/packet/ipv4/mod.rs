@@ -490,7 +490,7 @@ mod tests {
             )
         },
         payload: Udp {
-            header: UdpHeader::new(12345, 65421, 11, 0),
+            header: UdpHeader::new(12345, 65421, (UdpHeader::LEN + 12) as u16, 0x6b0f),
             payload: *b"Hello there!",
         },
     };
