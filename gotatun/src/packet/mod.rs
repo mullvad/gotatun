@@ -302,13 +302,11 @@ impl Packet<[u8]> {
     ///
     /// Returns [`Err`] if this packet is smaller than [`Ipv4Header::LEN`] bytes.
     pub fn try_into_ip(self) -> eyre::Result<Packet<Ip>> {
-        let packet = decode_owned(
-            self,
-            IpDecoder {
-                version: false,
-                min_length: true,
-            },
-        )?;
+        let decoder = IpDecoder {
+            version: false,
+            min_length: true,
+        };
+        let packet = decoder.decode_owned(self)?;
         Ok(packet)
     }
 
@@ -353,7 +351,7 @@ impl Packet<Ip> {
                     ..Ipv4Decoder::CHECK_ALL
                 };
 
-                decode_owned(self, decoder).map(Either::Left)
+                decoder.decode_owned(self).map(Either::Left)
             }
             6 => {
                 let decoder = Ipv6Decoder {
@@ -361,7 +359,7 @@ impl Packet<Ip> {
                     ..Ipv6Decoder::CHECK_ALL
                 };
 
-                decode_owned(self, decoder).map(Either::Right)
+                decoder.decode_owned(self).map(Either::Right)
             }
             v => bail!("Bad IP version: {v}"),
         }
@@ -389,7 +387,7 @@ impl Packet<Ipv4> {
                 checksum: false,
             },
         };
-        Ok(decode_owned(self, decoder)?)
+        Ok(decoder.decode_owned(self)?)
     }
 
     /// Try to cast this [`Ipv4`] packet into an [`Tcp`] packet.
@@ -447,7 +445,7 @@ impl Packet<Ipv6> {
                 checksum: false,
             },
         };
-        Ok(decode_owned(self, decoder)?)
+        Ok(decoder.decode_owned(self)?)
     }
 
     /// Try to cast this [`Ipv6`] packet into an [`Tcp`] packet.

@@ -17,7 +17,7 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unali
 mod protocol;
 pub use protocol::*;
 
-use crate::packet::{DecodeAs, DecodeError, PseudoHeaderV4, Udp, UdpDecoder};
+use crate::packet::{DecodeError, Decoder, PseudoHeaderV4, Udp, UdpDecoder};
 
 use super::util::size_must_be;
 
@@ -34,6 +34,8 @@ pub struct Ipv4<Payload: ?Sized = [u8]> {
     /// IPv4 payload.
     pub payload: Payload,
 }
+
+pub struct Ipv4AssumeNoOptions;
 
 pub struct Ipv4Decoder {
     /// Fail if IP version field is wrong.
@@ -66,12 +68,11 @@ impl Ipv4Decoder {
     };
 }
 
-impl DecodeAs<Ipv4<Ipv4Options<[u8]>>> for [u8] {
-    type Decoder = Ipv4Decoder;
+impl Decoder<[u8], Ipv4<Ipv4Options<[u8]>>> for Ipv4Decoder {
+    fn validate(&self, bytes: &[u8]) -> Result<usize, DecodeError> {
+        let ipv4: &Ipv4 = Ipv4::try_ref_from_bytes(bytes)?;
 
-    fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
-        let ipv4: &Ipv4 = Ipv4::try_ref_from_bytes(self)?;
-
+        let d = self;
         if d.version && ipv4.header.version() != 4 {
             return Err(DecodeError::InvalidValue("version"));
         }
@@ -85,40 +86,39 @@ impl DecodeAs<Ipv4<Ipv4Options<[u8]>>> for [u8] {
 
         let total_len = usize::from(ipv4.header.total_len.get());
         if d.length || d.truncate {
-            if total_len > self.len() || total_len < Ipv4Header::LEN {
+            if total_len > bytes.len() || total_len < Ipv4Header::LEN {
                 return Err(DecodeError::InvalidValue("total_len"));
             }
         }
 
         if d.ihl {
             let ihl = usize::from(ipv4.header.ihl());
-            if ihl < 5 || ihl * size_of::<u32>() > self.len() {
+            if ihl < 5 || ihl * size_of::<u32>() > bytes.len() {
                 return Err(DecodeError::InvalidValue("IHL"));
             }
         }
 
-        let len = if d.truncate { total_len } else { self.len() };
+        let len = if d.truncate { total_len } else { bytes.len() };
 
         Ok(len)
     }
 }
 
-impl DecodeAs<Ipv4<[u8]>> for Ipv4<Ipv4Options<[u8]>> {
-    type Decoder = ();
-    fn validate(&self, _: Self::Decoder) -> Result<usize, DecodeError> {
-        if self.header.ihl() == 5 {
-            Ok(self.as_bytes().len())
+impl Decoder<Ipv4<Ipv4Options<[u8]>>, Ipv4<[u8]>> for Ipv4AssumeNoOptions {
+    fn validate(&self, ipv4: &Ipv4<Ipv4Options<[u8]>>) -> Result<usize, DecodeError> {
+        if ipv4.header.ihl() == 5 {
+            Ok(ipv4.as_bytes().len())
         } else {
             Err(DecodeError::InvalidValue("IHL"))
         }
     }
 }
 
-impl DecodeAs<Ipv4<[u8]>> for [u8] {
-    type Decoder = Ipv4Decoder;
-    fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
-        let ipv4: &Ipv4 = Ipv4::try_ref_from_bytes(self)?;
+impl Decoder<[u8], Ipv4<[u8]>> for Ipv4Decoder {
+    fn validate(&self, bytes: &[u8]) -> Result<usize, DecodeError> {
+        let ipv4: &Ipv4 = Ipv4::try_ref_from_bytes(bytes)?;
 
+        let d = self;
         if d.version && ipv4.header.version() != 4 {
             return Err(DecodeError::InvalidValue("version"));
         }
@@ -132,7 +132,7 @@ impl DecodeAs<Ipv4<[u8]>> for [u8] {
 
         let total_len = usize::from(ipv4.header.total_len.get());
         if d.length || d.truncate {
-            if total_len > self.len() || total_len < Ipv4Header::LEN {
+            if total_len > bytes.len() || total_len < Ipv4Header::LEN {
                 return Err(DecodeError::InvalidValue("total_len"));
             }
         }
@@ -144,7 +144,7 @@ impl DecodeAs<Ipv4<[u8]>> for [u8] {
             }
         }
 
-        let len = if d.truncate { total_len } else { self.len() };
+        let len = if d.truncate { total_len } else { bytes.len() };
 
         Ok(len)
     }
@@ -172,38 +172,37 @@ impl Ipv4PayloadDecoder<UdpDecoder> {
     };
 }
 
-impl DecodeAs<Ipv4<Udp>> for Ipv4<[u8]> {
-    type Decoder = Ipv4PayloadDecoder<UdpDecoder>;
-
-    fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
-        if d.ip_next_protocol && self.header.next_protocol() != IpNextProtocol::Udp {
+impl Decoder<Ipv4<[u8]>, Ipv4<Udp>> for Ipv4PayloadDecoder<UdpDecoder> {
+    fn validate(&self, ipv4: &Ipv4<[u8]>) -> Result<usize, DecodeError> {
+        let d = self;
+        if d.ip_next_protocol && ipv4.header.next_protocol() != IpNextProtocol::Udp {
             return Err(DecodeError::InvalidValue("protocol"));
         }
 
-        if d.dont_fragment && (self.header.fragment_offset() != 0 || self.header.more_fragments()) {
+        if d.dont_fragment && (ipv4.header.fragment_offset() != 0 || ipv4.header.more_fragments()) {
             return Err(DecodeError::InvalidValue(
                 "fragment_offset / more_fragments",
             ));
         }
 
         if d.inner.checksum {
-            let udp = Udp::<[u8]>::try_ref_from_bytes(&self.payload)?;
+            let udp = Udp::<[u8]>::try_ref_from_bytes(&ipv4.payload)?;
             if udp.header.checksum.get() != 0 {
                 let header = PseudoHeaderV4::from_bytes(
-                    self.header.source_address,
-                    self.header.destination_address,
+                    ipv4.header.source_address,
+                    ipv4.header.destination_address,
                     IpNextProtocol::Udp,
-                    self.payload.as_bytes(),
+                    ipv4.payload.as_bytes(),
                 );
                 let expected_csum =
-                    crate::packet::util::checksum_udp_with_skip(header, self.payload.as_bytes());
+                    crate::packet::util::checksum_udp_with_skip(header, ipv4.payload.as_bytes());
                 if expected_csum != udp.header.checksum.get() {
                     return Err(DecodeError::InvalidValue("UDP checksum"));
                 }
             }
         }
 
-        let len = DecodeAs::<Udp>::validate(&self.payload, d.inner)?;
+        let len = d.inner.validate(&ipv4.payload)?;
         Ok(len + Ipv4Header::LEN)
     }
 }
@@ -494,7 +493,7 @@ mod tests {
     use zerocopy::{FromBytes, IntoBytes, big_endian};
 
     use super::{Ipv4, Ipv4Decoder, Ipv4Header, Ipv4PayloadDecoder};
-    use crate::packet::{DecodeError, IpNextProtocol, Udp, UdpDecoder, UdpHeader, decode_ref};
+    use crate::packet::{DecodeError, Decoder, IpNextProtocol, Udp, UdpDecoder, UdpHeader};
     use std::net::Ipv4Addr;
 
     const EXAMPLE_IPV4_ICMP: &[u8] = &[
@@ -531,17 +530,12 @@ mod tests {
     /// Test that [`decode_ref`] can decode a valid IPv4/UDP packet.
     #[test]
     fn ipv4_decode_and_validate() {
-        let ipv4: &Ipv4 =
-            decode_ref(EXAMPLE_IPV4_UDP_RAW, Ipv4Decoder::CHECK_ALL).expect("IPv4 packet is valid");
-        let ipv4_udp: &Ipv4<Udp> = decode_ref(
-            ipv4,
-            Ipv4PayloadDecoder {
-                ip_next_protocol: true,
-                dont_fragment: true,
-                inner: UdpDecoder::CHECK_ALL,
-            },
-        )
-        .expect("IPv4/UDP packet is valid");
+        let ipv4: &Ipv4 = Ipv4Decoder::CHECK_ALL
+            .decode_ref(EXAMPLE_IPV4_UDP_RAW)
+            .expect("IPv4 packet is valid");
+        let ipv4_udp: &Ipv4<Udp> = Ipv4PayloadDecoder::<UdpDecoder>::CHECK_ALL
+            .decode_ref(ipv4)
+            .expect("IPv4/UDP packet is valid");
 
         assert_eq!(ipv4_udp.as_bytes(), EXAMPLE_IPV4_UDP_RAW);
     }
@@ -552,11 +546,12 @@ mod tests {
         let mut ipv4 = EXAMPLE_IPV4_UDP;
         ipv4.header.header_checksum.set(1234);
 
-        let _ipv4_with_bad_checksum: &Ipv4 =
-            decode_ref(ipv4.as_bytes(), Ipv4Decoder::UNCHECKED).expect("Validation is disabled");
+        let _ipv4_with_bad_checksum: &Ipv4 = Ipv4Decoder::UNCHECKED
+            .decode_ref(ipv4.as_bytes())
+            .expect("Validation is disabled");
 
         let Err(DecodeError::InvalidValue("checksum")) =
-            decode_ref::<_, Ipv4>(ipv4.as_bytes(), Ipv4Decoder::CHECK_ALL)
+            Decoder::<_, Ipv4<[u8]>>::decode_ref(&Ipv4Decoder::CHECK_ALL, ipv4.as_bytes())
         else {
             panic!("Must fail with checksum error");
         };
