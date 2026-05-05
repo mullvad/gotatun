@@ -160,7 +160,7 @@ pub struct IpPayloadDecoder<Inner> {
     /// Assert that [`IpNextHeader`] matches the payload.
     pub ip_next_protocol: bool,
     /// Assert that the IP packet is not a fragment.
-    pub fragment: bool, // TODO: name
+    pub dont_fragment: bool,
     pub inner: Inner,
 }
 
@@ -172,7 +172,7 @@ impl DecodeAs<Ipv4<Udp>> for Ipv4<[u8]> {
             return Err(DecodeError::InvalidProtocol);
         }
 
-        if d.fragment && (self.header.fragment_offset() != 0 || self.header.more_fragments()) {
+        if d.dont_fragment && (self.header.fragment_offset() != 0 || self.header.more_fragments()) {
             return Err(DecodeError::InvalidValue(
                 "fragment_offset / more_fragments",
             ));
@@ -210,7 +210,7 @@ fn example_ipv4_udp(bytes: &[u8]) -> &Ipv4<super::Udp> {
         ipv4,
         IpPayloadDecoder {
             ip_next_protocol: false,
-            fragment: false,
+            dont_fragment: false,
             inner: UdpDecoder {
                 length: true,
                 checksum: true,
@@ -510,7 +510,7 @@ mod tests {
             ipv4,
             IpPayloadDecoder {
                 ip_next_protocol: true,
-                fragment: true,
+                dont_fragment: true,
                 inner: UdpDecoder::CHECK_ALL,
             },
         )
