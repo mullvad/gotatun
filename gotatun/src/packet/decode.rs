@@ -45,8 +45,6 @@ where
 
     /// Try to decode the `&mut Src` packet as `&mut Dst`.
     ///
-    /// `Src` must be decodeable as `Dst` using [`DecodeAs`].
-    ///
     /// See also: [`Self::decode_ref`], [`Self::decode_owned`].
     fn decode_mut<'a>(&self, source: &'a mut Src) -> Result<&'a mut Dst, DecodeError>
     where
@@ -59,8 +57,6 @@ where
     }
 
     /// Try to decode the `Packet<Src>` packet as `Packet<Dst>`.
-    ///
-    /// `Src` must be decodeable as `Dst` using [`DecodeAs`].
     ///
     /// See also: [`Self::decode_ref`], [`Self::decode_mut`].
     fn decode_owned(&self, source: Packet<Src>) -> Result<Packet<Dst>, DecodeError>
