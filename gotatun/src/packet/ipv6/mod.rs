@@ -169,13 +169,15 @@ pub struct Ipv6Decoder {
 }
 
 impl Ipv6Decoder {
-    pub const EVERYTHING: Self = Self {
+    /// Validate as *much* as possible about the decoded packet.
+    pub const CHECK_ALL: Self = Self {
         version: true,
         length: true,
         truncate: true,
     };
 
-    pub const NOTHING: Self = Self {
+    /// Validate as *little* as possible about the decoded packet.
+    pub const UNCHECKED: Self = Self {
         version: false,
         length: false,
         truncate: false,
@@ -219,7 +221,7 @@ impl DecodeAs<Ipv6<Udp>> for Ipv6<[u8]> {
 
 #[cfg(test)]
 mod tests {
-    use zerocopy::FromBytes;
+    use zerocopy::{FromBytes, IntoBytes};
 
     use super::{Ipv6, Ipv6Decoder};
     use crate::packet::{IpNextProtocol, Ipv6Header, decode_ref};
@@ -234,6 +236,13 @@ mod tests {
         0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
         0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
     ];
+
+    #[test]
+    fn ipv6_decode_and_validate() {
+        let ipv6: &Ipv6 =
+            decode_ref(EXAMPLE_IPV6_ICMP, Ipv6Decoder::CHECK_ALL).expect("IPv6 packet is valid");
+        assert_eq!(ipv6.as_bytes(), EXAMPLE_IPV6_ICMP);
+    }
 
     #[test]
     fn ipv6_header_layout() {
@@ -260,6 +269,6 @@ mod tests {
             EXAMPLE_IPV6_ICMP.len(),
         );
 
-        decode_ref::<_, Ipv6>(EXAMPLE_IPV6_ICMP, Ipv6Decoder::EVERYTHING).expect("Packet is valid");
+        decode_ref::<_, Ipv6>(EXAMPLE_IPV6_ICMP, Ipv6Decoder::CHECK_ALL).expect("Packet is valid");
     }
 }
