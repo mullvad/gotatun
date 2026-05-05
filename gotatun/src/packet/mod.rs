@@ -165,6 +165,7 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
         self.cast()
     }
 
+    #[cfg(test)]
     fn buf(&self) -> &[u8] {
         &self.inner.buf
     }
