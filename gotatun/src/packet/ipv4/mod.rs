@@ -85,10 +85,8 @@ impl DecodeAs<Ipv4<Ipv4Options<[u8]>>> for [u8] {
 
         let total_len = usize::from(ipv4.header.total_len.get());
         if d.length || d.truncate {
-            if total_len > self.len() {
-                return Err(DecodeError::HeaderTooBig);
-            } else if total_len < Ipv4Header::LEN {
-                return Err(DecodeError::HeaderTooSmall);
+            if total_len > self.len() || total_len < Ipv4Header::LEN {
+                return Err(DecodeError::InvalidValue("total_len"));
             }
         }
 
@@ -134,10 +132,8 @@ impl DecodeAs<Ipv4<[u8]>> for [u8] {
 
         let total_len = usize::from(ipv4.header.total_len.get());
         if d.length || d.truncate {
-            if total_len > self.len() {
-                return Err(DecodeError::HeaderTooBig);
-            } else if total_len < Ipv4Header::LEN {
-                return Err(DecodeError::HeaderTooSmall);
+            if total_len > self.len() || total_len < Ipv4Header::LEN {
+                return Err(DecodeError::InvalidValue("total_len"));
             }
         }
 

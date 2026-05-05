@@ -70,7 +70,7 @@ impl DecodeAs<Ip> for [u8] {
         };
 
         if d.min_length && self.len() < min_length {
-            return Err(super::DecodeError::HeaderTooSmall); // TODO
+            return Err(super::DecodeError::InvalidValue("length"));
         }
 
         Ok(self.len())

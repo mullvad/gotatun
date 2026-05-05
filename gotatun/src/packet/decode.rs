@@ -25,10 +25,6 @@ pub trait DecodeAs<Target: FromBytes + ?Sized>: IntoBytes + Immutable {
 pub enum DecodeError {
     #[error("Invalid IP version")]
     InvalidIpVersion,
-    #[error("Header Too Small")]
-    HeaderTooSmall,
-    #[error("Header Too Big")]
-    HeaderTooBig,
     #[error("Bad Checksum")]
     BadChecksum,
     #[error("Invalid protocol")]
@@ -38,16 +34,18 @@ pub enum DecodeError {
     // zerocopy errors
     #[error("Bad alignment")]
     BadAlignment,
-    #[error("Invalid something something")]
-    Invalid,
+    #[error("Invalid source size")]
+    InvalidSourceSize,
+    #[error("Invalid source data")]
+    InvalidSourceData,
 }
 
 impl<S, D: ?Sized + TryFromBytes> From<zerocopy::TryCastError<S, D>> for DecodeError {
     fn from(value: zerocopy::TryCastError<S, D>) -> Self {
         match value {
             zerocopy::TryCastError::Alignment(..) => DecodeError::BadAlignment,
-            zerocopy::TryCastError::Size(..) => DecodeError::HeaderTooSmall, // TODO: can technically be toobig also
-            zerocopy::TryCastError::Validity(..) => DecodeError::Invalid,
+            zerocopy::TryCastError::Size(..) => DecodeError::InvalidSourceSize,
+            zerocopy::TryCastError::Validity(..) => DecodeError::InvalidSourceData,
         }
     }
 }

@@ -193,7 +193,7 @@ impl DecodeAs<Ipv6<[u8]>> for [u8] {
         let total_len = ipv6.header.total_length();
         if d.length || d.truncate {
             if total_len > self.len() {
-                return Err(DecodeError::HeaderTooBig); // TODO
+                return Err(DecodeError::InvalidValue("total length"));
             }
         }
 
