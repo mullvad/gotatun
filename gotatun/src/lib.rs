@@ -14,6 +14,10 @@
 
 // Warn on missing docs when running `cargo doc`
 #![cfg_attr(doc, warn(missing_docs))]
+// Enables this nightly only feature for the documentation build on docs.rs.
+// To test this locally, build the docs with:
+// `RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features`
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod crypto;
 #[cfg(feature = "device")]
