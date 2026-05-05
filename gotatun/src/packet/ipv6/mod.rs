@@ -218,7 +218,7 @@ impl Decoder<Ipv6<[u8]>, Ipv6<Udp>> for Ipv6PayloadDecoder<UdpDecoder> {
 
 /// A [`Decoder`] for [`Ipv6::payload`] into a transport protocol like [`Udp`].
 pub struct Ipv6PayloadDecoder<Inner> {
-    /// Assert that [`IpNextHeader`] matches the payload.
+    /// Assert that [`IpNextProtocol`] matches the payload.
     pub ip_next_protocol: bool,
     /// Decoder for the inner transport protocol
     pub inner: Inner,

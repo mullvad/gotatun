@@ -155,7 +155,7 @@ impl Decoder<[u8], Ipv4<[u8]>> for Ipv4Decoder {
 
 /// A [`Decoder`] for [`Ipv4::payload`] into a transport protocol like [`Udp`].
 pub struct Ipv4PayloadDecoder<Inner> {
-    /// Assert that [`IpNextHeader`] matches the payload.
+    /// Assert that [`IpNextProtocol`] matches the payload.
     pub ip_next_protocol: bool,
     /// Assert that the IP packet is not a fragment.
     pub dont_fragment: bool,
