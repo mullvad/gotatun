@@ -33,8 +33,6 @@ pub enum DecodeError {
     BadChecksum,
     #[error("Invalid protocol")]
     InvalidProtocol,
-    #[error("BALHALHALHLH")]
-    Etc,
     #[error("Invalid value for {0}")]
     InvalidValue(&'static str),
     // zerocopy errors
