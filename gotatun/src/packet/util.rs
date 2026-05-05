@@ -166,7 +166,7 @@ fn checksum_payload_with_skip(bytes: &[u8], skip_word_index: usize) -> u32 {
     let mut sum: u32 = words
         .iter()
         .enumerate()
-        .filter(|(i, _)| *i == skip_word_index)
+        .filter(|(i, _)| *i != skip_word_index)
         .map(|(_, w)| u32::from(w.get()))
         .sum();
     if let [b] = rest {
