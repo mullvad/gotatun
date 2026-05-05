@@ -16,7 +16,7 @@ use either::Either;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
 use crate::packet::{
-    DecodeAs, Ipv4, Ipv4Decoder, Ipv4Header, Ipv4Options, Ipv6, Ipv6Decoder, Ipv6Header,
+    Decoder, Ipv4, Ipv4Decoder, Ipv4Header, Ipv4Options, Ipv6, Ipv6Decoder, Ipv6Header,
 };
 
 /// A packet bitfield-struct containing the `version`-field that is shared between IPv4 and IPv6.
@@ -54,13 +54,12 @@ pub struct IpDecoder {
     pub min_length: bool,
 }
 
-impl DecodeAs<Ip> for [u8] {
-    type Decoder = IpDecoder;
+/// Decode a byte slice into an [`Ip`] packet.
+impl Decoder<[u8], Ip> for IpDecoder {
+    fn validate(&self, bytes: &[u8]) -> Result<usize, super::DecodeError> {
+        let ip: &Ip = Ip::try_ref_from_bytes(bytes)?;
 
-    fn validate(&self, d: Self::Decoder) -> Result<usize, super::DecodeError> {
-        let ip: &Ip = Ip::try_ref_from_bytes(self)?;
-
-        let min_length = if d.version {
+        let min_length = if self.version {
             match ip.header.version() {
                 4 => Ipv4Header::LEN,
                 6 => Ipv6Header::LEN,
@@ -70,34 +69,32 @@ impl DecodeAs<Ip> for [u8] {
             Ipv4Header::LEN
         };
 
-        if d.min_length && self.len() < min_length {
+        if self.min_length && bytes.len() < min_length {
             return Err(super::DecodeError::InvalidValue("length"));
         }
 
-        Ok(self.len())
+        Ok(bytes.len())
     }
 }
 
-impl DecodeAs<Ipv4<Ipv4Options>> for Ip {
-    type Decoder = Ipv4Decoder;
-
-    fn validate(&self, d: Self::Decoder) -> Result<usize, super::DecodeError> {
-        DecodeAs::<Ipv4<Ipv4Options>>::validate(self.as_bytes(), d)
-    }
-}
-impl DecodeAs<Ipv4<[u8]>> for Ip {
-    type Decoder = Ipv4Decoder;
-
-    fn validate(&self, d: Self::Decoder) -> Result<usize, super::DecodeError> {
-        DecodeAs::<Ipv4<[u8]>>::validate(self.as_bytes(), d)
+/// Decode an [`Ip`] packet into an [`Ipv4`] packet.
+impl Decoder<Ip, Ipv4<Ipv4Options>> for Ipv4Decoder {
+    fn validate(&self, ip: &Ip) -> Result<usize, super::DecodeError> {
+        Decoder::<_, Ipv4<Ipv4Options>>::validate(self, ip.as_bytes())
     }
 }
 
-impl DecodeAs<Ipv6> for Ip {
-    type Decoder = Ipv6Decoder;
+/// Decode an [`Ip`] packet into an [`Ipv4`] packet (without optional header fields).
+impl Decoder<Ip, Ipv4<[u8]>> for Ipv4Decoder {
+    fn validate(&self, ip: &Ip) -> Result<usize, super::DecodeError> {
+        Decoder::<_, Ipv4<[u8]>>::validate(self, ip.as_bytes())
+    }
+}
 
-    fn validate(&self, d: Self::Decoder) -> Result<usize, super::DecodeError> {
-        DecodeAs::<Ipv6>::validate(self.as_bytes(), d)
+/// Decode an [`Ip`] packet into an [`Ipv6`].
+impl Decoder<Ip, Ipv6> for Ipv6Decoder {
+    fn validate(&self, ip: &Ip) -> Result<usize, super::DecodeError> {
+        self.validate(ip.as_bytes())
     }
 }
 

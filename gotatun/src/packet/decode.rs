@@ -2,32 +2,72 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 use crate::packet::Packet;
 
-/// A trait that enables byte-wise conversion between one packet type and another through zerocopy.
+use super::CheckedPayload;
+
+/// A trait that enables byte-wise conversion from one packet type to another through zerocopy.
+/// See [`crate::packet::Ipv4Decoder`] for an example.
 ///
 /// # Validation
 /// This trait asserts, at minimum, that `Src` can be soundly transmuted into `Dst`, but
 /// does not necessarily assert that the value resulting from the conversion is sane.
-///
-/// [`DecodeAs::validate`] _should_ perform validation, subject to configuration by the [`DecodeAs::Decoder`].
-pub trait DecodeAs<Target: FromBytes + ?Sized>: IntoBytes + Immutable {
-    type Decoder;
-
-    /// Validate that `Self` is a valid instance of `Target`.
+pub trait Decoder<Src, Dst>
+where
+    Src: IntoBytes + Immutable + KnownLayout + ?Sized,
+    Dst: TryFromBytes + Immutable + KnownLayout + ?Sized,
+{
+    /// Validate that the `Src` is a valid instance of `Dst`.
     ///
-    /// The returned `usize` indicated the byte-wise length of `Target`,
-    /// since it may be smaller than `Self`.
-    fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError>;
+    /// The returned `usize` indicated the byte-wise length of `Dst`,
+    /// since it may be smaller than `Src`.
+    fn validate(&self, s: &Src) -> Result<usize, DecodeError>;
+
+    /// Try to decode the `&Src` packet as `&Dst`.
+    /// See also: [`Decoder::decode_mut`], [`Decoder::decode_owned`].
+    fn decode_ref<'a>(&self, source: &'a Src) -> Result<&'a Dst, DecodeError> {
+        let len = self.validate(source)?;
+        let bytes = &source.as_bytes()[..len];
+        Ok(Dst::try_ref_from_bytes(bytes)?)
+    }
+
+    /// Try to decode the `&mut Src` packet as `&mut Dst`.
+    ///
+    /// See also: [`Self::decode_ref`], [`Self::decode_owned`].
+    fn decode_mut<'a>(&self, source: &'a mut Src) -> Result<&'a mut Dst, DecodeError>
+    where
+        Src: FromBytes,
+        Dst: IntoBytes,
+    {
+        let len = self.validate(source)?;
+        let bytes = &mut source.as_mut_bytes()[..len];
+        Ok(Dst::try_mut_from_bytes(bytes)?)
+    }
+
+    /// Try to decode the `Packet<Src>` packet as `Packet<Dst>`.
+    ///
+    /// See also: [`Self::decode_ref`], [`Self::decode_mut`].
+    fn decode_owned(&self, source: Packet<Src>) -> Result<Packet<Dst>, DecodeError>
+    where
+        Src: CheckedPayload,
+        Dst: CheckedPayload,
+    {
+        let len = self.validate(&*source)?;
+        let mut source = source.into_bytes();
+        source.truncate(len);
+        Ok(source.cast())
+    }
 }
 
-/// An error returned by [`decode_ref`] and friends.
+/// An error returned by [`Decoder::decode_ref`] and friends.
 #[derive(Debug, thiserror::Error)]
 pub enum DecodeError {
+    /// Invalid value.
     #[error("Invalid value for {0}")]
     InvalidValue(&'static str),
     // zerocopy errors
     /// Bad alignment.
     #[error("Bad alignment")]
     BadAlignment,
+    /// Invalid source size.
     #[error("Invalid source size")]
     InvalidSourceSize,
     /// Invalid source data.
@@ -43,56 +83,4 @@ impl<S, D: ?Sized + TryFromBytes> From<zerocopy::TryCastError<S, D>> for DecodeE
             zerocopy::TryCastError::Validity(..) => DecodeError::InvalidSourceData,
         }
     }
-}
-
-/// Try to decode the `&Src` packet as `&Dst`.
-///
-/// `Src` must be decodeable as `Dst` using [`DecodeAs`].
-///
-/// See also: [`decode_mut`], [`decode_owned`].
-pub fn decode_ref<Src, Dst>(source: &Src, decoder: Src::Decoder) -> Result<&Dst, DecodeError>
-where
-    Src: DecodeAs<Dst> + ?Sized,
-    Dst: FromBytes + KnownLayout + Immutable + ?Sized,
-{
-    let len = source.validate(decoder)?;
-    let bytes = &source.as_bytes()[..len];
-    Ok(Dst::try_ref_from_bytes(bytes)?)
-}
-
-/// Try to decode the `&mut Src` packet as `&mut Dst`.
-///
-/// `Src` must be decodeable as `Dst` using [`DecodeAs`].
-///
-/// See also: [`decode_ref`], [`decode_owned`].
-pub fn decode_mut<Src, Dst>(
-    source: &mut Src,
-    decoder: Src::Decoder,
-) -> Result<&mut Dst, DecodeError>
-where
-    Src: DecodeAs<Dst> + FromBytes + ?Sized,
-    Dst: IntoBytes + FromBytes + KnownLayout + Immutable + ?Sized,
-{
-    let len = source.validate(decoder)?;
-    let bytes = &mut source.as_mut_bytes()[..len];
-    Ok(Dst::try_mut_from_bytes(bytes)?)
-}
-
-/// Try to decode the `Packet<Src>` packet as `Packet<Dst>`.
-///
-/// `Src` must be decodeable as `Dst` using [`DecodeAs`].
-///
-/// See also: [`decode_ref`], [`decode_mut`].
-pub fn decode_owned<Src, Dst>(
-    source: Packet<Src>,
-    decoder: Src::Decoder,
-) -> Result<Packet<Dst>, DecodeError>
-where
-    Src: DecodeAs<Dst> + FromBytes + ?Sized + super::CheckedPayload,
-    Dst: IntoBytes + FromBytes + KnownLayout + Immutable + super::CheckedPayload + ?Sized,
-{
-    let len = source.validate(decoder)?;
-    let mut source = source.into_bytes();
-    source.truncate(len);
-    Ok(source.cast())
 }

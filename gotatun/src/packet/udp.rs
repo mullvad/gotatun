@@ -13,7 +13,7 @@ use std::fmt;
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
-use crate::packet::{DecodeAs, DecodeError};
+use crate::packet::{DecodeError, Decoder};
 
 use super::util::size_must_be;
 
@@ -94,19 +94,18 @@ impl UdpDecoder {
     };
 }
 
-impl DecodeAs<Udp> for [u8] {
-    type Decoder = UdpDecoder;
-
-    fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
-        let udp = Udp::<[u8]>::try_ref_from_bytes(self)?;
+/// Decode a byte slice into an [`Udp`] packet (without an IP header).
+impl Decoder<[u8], Udp> for UdpDecoder {
+    fn validate(&self, bytes: &[u8]) -> Result<usize, DecodeError> {
+        let udp = Udp::<[u8]>::try_ref_from_bytes(bytes)?;
 
         if self.length {
             let udp_len = usize::from(udp.header.length.get());
-            if self.len() != udp_len {
+            if bytes.len() != udp_len {
                 return Err(DecodeError::InvalidValue("UDP Length"));
             }
         }
 
-        Ok(self.len())
+        Ok(bytes.len())
     }
 }
