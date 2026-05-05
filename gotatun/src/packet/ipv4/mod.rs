@@ -11,15 +11,13 @@
 
 use bitfield_struct::bitfield;
 use eyre::eyre;
-use std::{fmt::Debug, mem::offset_of, net::Ipv4Addr};
+use std::{fmt::Debug, net::Ipv4Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
 mod protocol;
 pub use protocol::*;
 
-use crate::packet::{
-    DecodeAs, DecodeError, PseudoHeaderV4, Udp, UdpDecoder, UdpHeader, decode_ref,
-};
+use crate::packet::{DecodeAs, DecodeError, PseudoHeaderV4, Udp, UdpDecoder};
 
 use super::util::size_must_be;
 
