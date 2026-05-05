@@ -406,6 +406,10 @@ impl<P: ?Sized> Ipv4<P>
 where
     Self: IntoBytes + Immutable,
 {
+    /// Update [`Ipv4Header::total_len`] according to how big `self` is.
+    ///
+    /// # Errors
+    /// Returns an error if `self` is larger than [`Ipv4::MAX_LEN`].
     pub fn try_update_ip_len(&mut self) -> eyre::Result<()> {
         self.header.total_len = self
             .as_bytes()
