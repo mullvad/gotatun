@@ -358,7 +358,7 @@ impl Packet<Ip> {
             6 => {
                 let decoder = Ipv6Decoder {
                     version: false,
-                    ..Ipv6Decoder::EVERYTHING
+                    ..Ipv6Decoder::CHECK_ALL
                 };
 
                 decode_owned(self, decoder).map(Either::Right)
