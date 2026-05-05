@@ -10,7 +10,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use bitfield_struct::bitfield;
-use eyre::eyre;
+use eyre::{bail, eyre};
 use std::{fmt::Debug, net::Ipv4Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
@@ -238,10 +238,10 @@ impl DecodeAs<Ipv4<Udp>> for Ipv4<[u8]> {
 
 /// IPv4 options and payload.
 #[repr(C)]
-#[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
+#[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Ipv4Options<T: ?Sized = [u8]> {
     _pd: std::marker::PhantomData<T>,
-    options: [u8],
+    options_and_payload: [u8],
 }
 
 /// A bitfield struct containing the IPv4 fields `version` and `ihl`.
@@ -440,6 +440,40 @@ where
             .try_into()
             .map_err(|_| eyre!("IPv4 packet was larger than {}", u16::MAX))?;
         Ok(())
+    }
+}
+
+impl<P> Ipv4<Ipv4Options<P>>
+where
+    P: TryFromBytes + Immutable + KnownLayout,
+{
+    fn options_and_payload_bytes(&self) -> eyre::Result<(&[u8], &[u8])> {
+        let header_len = usize::from(self.header.ihl()) * size_of::<u32>();
+
+        let Some(options_len) = header_len.checked_sub(Ipv4Header::LEN) else {
+            bail!("Invalid IHL");
+        };
+
+        self.payload
+            .options_and_payload
+            .split_at_checked(options_len)
+            .ok_or(eyre!("IHL larger than header"))
+    }
+
+    fn payload_bytes(&self) -> eyre::Result<&[u8]> {
+        Ok(self.options_and_payload_bytes()?.1)
+    }
+
+    /// Get the payload of this IPv4 packet.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Err`] if this packet has an invalid `IHL`, or if the payload bytes fails to be
+    /// cast into `P`.
+    pub fn payload(&self) -> eyre::Result<&P> {
+        let bytes = self.payload_bytes()?;
+        let payload = P::try_ref_from_bytes(bytes).map_err(|e| eyre!("{e}"))?;
+        Ok(payload)
     }
 }
 
