@@ -72,8 +72,11 @@ impl fmt::Debug for UdpHeader {
     }
 }
 
+/// A [`Decoder`] for [`Udp`] datagrams.
 pub struct UdpDecoder {
+    /// Validate UDP length field.
     pub length: bool,
+    /// Validate UDP checksum field.
     pub checksum: bool, // TODO: should this be here?
 }
 
