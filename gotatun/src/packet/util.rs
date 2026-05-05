@@ -13,7 +13,7 @@ use std::mem::offset_of;
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
-use crate::packet::{IpNextProtocol, Udp};
+use crate::packet::{IpNextProtocol, TcpHeader, Udp, UdpHeader};
 
 /// Check that the size of type `T` is `size`. If not, panic.
 ///
@@ -145,6 +145,18 @@ pub fn checksum_udp_with_skip<H: IntoBytes + Immutable>(header: H, payload: &[u8
         return !0;
     }
     csum
+}
+
+/// Compute an "Internet checksum" with an additional header and a final
+/// inversion of all bits if the checksum is all zeros. This is used for UDP checksums
+/// because 0 means "no checksum" in UDP + IPv4.
+///
+/// This also skips any existing checksum field.
+pub fn checksum_tcp_with_skip<H: IntoBytes + Immutable>(header: H, payload: &[u8]) -> u16 {
+    const SKIP_INDEX: usize = offset_of!(TcpHeader, checksum) / size_of::<u16>();
+    let mut sum = checksum_payload(header.as_bytes());
+    sum += checksum_payload_with_skip(payload, SKIP_INDEX);
+    finalize_csum(sum)
 }
 
 fn checksum_payload(bytes: &[u8]) -> u32 {
