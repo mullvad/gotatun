@@ -49,6 +49,15 @@ pub struct UdpHeader {
 impl UdpHeader {
     /// Length of a [`UdpHeader`], in bytes.
     pub const LEN: usize = size_must_be::<UdpHeader>(8);
+
+    pub const fn new(source_port: u16, destination_port: u16, length: u16, checksum: u16) -> Self {
+        UdpHeader {
+            source_port: big_endian::U16::new(source_port),
+            destination_port: big_endian::U16::new(destination_port),
+            length: big_endian::U16::new(length),
+            checksum: big_endian::U16::new(checksum),
+        }
+    }
 }
 
 impl fmt::Debug for UdpHeader {

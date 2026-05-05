@@ -462,10 +462,10 @@ impl Debug for Ipv4Header {
 
 #[cfg(test)]
 mod tests {
-    use zerocopy::FromBytes;
+    use zerocopy::{FromBytes, IntoBytes, big_endian};
 
-    use super::{Ipv4, Ipv4Header};
-    use crate::packet::IpNextProtocol;
+    use super::{IpPayloadDecoder, Ipv4, Ipv4Decoder, Ipv4Header};
+    use crate::packet::{IpNextProtocol, Udp, UdpDecoder, UdpHeader, decode_ref};
     use std::net::Ipv4Addr;
 
     const EXAMPLE_IPV4_ICMP: &[u8] = &[
@@ -476,6 +476,49 @@ mod tests {
         0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32,
         0x33, 0x34, 0x35, 0x36, 0x37,
     ];
+
+    const EXAMPLE_IPV4_UDP: Ipv4<Udp<[u8; 12]>> = Ipv4 {
+        header: Ipv4Header {
+            header_checksum: big_endian::U16::new(0x78c5),
+            ..Ipv4Header::new_for_length(
+                Ipv4Addr::new(1, 2, 3, 4),
+                Ipv4Addr::new(255, 254, 253, 252),
+                IpNextProtocol::Udp,
+                (UdpHeader::LEN + 11) as u16,
+            )
+        },
+        payload: Udp {
+            header: UdpHeader::new(12345, 65421, 11, 0),
+            payload: *b"Hello there!",
+        },
+    };
+    const EXAMPLE_IPV4_UDP_RAW: &[u8] = &[
+        0x45, 0x0, 0x0, 0x27, 0x0, 0x0, 0x0, 0x0, 0x40, 0x11, 0x78, 0xc5, 0x1, 0x2, 0x3, 0x4, 0xff,
+        0xfe, 0xfd, 0xfc, 0x30, 0x39, 0xff, 0x8d, 0x0, 0xb, 0x0, 0x0, 0x48, 0x65, 0x6c, 0x6c, 0x6f,
+        0x20, 0x74, 0x68, 0x65, 0x72, 0x65, 0x21,
+    ];
+
+    #[test]
+    fn ipv4_decode_and_validate() {
+        let ipv4: &Ipv4 =
+            decode_ref(EXAMPLE_IPV4_UDP_RAW, Ipv4Decoder::CHECK_ALL).expect("IPv4 packet is valid");
+        let ipv4_udp: &Ipv4<Udp> = decode_ref(
+            ipv4,
+            IpPayloadDecoder {
+                ip_next_protocol: true,
+                fragment: true,
+                inner: UdpDecoder::CHECK_ALL,
+            },
+        )
+        .expect("IPv4 packet is valid");
+
+        assert_eq!(ipv4_udp.as_bytes(), EXAMPLE_IPV4_UDP_RAW);
+    }
+
+    #[test]
+    fn ipv4_layout() {
+        assert_eq!(EXAMPLE_IPV4_UDP.as_bytes(), EXAMPLE_IPV4_UDP_RAW);
+    }
 
     #[test]
     fn ipv4_header_layout() {
