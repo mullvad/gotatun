@@ -100,6 +100,26 @@ impl PseudoHeaderV6 {
             length: udp.as_bytes().len().try_into().unwrap(),
         }
     }
+
+    /// Create a new [`PseudoHeaderV6`] from payload.
+    ///
+    /// # Panics
+    ///
+    /// This panics if `payload` is bigger than `u16::MAX`.
+    pub fn from_bytes(
+        source: big_endian::U128,
+        destination: big_endian::U128,
+        protocol: IpNextProtocol,
+        payload: &[u8],
+    ) -> Self {
+        Self {
+            source,
+            destination,
+            _zero: 0,
+            protocol,
+            length: payload.len().try_into().unwrap(),
+        }
+    }
 }
 
 /// Compute an "Internet checksum"

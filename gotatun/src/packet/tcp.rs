@@ -3,7 +3,7 @@ use std::fmt;
 use bitfield_struct::bitfield;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
-use crate::packet::util::size_must_be;
+use crate::packet::{IpNextProtocol, PseudoHeaderV4, PseudoHeaderV6, util::size_must_be};
 
 use super::{Ipv4, Ipv6};
 
@@ -211,8 +211,13 @@ impl Ipv4<Tcp> {
     #[must_use]
     pub fn calculate_tcp_checksum(&self) -> u16 {
         let tcp = &self.payload;
-        // TODO:
-        todo!()
+        let header = PseudoHeaderV4::from_bytes(
+            self.header.source_address,
+            self.header.destination_address,
+            IpNextProtocol::Tcp,
+            self.payload.as_bytes(),
+        );
+        crate::packet::util::checksum_tcp_with_skip(header, tcp.as_bytes())
     }
 
     /// Calculate and set the TCP checksum for this packet.
@@ -226,8 +231,13 @@ impl Ipv6<Tcp> {
     #[must_use]
     pub fn calculate_tcp_checksum(&self) -> u16 {
         let tcp = &self.payload;
-        // TODO:
-        todo!()
+        let header = PseudoHeaderV6::from_bytes(
+            self.header.source_address,
+            self.header.destination_address,
+            IpNextProtocol::Tcp,
+            self.payload.as_bytes(),
+        );
+        crate::packet::util::checksum_tcp_with_skip(header, tcp.as_bytes())
     }
 
     /// Calculate and set the TCP checksum for this packet.
