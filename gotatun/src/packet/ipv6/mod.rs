@@ -14,9 +14,7 @@ use eyre::eyre;
 use std::{fmt::Debug, net::Ipv6Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
-use super::{
-    DecodeAs, DecodeError, IpNextProtocol, IpPayloadDecoder, Udp, UdpDecoder, util::size_must_be,
-};
+use super::{DecodeAs, DecodeError, IpNextProtocol, Udp, UdpDecoder, util::size_must_be};
 
 /// An IPv6 packet.
 ///
@@ -208,7 +206,7 @@ impl DecodeAs<Ipv6<[u8]>> for [u8] {
 }
 
 impl DecodeAs<Ipv6<Udp>> for Ipv6<[u8]> {
-    type Decoder = IpPayloadDecoder<UdpDecoder>;
+    type Decoder = Ipv6PayloadDecoder<UdpDecoder>;
 
     fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
         if d.ip_next_protocol && self.header.next_protocol() != IpNextProtocol::Udp {
@@ -217,6 +215,28 @@ impl DecodeAs<Ipv6<Udp>> for Ipv6<[u8]> {
         let len = DecodeAs::<Udp>::validate(&self.payload, d.inner)?;
         Ok(len + Ipv6Header::LEN)
     }
+}
+
+/// A [`Decoder`] for [`Ipv6::payload`] into a transport protocol like [`Udp`].
+pub struct Ipv6PayloadDecoder<Inner> {
+    /// Assert that [`IpNextProtocol`] matches the payload.
+    pub ip_next_protocol: bool,
+    /// Decoder for the inner transport protocol
+    pub inner: Inner,
+}
+
+impl Ipv6PayloadDecoder<UdpDecoder> {
+    /// Validate as *much* as possible about the decoded UDP payload.
+    pub const CHECK_ALL: Self = Self {
+        ip_next_protocol: true,
+        inner: UdpDecoder::CHECK_ALL,
+    };
+
+    /// Validate as *little* as possible about the decoded UDP payload.
+    pub const UNCHECKED: Self = Self {
+        ip_next_protocol: false,
+        inner: UdpDecoder::UNCHECKED,
+    };
 }
 
 #[cfg(test)]

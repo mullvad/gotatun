@@ -382,7 +382,7 @@ impl Packet<Ipv4> {
     /// - the IHL is not `5`
     /// - UDP validation fails
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv4<Udp>>> {
-        let decoder = IpPayloadDecoder {
+        let decoder = Ipv4PayloadDecoder {
             ip_next_protocol: true,
             dont_fragment: true,
             inner: UdpDecoder {
@@ -441,9 +441,8 @@ impl Packet<Ipv6> {
     /// # Errors
     /// Returns an error if UDP validation fails
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv6<Udp>>> {
-        let decoder = IpPayloadDecoder {
+        let decoder = Ipv6PayloadDecoder {
             ip_next_protocol: true,
-            dont_fragment: true, // TODO: is this relevant or ipv6?
             inner: UdpDecoder {
                 length: true,
                 checksum: false,
