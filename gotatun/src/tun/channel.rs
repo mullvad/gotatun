@@ -119,7 +119,7 @@ impl IpRecv for TunChannelRx {
 mod fragmentation {
     use zerocopy::{FromBytes, FromZeros};
 
-    use crate::packet::Ipv4Header;
+    use crate::packet::{Ipv4Decoder, Ipv4Header, decode_owned};
     use std::{collections::VecDeque, net::Ipv4Addr};
 
     use crate::packet::{Ipv4, Packet};
@@ -304,16 +304,15 @@ mod fragmentation {
                 ip.header.header_checksum.zero();
             }
 
-            // NOTE: We could change the `tun_tx_vx` channels to take a tuple of source ip,
-            // destination ip, and `Packet<Udp>`, instead of `Packet<Ipv4<Udp>>`, to avoid
-            // having to reconstruct the IP head and validate the IP packet with
-            // `try_into_ipvx`
-            Some(
-                bytes
-                    .try_into_ipvx()
-                    .expect("Previously valid Ipv4 packet should still be valid")
-                    .unwrap_left(),
-            )
+            let decoder = if cfg!(debug_assertions) {
+                Ipv4Decoder::CHECK_ALL
+            } else {
+                Ipv4Decoder::UNCHECKED
+            };
+
+            let reassmebled_packet = decode_owned(bytes, decoder)
+                .expect("Previously valid IPv4 packet should still be valid");
+            Some(reassmebled_packet)
         }
     }
 
