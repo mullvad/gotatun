@@ -350,7 +350,7 @@ impl Packet<Ip> {
                 let decoder = Ipv4Decoder {
                     checksum: false,
                     version: false,
-                    ..Ipv4Decoder::EVERYTHING
+                    ..Ipv4Decoder::CHECK_ALL
                 };
 
                 decode_owned(self, decoder).map(Either::Left)
@@ -384,7 +384,7 @@ impl Packet<Ipv4> {
         let decoder = IpPayloadDecoder {
             ip_next_protocol: true,
             fragment: true,
-            inner: UdpValidator {
+            inner: UdpDecoder {
                 length: true,
                 checksum: false,
             },
@@ -443,7 +443,7 @@ impl Packet<Ipv6> {
         let decoder = IpPayloadDecoder {
             ip_next_protocol: true,
             fragment: true, // TODO: is this relevant or ipv6?
-            inner: UdpValidator {
+            inner: UdpDecoder {
                 length: true,
                 checksum: false,
             },

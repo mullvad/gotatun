@@ -62,13 +62,25 @@ impl fmt::Debug for UdpHeader {
     }
 }
 
-pub struct UdpValidator {
+pub struct UdpDecoder {
     pub length: bool,
     pub checksum: bool, // TODO: should this be here?
 }
 
+impl UdpDecoder {
+    pub const CHECK_ALL: Self = Self {
+        length: true,
+        checksum: true,
+    };
+
+    pub const UNCHECKED: Self = Self {
+        length: false,
+        checksum: false,
+    };
+}
+
 impl DecodeAs<Udp> for [u8] {
-    type Decoder = UdpValidator;
+    type Decoder = UdpDecoder;
 
     fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
         let udp = Udp::<[u8]>::try_ref_from_bytes(self)?;

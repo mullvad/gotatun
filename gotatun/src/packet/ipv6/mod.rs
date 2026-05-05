@@ -15,7 +15,7 @@ use std::{fmt::Debug, net::Ipv6Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
 use super::{
-    DecodeAs, DecodeError, IpNextProtocol, IpPayloadDecoder, Udp, UdpValidator, util::size_must_be,
+    DecodeAs, DecodeError, IpNextProtocol, IpPayloadDecoder, Udp, UdpDecoder, util::size_must_be,
 };
 
 /// An IPv6 packet.
@@ -204,7 +204,7 @@ impl DecodeAs<Ipv6<[u8]>> for [u8] {
 }
 
 impl DecodeAs<Ipv6<Udp>> for Ipv6<[u8]> {
-    type Decoder = IpPayloadDecoder<UdpValidator>;
+    type Decoder = IpPayloadDecoder<UdpDecoder>;
 
     fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
         if d.ip_next_protocol && self.header.next_protocol() != IpNextProtocol::Udp {
