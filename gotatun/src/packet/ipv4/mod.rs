@@ -481,7 +481,7 @@ mod tests {
 
     const EXAMPLE_IPV4_UDP: Ipv4<Udp<[u8; 12]>> = Ipv4 {
         header: Ipv4Header {
-            header_checksum: big_endian::U16::new(0x78c5),
+            header_checksum: big_endian::U16::new(0x78c4),
             ..Ipv4Header::new_for_length(
                 Ipv4Addr::new(1, 2, 3, 4),
                 Ipv4Addr::new(255, 254, 253, 252),
