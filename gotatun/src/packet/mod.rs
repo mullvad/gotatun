@@ -15,10 +15,10 @@
 //! buffer.
 //!
 //! Any of the <https://docs.rs/zerocopy>-enabled definitions such as [`Ipv4`] or [`Udp`] can be used to cheaply
-//! construct or parse packets:
+//! construct or parse packets (through [`Decoder`]):
 //! ```
 //! let example_ipv4_icmp: &mut [u8] = &mut [
-//!     0x45, 0x83, 0x0, 0x54, 0xa3, 0x13, 0x40, 0x0, 0x40, 0x1, 0xc6, 0x26, 0xa, 0x8c, 0xc2, 0xdd,
+//!     0x45, 0x83, 0x0, 0x54, 0xa3, 0x13, 0x40, 0x0, 0x40, 0x1, 0xc5, 0xa3, 0xa, 0x8c, 0xc2, 0xdd,
 //!     0x1, 0x2, 0x3, 0x4, 0x8, 0x0, 0x51, 0x13, 0x0, 0x2b, 0x0, 0x1, 0xb1, 0x5c, 0x87, 0x68, 0x0,
 //!     0x0, 0x0, 0x0, 0xa8, 0x28, 0x7, 0x0, 0x0, 0x0, 0x0, 0x0, 0x10, 0x11, 0x12, 0x13, 0x14,
 //!     0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23,
@@ -26,15 +26,14 @@
 //!     0x33, 0x34, 0x35, 0x36, 0x37,
 //! ];
 //!
-//! use gotatun::packet::{Ipv4, Ipv4Header, IpNextProtocol};
+//! use gotatun::packet::{Decoder, Ipv4, Ipv4Decoder, Ipv4Header, IpNextProtocol};
 //! use zerocopy::FromBytes;
 //! use std::net::Ipv4Addr;
 //!
-//! // Cast the `&[u8]` to an &Ipv4.
-//! // Note that this doesn't validate anything about the packet,
-//! // except that it's at least Ipv4Header::LEN bytes long.
-//! let packet = Ipv4::<[u8]>::mut_from_bytes(example_ipv4_icmp)
-//!     .expect("Packet must be large enough to be IPv4");
+//! // Decode the `&[u8]` to an &Ipv4, while validaing the checksum, and IP header fields.
+//! // Note that this doesn't validate anything about the ICMP payload.
+//! let packet: &mut Ipv4<[u8]> = Ipv4Decoder::CHECK_ALL.decode_mut(example_ipv4_icmp)
+//!     .expect("Is a valid IPv4 packet");
 //! let header: &mut Ipv4Header = &mut packet.header;
 //! let payload: &mut [u8] = &mut packet.payload;
 //!
@@ -42,7 +41,7 @@
 //! assert_eq!(header.version(), 4);
 //! assert_eq!(header.source(), Ipv4Addr::new(10, 140, 194, 221));
 //! assert_eq!(header.destination(), Ipv4Addr::new(1, 2, 3, 4));
-//! assert_eq!(header.header_checksum, 0xc626);
+//! assert_eq!(header.header_checksum, 0xc5a3);
 //! assert_eq!(header.protocol, IpNextProtocol::Icmp);
 //!
 //! // Write stuff to the header. Note that this invalidates the checksum.
@@ -89,8 +88,8 @@ pub use wg::*;
 ///
 /// The generic type `Kind` represents the type of packet.
 /// For example, a `Packet<[u8]>` is an untyped packet containing arbitrary bytes.
-/// It can be safely decoded into a `Packet<Ipv4>` using [`Packet::try_into_ip`],
-/// and further decoded into a `Packet<Ipv4<Udp>>` using [`Packet::try_into_udp`].
+/// The bytes can be parsed as a concrete type using [`Decoder::decode_owned`], or by using
+/// convenience methods like [`Packet::try_into_ipvx`] and [`Packet::try_into_udp`].
 ///
 /// [`Packet`] uses [`BytesMut`] as the backing buffer.
 ///
