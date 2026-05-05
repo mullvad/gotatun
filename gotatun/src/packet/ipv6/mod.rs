@@ -130,6 +130,7 @@ impl<P: ?Sized> Ipv6<P>
 where
     P: IntoBytes + Immutable,
 {
+    /// Update [`Ipv6Header::payload_length`] to match real payload size.
     pub fn try_update_ip_len(&mut self) -> eyre::Result<()> {
         self.header.payload_length = self
             .payload
