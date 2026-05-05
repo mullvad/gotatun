@@ -187,11 +187,8 @@ impl DecodeAs<Ipv4<Udp>> for Ipv4<[u8]> {
                     IpNextProtocol::Udp,
                     self.payload.as_bytes(),
                 );
-                let expected_csum = crate::packet::util::checksum_udp_with_skip(
-                    header,
-                    self.payload.as_bytes(),
-                    offset_of!(UdpHeader, checksum) / size_of::<u16>(),
-                );
+                let expected_csum =
+                    crate::packet::util::checksum_udp_with_skip(header, self.payload.as_bytes());
                 if expected_csum != udp.header.checksum.get() {
                     return Err(DecodeError::InvalidValue("UDP checksum"));
                 }
@@ -382,7 +379,7 @@ impl Ipv4Header {
 
     /// Compute expected header checksum.
     pub fn compute_checksum(&self) -> u16 {
-        crate::packet::util::checksum_ipv4(self.as_bytes())
+        crate::packet::util::checksum_ipv4_skip(self.as_bytes())
     }
 }
 

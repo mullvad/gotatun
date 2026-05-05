@@ -113,7 +113,7 @@ pub fn checksum(payload: &[&[u8]]) -> u16 {
 
 /// Compute an "Internet checksum" for IPv4.
 /// This skips the checksum field, so it works for even if non-zero.
-pub fn checksum_ipv4(payload: &[u8]) -> u16 {
+pub fn checksum_ipv4_with_skip(payload: &[u8]) -> u16 {
     const SKIP_WORD: usize =
         offset_of!(crate::packet::Ipv4Header, header_checksum) / size_of::<u16>();
     let sum = checksum_payload_with_skip(payload, SKIP_WORD);
@@ -134,13 +134,12 @@ pub fn checksum_udp<H: IntoBytes + Immutable>(header: H, payload: &[u8]) -> u16 
 /// Compute an "Internet checksum" with an additional header and a final
 /// inversion of all bits if the checksum is all zeros. This is used for UDP checksums
 /// because 0 means "no checksum" in UDP + IPv4.
-pub fn checksum_udp_with_skip<H: IntoBytes + Immutable>(
-    header: H,
-    payload: &[u8],
-    skip_word_index: usize,
-) -> u16 {
+///
+/// This also skips any existing checksum field.
+pub fn checksum_udp_with_skip<H: IntoBytes + Immutable>(header: H, payload: &[u8]) -> u16 {
+    const SKIP_INDEX: usize = offset_of!(UdpHeader, checksum) / size_of::<u16>();
     let mut sum = checksum_payload(header.as_bytes());
-    sum += checksum_payload_with_skip(payload, skip_word_index);
+    sum += checksum_payload_with_skip(payload, SKIP_INDEX);
     let csum = finalize_csum(sum);
     if csum == 0 {
         return !0;
