@@ -152,8 +152,31 @@ impl DecodeAs<Ipv4<[u8]>> for [u8] {
     }
 }
 
-pub struct IpPayloadDecoder<Inner> {
-    /// Assert that [`IpNextHeader`] matches the payload.
+fn validate_ipv4(d: &Ipv4Decoder, ipv4: &Ipv4) -> Result<usize, DecodeError> {
+    let buf_len = ipv4.as_bytes().len();
+
+    if d.version && ipv4.header.version() != 4 {
+        return Err(DecodeError::InvalidValue("version"));
+    }
+
+    if d.checksum {
+        let expected_csum = ipv4.header.compute_checksum();
+        if ipv4.header.header_checksum.get() != expected_csum {
+            return Err(DecodeError::InvalidValue("checksum"));
+        }
+    }
+
+    let total_len = usize::from(ipv4.header.total_len.get());
+    if (d.length || d.truncate) && (total_len > buf_len || total_len < Ipv4Header::LEN) {
+        return Err(DecodeError::InvalidValue("total_len"));
+    }
+
+    Ok(if d.truncate { total_len } else { buf_len })
+}
+
+/// A [`Decoder`] for [`Ipv4::payload`] into a transport protocol like [`Udp`].
+pub struct Ipv4PayloadDecoder<Inner> {
+    /// Assert that [`IpNextProtocol`] matches the payload.
     pub ip_next_protocol: bool,
     /// Assert that the IP packet is not a fragment.
     pub dont_fragment: bool,
@@ -161,7 +184,8 @@ pub struct IpPayloadDecoder<Inner> {
     pub inner: Inner,
 }
 
-impl IpPayloadDecoder<UdpDecoder> {
+impl Ipv4PayloadDecoder<UdpDecoder> {
+    /// Validate as *much* as possible about the decoded UDP payload.
     pub const CHECK_ALL: Self = Self {
         ip_next_protocol: true,
         dont_fragment: true,
@@ -177,7 +201,7 @@ impl IpPayloadDecoder<UdpDecoder> {
 }
 
 impl DecodeAs<Ipv4<Udp>> for Ipv4<[u8]> {
-    type Decoder = IpPayloadDecoder<UdpDecoder>;
+    type Decoder = Ipv4PayloadDecoder<UdpDecoder>;
 
     fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
         if d.ip_next_protocol && self.header.next_protocol() != IpNextProtocol::Udp {
@@ -444,7 +468,7 @@ impl Debug for Ipv4Header {
 mod tests {
     use zerocopy::{FromBytes, IntoBytes, big_endian};
 
-    use super::{IpPayloadDecoder, Ipv4, Ipv4Decoder, Ipv4Header};
+    use super::{Ipv4, Ipv4Decoder, Ipv4Header, Ipv4PayloadDecoder};
     use crate::packet::{DecodeError, IpNextProtocol, Udp, UdpDecoder, UdpHeader, decode_ref};
     use std::net::Ipv4Addr;
 
@@ -486,7 +510,7 @@ mod tests {
             decode_ref(EXAMPLE_IPV4_UDP_RAW, Ipv4Decoder::CHECK_ALL).expect("IPv4 packet is valid");
         let ipv4_udp: &Ipv4<Udp> = decode_ref(
             ipv4,
-            IpPayloadDecoder {
+            Ipv4PayloadDecoder {
                 ip_next_protocol: true,
                 dont_fragment: true,
                 inner: UdpDecoder::CHECK_ALL,
