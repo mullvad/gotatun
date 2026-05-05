@@ -78,13 +78,17 @@ where
 /// An error returned by [`decode_ref`] and friends.
 #[derive(Debug, thiserror::Error)]
 pub enum DecodeError {
+    /// Invalid value.
     #[error("Invalid value for {0}")]
     InvalidValue(&'static str),
     // zerocopy errors
+    /// Bad alignment.
     #[error("Bad alignment")]
     BadAlignment,
+    /// Invalid source size.
     #[error("Invalid source size")]
     InvalidSourceSize,
+    /// Invalid source data.
     #[error("Invalid source data")]
     InvalidSourceData,
 }
