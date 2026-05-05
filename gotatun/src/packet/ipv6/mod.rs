@@ -14,7 +14,7 @@ use eyre::eyre;
 use std::{fmt::Debug, net::Ipv6Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
-use super::{DecodeAs, DecodeError, IpNextProtocol, Udp, UdpDecoder, util::size_must_be};
+use super::{DecodeError, Decoder, IpNextProtocol, Udp, UdpDecoder, util::size_must_be};
 
 /// An IPv6 packet.
 ///
@@ -182,37 +182,37 @@ impl Ipv6Decoder {
     };
 }
 
-impl DecodeAs<Ipv6<[u8]>> for [u8] {
-    type Decoder = Ipv6Decoder;
+/// Decode a byte slice into an [`Ipv6`] packet.
+impl Decoder<[u8], Ipv6<[u8]>> for Ipv6Decoder {
+    fn validate(&self, bytes: &[u8]) -> Result<usize, DecodeError> {
+        let ipv6: &Ipv6 = Ipv6::try_ref_from_bytes(bytes)?;
 
-    fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
-        let ipv6: &Ipv6 = Ipv6::try_ref_from_bytes(self)?;
-
-        if d.version && ipv6.header.version() != 6 {
+        if self.version && ipv6.header.version() != 6 {
             return Err(DecodeError::InvalidValue("version"));
         }
 
         let total_len = ipv6.header.total_length();
-        if d.length || d.truncate {
-            if total_len > self.len() {
-                return Err(DecodeError::InvalidValue("total length"));
-            }
+        if (self.length || self.truncate) && total_len > bytes.len() {
+            return Err(DecodeError::InvalidValue("total length"));
         }
 
-        let len = if d.truncate { total_len } else { self.len() };
+        let len = if self.truncate {
+            total_len
+        } else {
+            bytes.len()
+        };
 
         Ok(len)
     }
 }
 
-impl DecodeAs<Ipv6<Udp>> for Ipv6<[u8]> {
-    type Decoder = Ipv6PayloadDecoder<UdpDecoder>;
-
-    fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
-        if d.ip_next_protocol && self.header.next_protocol() != IpNextProtocol::Udp {
+/// Decode the [`Ipv6::payload`] into [`Udp`].
+impl Decoder<Ipv6<[u8]>, Ipv6<Udp>> for Ipv6PayloadDecoder<UdpDecoder> {
+    fn validate(&self, ipv6: &Ipv6) -> Result<usize, DecodeError> {
+        if self.ip_next_protocol && ipv6.header.next_protocol() != IpNextProtocol::Udp {
             return Err(DecodeError::InvalidValue("next_protocol"));
         }
-        let len = DecodeAs::<Udp>::validate(&self.payload, d.inner)?;
+        let len = self.inner.validate(&ipv6.payload)?;
         Ok(len + Ipv6Header::LEN)
     }
 }
@@ -244,7 +244,7 @@ mod tests {
     use zerocopy::{FromBytes, IntoBytes};
 
     use super::{Ipv6, Ipv6Decoder};
-    use crate::packet::{IpNextProtocol, Ipv6Header, decode_ref};
+    use crate::packet::{Decoder, IpNextProtocol, Ipv6Header};
     use std::{net::Ipv6Addr, str::FromStr};
 
     const EXAMPLE_IPV6_ICMP: &[u8] = &[
@@ -259,8 +259,9 @@ mod tests {
 
     #[test]
     fn ipv6_decode_and_validate() {
-        let ipv6: &Ipv6 =
-            decode_ref(EXAMPLE_IPV6_ICMP, Ipv6Decoder::CHECK_ALL).expect("IPv6 packet is valid");
+        let ipv6: &Ipv6 = Ipv6Decoder::CHECK_ALL
+            .decode_ref(EXAMPLE_IPV6_ICMP)
+            .expect("IPv6 packet is valid");
         assert_eq!(ipv6.as_bytes(), EXAMPLE_IPV6_ICMP);
     }
 
@@ -289,6 +290,8 @@ mod tests {
             EXAMPLE_IPV6_ICMP.len(),
         );
 
-        decode_ref::<_, Ipv6>(EXAMPLE_IPV6_ICMP, Ipv6Decoder::CHECK_ALL).expect("Packet is valid");
+        Ipv6Decoder::CHECK_ALL
+            .decode_ref(EXAMPLE_IPV6_ICMP)
+            .expect("Packet is valid");
     }
 }
