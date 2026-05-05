@@ -486,7 +486,7 @@ mod tests {
                 Ipv4Addr::new(1, 2, 3, 4),
                 Ipv4Addr::new(255, 254, 253, 252),
                 IpNextProtocol::Udp,
-                (UdpHeader::LEN + 11) as u16,
+                (UdpHeader::LEN + 12) as u16,
             )
         },
         payload: Udp {
