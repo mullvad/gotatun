@@ -214,6 +214,7 @@ impl Decoder<Ipv4<[u8]>, Ipv4<Udp>> for Ipv4PayloadDecoder<UdpDecoder> {
     }
 }
 
+/// IPv4 options and payload.
 #[repr(C)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Ipv4Options<T: ?Sized = [u8]> {
