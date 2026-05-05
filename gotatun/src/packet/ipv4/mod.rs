@@ -393,7 +393,7 @@ impl Ipv4Header {
 
     /// Compute expected header checksum.
     pub fn compute_checksum(&self) -> u16 {
-        crate::packet::util::checksum_ipv4_skip(self.as_bytes())
+        crate::packet::util::checksum_ipv4_with_skip(self.as_bytes())
     }
 }
 
