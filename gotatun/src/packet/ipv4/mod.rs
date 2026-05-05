@@ -73,13 +73,13 @@ impl DecodeAs<Ipv4<Ipv4Options<[u8]>>> for [u8] {
         let ipv4: &Ipv4 = Ipv4::try_ref_from_bytes(self)?;
 
         if d.version && ipv4.header.version() != 4 {
-            return Err(DecodeError::InvalidIpVersion);
+            return Err(DecodeError::InvalidValue("version"));
         }
 
         if d.checksum {
             let expected_csum = ipv4.header.compute_checksum();
             if ipv4.header.header_checksum.get() != expected_csum {
-                return Err(DecodeError::BadChecksum);
+                return Err(DecodeError::InvalidValue("checksum"));
             }
         }
 
@@ -120,13 +120,13 @@ impl DecodeAs<Ipv4<[u8]>> for [u8] {
         let ipv4: &Ipv4 = Ipv4::try_ref_from_bytes(self)?;
 
         if d.version && ipv4.header.version() != 4 {
-            return Err(DecodeError::InvalidIpVersion);
+            return Err(DecodeError::InvalidValue("version"));
         }
 
         if d.checksum {
             let expected_csum = ipv4.header.compute_checksum();
             if ipv4.header.header_checksum.get() != expected_csum {
-                return Err(DecodeError::BadChecksum);
+                return Err(DecodeError::InvalidValue("checksum"));
             }
         }
 
@@ -177,7 +177,7 @@ impl DecodeAs<Ipv4<Udp>> for Ipv4<[u8]> {
 
     fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
         if d.ip_next_protocol && self.header.next_protocol() != IpNextProtocol::Udp {
-            return Err(DecodeError::InvalidProtocol);
+            return Err(DecodeError::InvalidValue("protocol"));
         }
 
         if d.dont_fragment && (self.header.fragment_offset() != 0 || self.header.more_fragments()) {
@@ -497,7 +497,7 @@ mod tests {
         let _ipv4_with_bad_checksum: &Ipv4 =
             decode_ref(ipv4.as_bytes(), Ipv4Decoder::UNCHECKED).expect("Validation is disabled");
 
-        let Err(DecodeError::BadChecksum) =
+        let Err(DecodeError::InvalidValue("checksum")) =
             decode_ref::<_, Ipv4>(ipv4.as_bytes(), Ipv4Decoder::CHECK_ALL)
         else {
             panic!("Must fail with checksum error");

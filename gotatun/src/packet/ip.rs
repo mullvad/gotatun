@@ -63,7 +63,7 @@ impl DecodeAs<Ip> for [u8] {
             match ip.header.version() {
                 4 => Ipv4Header::LEN,
                 6 => Ipv6Header::LEN,
-                _ => return Err(super::DecodeError::InvalidIpVersion),
+                _ => return Err(super::DecodeError::InvalidValue("version")),
             }
         } else {
             Ipv4Header::LEN

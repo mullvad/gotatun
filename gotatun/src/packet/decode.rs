@@ -20,15 +20,8 @@ pub trait DecodeAs<Target: FromBytes + ?Sized>: IntoBytes + Immutable {
 }
 
 /// An error returned by [`decode_ref`] and friends.
-// TODO: make pretty
 #[derive(Debug, thiserror::Error)]
 pub enum DecodeError {
-    #[error("Invalid IP version")]
-    InvalidIpVersion,
-    #[error("Bad Checksum")]
-    BadChecksum,
-    #[error("Invalid protocol")]
-    InvalidProtocol,
     #[error("Invalid value for {0}")]
     InvalidValue(&'static str),
     // zerocopy errors

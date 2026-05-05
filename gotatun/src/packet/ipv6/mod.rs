@@ -187,7 +187,7 @@ impl DecodeAs<Ipv6<[u8]>> for [u8] {
         let ipv6: &Ipv6 = Ipv6::try_ref_from_bytes(self)?;
 
         if d.version && ipv6.header.version() != 6 {
-            return Err(DecodeError::InvalidIpVersion);
+            return Err(DecodeError::InvalidValue("version"));
         }
 
         let total_len = ipv6.header.total_length();
@@ -208,7 +208,7 @@ impl DecodeAs<Ipv6<Udp>> for Ipv6<[u8]> {
 
     fn validate(&self, d: Self::Decoder) -> Result<usize, DecodeError> {
         if d.ip_next_protocol && self.header.next_protocol() != IpNextProtocol::Udp {
-            return Err(DecodeError::InvalidProtocol);
+            return Err(DecodeError::InvalidValue("next_protocol"));
         }
         let len = DecodeAs::<Udp>::validate(&self.payload, d.inner)?;
         Ok(len + Ipv6Header::LEN)
