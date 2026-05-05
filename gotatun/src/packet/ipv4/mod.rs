@@ -179,20 +179,22 @@ impl DecodeAs<Ipv4<Udp>> for Ipv4<[u8]> {
         }
 
         if d.inner.checksum {
-            let header = PseudoHeaderV4::from_bytes(
-                self.header.source_address,
-                self.header.destination_address,
-                IpNextProtocol::Udp,
-                self.payload.as_bytes(),
-            );
-            let expected_csum = crate::packet::util::checksum_udp_with_skip(
-                header,
-                self.payload.as_bytes(),
-                offset_of!(UdpHeader, checksum) / size_of::<u16>(),
-            );
             let udp = Udp::<[u8]>::try_ref_from_bytes(&self.payload)?;
-            if expected_csum != udp.header.checksum.get() {
-                return Err(DecodeError::InvalidValue("UDP checksum"));
+            if udp.header.checksum.get() != 0 {
+                let header = PseudoHeaderV4::from_bytes(
+                    self.header.source_address,
+                    self.header.destination_address,
+                    IpNextProtocol::Udp,
+                    self.payload.as_bytes(),
+                );
+                let expected_csum = crate::packet::util::checksum_udp_with_skip(
+                    header,
+                    self.payload.as_bytes(),
+                    offset_of!(UdpHeader, checksum) / size_of::<u16>(),
+                );
+                if expected_csum != udp.header.checksum.get() {
+                    return Err(DecodeError::InvalidValue("UDP checksum"));
+                }
             }
         }
 
