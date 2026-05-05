@@ -50,6 +50,7 @@ impl UdpHeader {
     /// Length of a [`UdpHeader`], in bytes.
     pub const LEN: usize = size_must_be::<UdpHeader>(8);
 
+    /// Create a new [`UdpHeader`] with the provided fields.
     pub const fn new(source_port: u16, destination_port: u16, length: u16, checksum: u16) -> Self {
         UdpHeader {
             source_port: big_endian::U16::new(source_port),
@@ -77,11 +78,13 @@ pub struct UdpDecoder {
 }
 
 impl UdpDecoder {
+    /// Validate as *much* as possible about the UDP packet.
     pub const CHECK_ALL: Self = Self {
         length: true,
         checksum: true,
     };
 
+    /// Validate as *little* as possible about the UDP packet.
     pub const UNCHECKED: Self = Self {
         length: false,
         checksum: false,
