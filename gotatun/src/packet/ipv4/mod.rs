@@ -476,26 +476,6 @@ impl Debug for Ipv4Header {
     }
 }
 
-impl<P> Debug for Ipv4<Ipv4Options<P>>
-where
-    P: Debug + TryFromBytes + Immutable + KnownLayout,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.payload() {
-            Ok(payload) => f
-                .debug_struct("Ipv4Options")
-                .field("options", &"TODO")
-                .field("payload", payload)
-                .finish(),
-            Err(e) => f
-                .debug_struct("Ipv4Options")
-                .field("options", &"TODO")
-                .field("payload", &Err::<(), _>(e.to_string()))
-                .finish(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use zerocopy::{FromBytes, IntoBytes, big_endian};
