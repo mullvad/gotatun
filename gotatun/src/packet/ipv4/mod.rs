@@ -514,7 +514,7 @@ mod tests {
                 inner: UdpDecoder::CHECK_ALL,
             },
         )
-        .expect("IPv4 packet is valid");
+        .expect("IPv4/UDP packet is valid");
 
         assert_eq!(ipv4_udp.as_bytes(), EXAMPLE_IPV4_UDP_RAW);
     }
