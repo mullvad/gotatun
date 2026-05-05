@@ -164,6 +164,20 @@ pub struct IpPayloadDecoder<Inner> {
     pub inner: Inner,
 }
 
+impl IpPayloadDecoder<UdpDecoder> {
+    pub const CHECK_ALL: Self = Self {
+        ip_next_protocol: true,
+        fragment: true,
+        inner: UdpDecoder::CHECK_ALL,
+    };
+
+    pub const UNCHECKED: Self = Self {
+        ip_next_protocol: false,
+        fragment: false,
+        inner: UdpDecoder::UNCHECKED,
+    };
+}
+
 impl DecodeAs<Ipv4<Udp>> for Ipv4<[u8]> {
     type Decoder = IpPayloadDecoder<UdpDecoder>;
 
