@@ -19,6 +19,7 @@ targets = [
   "x86_64-pc-windows-msvc",
   "aarch64-linux-android"
 ]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [lib]
 crate-type = ["cdylib", "rlib", "staticlib"]
