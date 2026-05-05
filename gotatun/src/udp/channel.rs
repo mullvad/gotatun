@@ -21,11 +21,12 @@ use std::{
     sync::{Arc, atomic::AtomicU16},
 };
 use tokio::sync::{Mutex, OwnedMutexGuard, mpsc};
-use zerocopy::{FromBytes, IntoBytes};
+use zerocopy::IntoBytes;
 
 use crate::{
     packet::{
-        IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Ipv6Header, Packet, PacketBufPool, PseudoHeaderV4,
+        Decoder, IpNextProtocol, Ipv4, Ipv4Decoder, Ipv4Header, Ipv4PayloadDecoder, Ipv6,
+        Ipv6Decoder, Ipv6Header, Ipv6PayloadDecoder, Packet, PacketBufPool, PseudoHeaderV4,
         PseudoHeaderV6, Udp, UdpHeader, checksum, checksum_udp,
     },
     tun::{
@@ -322,39 +323,31 @@ fn create_ipv4_payload_inner(
     let udp_len: u16 = (UdpHeader::LEN + udp_payload.len()).try_into().unwrap();
     let total_len = u16::try_from(Ipv4Header::LEN).unwrap() + udp_len;
 
-    let mut packet = BytesMut::zeroed(usize::from(total_len));
+    let packet = Packet::from_bytes(BytesMut::zeroed(usize::from(total_len)));
+    let mut ipv4: Packet<Ipv4<Udp>> = Ipv4Decoder::UNCHECKED
+        .decode_owned(packet)
+        .and_then(|p| Ipv4PayloadDecoder::UNCHECKED.decode_owned(p))
+        .expect("buffer is big enough");
 
-    let ipv4 = Ipv4::<Udp>::mut_from_bytes(&mut packet).expect("bad IP packet buffer");
     ipv4.header =
         Ipv4Header::new_for_length(source_ip, destination_ip, IpNextProtocol::Udp, udp_len);
-
     ipv4.header.identification = identification.into();
     ipv4.header.header_checksum = checksum(&[ipv4.header.as_bytes()]).into();
 
     let udp = &mut ipv4.payload;
-    udp.header.source_port = source_port.into();
-    udp.header.destination_port = destination_port.into();
-    udp.header.length = udp_len.into();
+    udp.header = UdpHeader::new(source_port, destination_port, udp_len, 0);
     udp.payload.copy_from_slice(udp_payload);
 
-    let csum = checksum_udp(
+    udp.header.checksum.set(checksum_udp(
         PseudoHeaderV4::from_udp(
             source_ip.octets().into(),
             destination_ip.octets().into(),
             udp,
         ),
         udp.as_bytes(),
-    );
+    ));
 
-    udp.header.checksum = csum.into();
-
-    Packet::from_bytes(packet)
-        .try_into_ip()
-        .and_then(|p| p.try_into_ipvx())
-        .expect("packet is valid")
-        .expect_left("packet is ipv4")
-        .try_into_udp()
-        .expect("packet is udp")
+    ipv4
 }
 
 fn create_ipv6_payload(
@@ -368,9 +361,12 @@ fn create_ipv6_payload(
     let udp_len: u16 = (UdpHeader::LEN + udp_payload.len()).try_into().unwrap();
     let total_len = u16::try_from(Ipv6Header::LEN).unwrap() + udp_len;
 
-    let mut packet = BytesMut::zeroed(usize::from(total_len));
+    let packet = Packet::from_bytes(BytesMut::zeroed(usize::from(total_len)));
+    let mut ipv6 = Ipv6Decoder::UNCHECKED
+        .decode_owned(packet)
+        .and_then(|p| Ipv6PayloadDecoder::UNCHECKED.decode_owned(p))
+        .expect("buffer is big enough");
 
-    let ipv6 = Ipv6::<Udp>::mut_from_bytes(&mut packet).expect("bad IP packet buffer");
     ipv6.header.set_version(6);
     ipv6.header.set_flow_label(connection_id);
     ipv6.header.payload_length = udp_len.into();
@@ -380,28 +376,19 @@ fn create_ipv6_payload(
     ipv6.header.hop_limit = 64;
 
     let udp = &mut ipv6.payload;
-    udp.header.source_port = source_port.into();
-    udp.header.destination_port = destination_port.into();
-    udp.header.length = udp_len.into();
+    udp.header = UdpHeader::new(source_port, destination_port, udp_len, 0);
     udp.payload.copy_from_slice(udp_payload);
 
-    let csum = checksum_udp(
+    udp.header.checksum.set(checksum_udp(
         PseudoHeaderV6::from_udp(
             source_ip.octets().into(),
             destination_ip.octets().into(),
             udp,
         ),
         udp.as_bytes(),
-    );
-    udp.header.checksum = csum.into();
+    ));
 
-    Packet::from_bytes(packet)
-        .try_into_ip()
-        .and_then(|p| p.try_into_ipvx())
-        .expect("packet is valid")
-        .expect_right("packet is ipv6")
-        .try_into_udp()
-        .expect("packet is udp")
+    ipv6
 }
 
 #[cfg(test)]

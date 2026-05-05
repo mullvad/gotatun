@@ -9,9 +9,11 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+use std::mem::offset_of;
+
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
-use crate::packet::{IpNextProtocol, Udp};
+use crate::packet::{IpNextProtocol, TcpHeader, Udp, UdpHeader};
 
 /// Check that the size of type `T` is `size`. If not, panic.
 ///
@@ -50,6 +52,26 @@ impl PseudoHeaderV4 {
             length: udp.as_bytes().len().try_into().unwrap(),
         }
     }
+
+    /// Create a new [`PseudoHeaderV4`] from payload.
+    ///
+    /// # Panics
+    ///
+    /// This panics if `payload` is bigger than `u16::MAX`.
+    pub fn from_bytes(
+        source: big_endian::U32,
+        destination: big_endian::U32,
+        protocol: IpNextProtocol,
+        payload: &[u8],
+    ) -> Self {
+        Self {
+            source,
+            destination,
+            _zero: 0,
+            protocol,
+            length: payload.len().try_into().unwrap(),
+        }
+    }
 }
 
 /// Pseudo-header used for computing UDP and TCP checksums.
@@ -78,6 +100,26 @@ impl PseudoHeaderV6 {
             length: udp.as_bytes().len().try_into().unwrap(),
         }
     }
+
+    /// Create a new [`PseudoHeaderV6`] from payload.
+    ///
+    /// # Panics
+    ///
+    /// This panics if `payload` is bigger than `u16::MAX`.
+    pub fn from_bytes(
+        source: big_endian::U128,
+        destination: big_endian::U128,
+        protocol: IpNextProtocol,
+        payload: &[u8],
+    ) -> Self {
+        Self {
+            source,
+            destination,
+            _zero: 0,
+            protocol,
+            length: payload.len().try_into().unwrap(),
+        }
+    }
 }
 
 /// Compute an "Internet checksum"
@@ -86,6 +128,15 @@ pub fn checksum(payload: &[&[u8]]) -> u16 {
     for p in payload {
         sum += checksum_payload(p);
     }
+    finalize_csum(sum)
+}
+
+/// Compute an "Internet checksum" for IPv4.
+/// This skips the checksum field, so it works for even if non-zero.
+pub fn checksum_ipv4_with_skip(payload: &[u8]) -> u16 {
+    const SKIP_WORD: usize =
+        offset_of!(crate::packet::Ipv4Header, header_checksum) / size_of::<u16>();
+    let sum = checksum_payload_with_skip(payload, SKIP_WORD);
     finalize_csum(sum)
 }
 
@@ -100,10 +151,55 @@ pub fn checksum_udp<H: IntoBytes + Immutable>(header: H, payload: &[u8]) -> u16 
     csum
 }
 
+/// Compute an "Internet checksum" with an additional header and a final
+/// inversion of all bits if the checksum is all zeros. This is used for UDP checksums
+/// because 0 means "no checksum" in UDP + IPv4.
+///
+/// This also skips any existing checksum field.
+pub fn checksum_udp_with_skip<H: IntoBytes + Immutable>(header: H, payload: &[u8]) -> u16 {
+    const SKIP_INDEX: usize = offset_of!(UdpHeader, checksum) / size_of::<u16>();
+    let mut sum = checksum_payload(header.as_bytes());
+    sum += checksum_payload_with_skip(payload, SKIP_INDEX);
+    let csum = finalize_csum(sum);
+    if csum == 0 {
+        return !0;
+    }
+    csum
+}
+
+/// Compute an "Internet checksum" with an additional header and a final
+/// inversion of all bits if the checksum is all zeros. This is used for UDP checksums
+/// because 0 means "no checksum" in UDP + IPv4.
+///
+/// This also skips any existing checksum field.
+pub fn checksum_tcp_with_skip<H: IntoBytes + Immutable>(header: H, payload: &[u8]) -> u16 {
+    const SKIP_INDEX: usize = offset_of!(TcpHeader, checksum) / size_of::<u16>();
+    let mut sum = checksum_payload(header.as_bytes());
+    sum += checksum_payload_with_skip(payload, SKIP_INDEX);
+    finalize_csum(sum)
+}
+
 fn checksum_payload(bytes: &[u8]) -> u32 {
     let (words, rest) = <[big_endian::U16]>::ref_from_prefix(bytes).unwrap();
 
     let mut sum: u32 = words.iter().map(|w| u32::from(w.get())).sum();
+    if let [b] = rest {
+        // Zero-pad if odd number of bytes
+        sum += u32::from(u16::from_be_bytes([*b, 0]));
+    }
+
+    sum
+}
+
+fn checksum_payload_with_skip(bytes: &[u8], skip_word_index: usize) -> u32 {
+    let (words, rest) = <[big_endian::U16]>::ref_from_prefix(bytes).unwrap();
+
+    let mut sum: u32 = words
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != skip_word_index)
+        .map(|(_, w)| u32::from(w.get()))
+        .sum();
     if let [b] = rest {
         // Zero-pad if odd number of bytes
         sum += u32::from(u16::from_be_bytes([*b, 0]));

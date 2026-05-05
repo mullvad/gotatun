@@ -13,9 +13,11 @@ use std::net::IpAddr;
 
 use bitfield_struct::bitfield;
 use either::Either;
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
-use crate::packet::{Ipv4, Ipv6};
+use crate::packet::{
+    Decoder, Ipv4, Ipv4Decoder, Ipv4Header, Ipv4Options, Ipv6, Ipv6Decoder, Ipv6Header,
+};
 
 /// A packet bitfield-struct containing the `version`-field that is shared between IPv4 and IPv6.
 #[bitfield(u8)]
@@ -42,8 +44,58 @@ pub struct Ip {
     pub rest: [u8],
 }
 
+/// [`Decoder`] for any IP packet ([`Ipv4`] or [`Ipv6`]).
+pub struct IpDecoder {
+    /// Validate that the IP version is 4 or 6.
+    pub version: bool,
+
+    /// Validate that byte length is at least the smallest possible for the IP version
+    /// (or IPv4 if `version` is `false`).
+    pub min_length: bool,
+}
+
+impl Decoder<[u8], Ip> for IpDecoder {
+    fn validate(&self, bytes: &[u8]) -> Result<usize, super::DecodeError> {
+        let ip: &Ip = Ip::try_ref_from_bytes(bytes)?;
+
+        let d = self;
+        let min_length = if d.version {
+            match ip.header.version() {
+                4 => Ipv4Header::LEN,
+                6 => Ipv6Header::LEN,
+                _ => return Err(super::DecodeError::InvalidValue("version")),
+            }
+        } else {
+            Ipv4Header::LEN
+        };
+
+        if d.min_length && bytes.len() < min_length {
+            return Err(super::DecodeError::InvalidValue("length"));
+        }
+
+        Ok(bytes.len())
+    }
+}
+
+impl Decoder<Ip, Ipv4<Ipv4Options>> for Ipv4Decoder {
+    fn validate(&self, ip: &Ip) -> Result<usize, super::DecodeError> {
+        Decoder::<_, Ipv4<Ipv4Options>>::validate(self, ip.as_bytes())
+    }
+}
+impl Decoder<Ip, Ipv4<[u8]>> for Ipv4Decoder {
+    fn validate(&self, ip: &Ip) -> Result<usize, super::DecodeError> {
+        Decoder::<_, Ipv4<[u8]>>::validate(self, ip.as_bytes())
+    }
+}
+
+impl Decoder<Ip, Ipv6> for Ipv6Decoder {
+    fn validate(&self, ip: &Ip) -> Result<usize, super::DecodeError> {
+        self.validate(ip.as_bytes())
+    }
+}
+
 impl Ip {
-    fn as_v4_or_v6(&self) -> Option<Either<&Ipv4, &Ipv6>> {
+    fn as_v4_or_v6(&self) -> Option<Either<&Ipv4<[u8]>, &Ipv6>> {
         let b = self.as_bytes();
         match self.header.version() {
             4 => Ipv4::<[u8]>::ref_from_bytes(b).ok().map(Either::Left),
