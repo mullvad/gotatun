@@ -97,7 +97,7 @@ impl DecodeAs<Udp> for [u8] {
         if d.length {
             let udp_len = usize::from(udp.header.length.get());
             if self.len() != udp_len {
-                return Err(DecodeError::InvalidValue("UDP Header Lenght"));
+                return Err(DecodeError::InvalidValue("UDP Length"));
             }
         }
 
