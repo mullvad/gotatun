@@ -901,7 +901,7 @@ dependencies = [
 
 [[package]]
 name = "gotatun"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "aead",
  "aws-lc-rs",
@@ -948,7 +948,7 @@ dependencies = [
 
 [[package]]
 name = "gotatun-cli"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "clap 3.2.25",
  "daemonize",
