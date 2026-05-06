@@ -34,9 +34,6 @@ where
 
     /// Try to decode the `&Src` packet as `&Dst`.
     /// See also: [`Decoder::decode_mut`], [`Decoder::decode_owned`].
-    ///
-    /// # Errors
-    /// -
     fn decode_ref<'a>(&self, source: &'a Src) -> Result<&'a Dst, DecodeError> {
         let len = self.validate(source)?;
         let bytes = &source.as_bytes()[..len];
