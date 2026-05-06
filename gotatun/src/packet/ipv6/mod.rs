@@ -23,7 +23,7 @@ use super::{DecodeError, Decoder, IpNextProtocol, Udp, UdpDecoder, util::size_mu
 ///
 /// Use [`Ipv6Decoder`] and [`Ipv6PayloadDecoder`] for parsing into these packet types from
 /// byte slices and such. You can also use [`FromBytes`] and [`IntoBytes`] if you want minimal
-/// validation [Read more](crate::packet).
+/// validation. [Read more](crate::packet)
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Ipv6<Payload: ?Sized = [u8]> {
@@ -185,30 +185,34 @@ impl Ipv6Decoder {
     };
 }
 
+/// Decode a byte slice into an [`Ipv6`] packet.
 impl Decoder<[u8], Ipv6<[u8]>> for Ipv6Decoder {
     fn validate(&self, bytes: &[u8]) -> Result<usize, DecodeError> {
-        let d = self;
         let ipv6: &Ipv6 = Ipv6::try_ref_from_bytes(bytes)?;
 
-        if d.version && ipv6.header.version() != 6 {
+        if self.version && ipv6.header.version() != 6 {
             return Err(DecodeError::InvalidValue("version"));
         }
 
         let total_len = ipv6.header.total_length();
-        if (d.length || d.truncate) && total_len > bytes.len() {
+        if (self.length || self.truncate) && total_len > bytes.len() {
             return Err(DecodeError::InvalidValue("total length"));
         }
 
-        let len = if d.truncate { total_len } else { bytes.len() };
+        let len = if self.truncate {
+            total_len
+        } else {
+            bytes.len()
+        };
 
         Ok(len)
     }
 }
 
+/// Decode the [`Ipv6::payload`] into [`Udp`].
 impl Decoder<Ipv6<[u8]>, Ipv6<Udp>> for Ipv6PayloadDecoder<UdpDecoder> {
     fn validate(&self, ipv6: &Ipv6) -> Result<usize, DecodeError> {
-        let d = self;
-        if d.ip_next_protocol && ipv6.header.next_protocol() != IpNextProtocol::Udp {
+        if self.ip_next_protocol && ipv6.header.next_protocol() != IpNextProtocol::Udp {
             return Err(DecodeError::InvalidValue("next_protocol"));
         }
         let len = self.inner.validate(&ipv6.payload)?;

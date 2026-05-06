@@ -94,12 +94,12 @@ impl UdpDecoder {
     };
 }
 
+/// Decode a byte slice into an [`Udp`] packet (without an IP header).
 impl Decoder<[u8], Udp> for UdpDecoder {
     fn validate(&self, bytes: &[u8]) -> Result<usize, DecodeError> {
-        let d = self;
         let udp = Udp::<[u8]>::try_ref_from_bytes(bytes)?;
 
-        if d.length {
+        if self.length {
             let udp_len = usize::from(udp.header.length.get());
             if bytes.len() != udp_len {
                 return Err(DecodeError::InvalidValue("UDP Length"));
