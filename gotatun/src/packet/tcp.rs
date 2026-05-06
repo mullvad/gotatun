@@ -116,68 +116,68 @@ impl TcpHeader {
     /// Length of a [TcpHeader]. Not including TCP options.
     pub const LEN: usize = size_must_be::<TcpHeader>(20);
 
-    /// See [Self::fin].
+    /// See [`TcpFlags::fin`].
     pub const fn fin(&self) -> bool {
         self.flags.fin()
     }
-    /// See [Self::syn].
+    /// See [`TcpFlags::syn`].
     pub const fn syn(&self) -> bool {
         self.flags.syn()
     }
-    /// See [Self::rst].
+    /// See [`TcpFlags::rst`].
     pub const fn rst(&self) -> bool {
         self.flags.rst()
     }
-    /// See [Self::psh].
+    /// See [`TcpFlags::psh`].
     pub const fn psh(&self) -> bool {
         self.flags.psh()
     }
-    /// See [Self::ack].
+    /// See [`TcpFlags::ack`].
     pub const fn ack(&self) -> bool {
         self.flags.ack()
     }
-    /// See [Self::urg].
+    /// See [`TcpFlags::urg`].
     pub const fn urg(&self) -> bool {
         self.flags.urg()
     }
-    /// See [Self::ece].
+    /// See [`TcpFlags::ece`].
     pub const fn ece(&self) -> bool {
         self.flags.ece()
     }
-    /// See [Self::cwr].
+    /// See [`TcpFlags::cwr`].
     pub const fn cwr(&self) -> bool {
         self.flags.cwr()
     }
 
-    /// See [Self::fin].
+    /// See [`TcpFlags::fin`].
     pub const fn set_fin(&mut self, value: bool) {
         self.flags.set_fin(value);
     }
-    /// See [Self::syn].
+    /// See [`TcpFlags::syn`].
     pub const fn set_syn(&mut self, value: bool) {
         self.flags.set_syn(value);
     }
-    /// See [Self::rst].
+    /// See [`TcpFlags::rst`].
     pub const fn set_rst(&mut self, value: bool) {
         self.flags.set_rst(value);
     }
-    /// See [Self::psh].
+    /// See [`TcpFlags::psh`].
     pub const fn set_psh(&mut self, value: bool) {
         self.flags.set_psh(value);
     }
-    /// See [Self::ack].
+    /// See [`TcpFlags::ack`].
     pub const fn set_ack(&mut self, value: bool) {
         self.flags.set_ack(value);
     }
-    /// See [Self::urg].
+    /// See [`TcpFlags::urg`].
     pub const fn set_urg(&mut self, value: bool) {
         self.flags.set_urg(value);
     }
-    /// See [Self::ece].
+    /// See [`TcpFlags::ece`].
     pub const fn set_ece(&mut self, value: bool) {
         self.flags.set_ece(value);
     }
-    /// See [Self::cwr].
+    /// See [`TcpFlags::cwr`].
     pub const fn set_cwr(&mut self, value: bool) {
         self.flags.set_cwr(value);
     }
