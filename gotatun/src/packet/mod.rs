@@ -129,36 +129,24 @@ struct PacketInner {
     _return_to_pool: Option<ReturnToPool>,
 }
 
-/// A marker trait that indicates that a [Packet] contains a valid payload of a specific type.
-///
-/// For example, [`CheckedPayload`] is implemented for [`Ipv4<[u8]>`], and a [`Packet<Ipv4<[u8]>>>`]
-/// can only be constructed through [`Packet::<[u8]>::try_into_ipvx`], which checks that the IPv4
-/// header is valid.
-pub trait CheckedPayload: FromBytes + IntoBytes + KnownLayout + Immutable + Unaligned {}
+/// Plain ol' data. A helper trait for types that can be cast to/from bytes.
+pub trait PoD: FromBytes + IntoBytes + KnownLayout + Immutable + Unaligned {}
+impl<T: FromBytes + IntoBytes + KnownLayout + Immutable + Unaligned + ?Sized> PoD for T {}
 
-impl CheckedPayload for [u8] {}
-impl CheckedPayload for Ip {}
-impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv6<P> {}
-impl<P: CheckedPayload + ?Sized> CheckedPayload for Ipv4<P> {}
-impl<P: CheckedPayload + ?Sized> CheckedPayload for Udp<P> {}
-impl CheckedPayload for Tcp {}
-impl CheckedPayload for WgHandshakeInit {}
-impl CheckedPayload for WgHandshakeResp {}
-impl CheckedPayload for WgCookieReply {}
-impl CheckedPayload for WgData {}
-
-impl<T: CheckedPayload + ?Sized> Packet<T> {
+impl<T: IntoBytes + KnownLayout + Immutable + ?Sized> Packet<T> {
     /// Cast `T` to `Y` without checking anything.
     ///
     /// Only invoke this after checking that the backing buffer contain a bitwise valid `Y` type.
     /// Incorrect usage of this function will cause [`Packet::deref`] to panic.
-    fn cast<Y: CheckedPayload + ?Sized>(self) -> Packet<Y> {
+    fn cast<Y: FromBytes + KnownLayout + Immutable + ?Sized>(self) -> Packet<Y> {
         Packet {
             inner: self.inner,
             _kind: PhantomData::<Y>,
         }
     }
+}
 
+impl<T: IntoBytes + KnownLayout + Immutable + ?Sized> Packet<T> {
     /// Discard the type of this packet and treat it as a pile of bytes.
     pub fn into_bytes(self) -> Packet<[u8]> {
         self.cast()
@@ -168,7 +156,9 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
     fn buf(&self) -> &[u8] {
         &self.inner.buf
     }
+}
 
+impl<T: IntoBytes + FromBytes + KnownLayout + Immutable + ?Sized> Packet<T> {
     /// Create a `Packet<T>` from a `&T`.
     pub fn copy_from(payload: &T) -> Self {
         Self {
@@ -185,7 +175,10 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
     ///
     /// If the `Y` won't fit into the backing buffer, this call will allocate, and effectively
     /// devolves into [`Packet::copy_from`].
-    pub fn overwrite_with<Y: CheckedPayload>(mut self, payload: &Y) -> Packet<Y> {
+    pub fn overwrite_with<Y: IntoBytes + FromBytes + KnownLayout + Immutable + ?Sized>(
+        mut self,
+        payload: &Y,
+    ) -> Packet<Y> {
         self.inner.buf.clear();
         self.inner.buf.extend_from_slice(payload.as_bytes());
         self.cast()
@@ -215,12 +208,16 @@ impl<T: CheckedPayload + ?Sized> Packet<T> {
     [Ipv6<[u8]>]            [[u8]];
     [Ip]                    [[u8]];
     [WgData]                [[u8]];
-    [WgHandshakeInit]       [[u8]];
-    [WgHandshakeResp]       [[u8]];
-    [WgCookieReply]         [[u8]];
 )]
 impl From<Packet<FromType>> for Packet<ToType> {
     fn from(value: Packet<FromType>) -> Packet<ToType> {
+        value.cast()
+    }
+}
+
+/// Implement Into<Packet<[u8]>> for all sized [`IntoBytes`]-types.
+impl<P: IntoBytes + KnownLayout + Immutable + Unaligned> From<Packet<P>> for Packet<[u8]> {
+    fn from(value: Packet<P>) -> Packet<[u8]> {
         value.cast()
     }
 }
@@ -465,7 +462,7 @@ impl Packet<Ipv6> {
     }
 }
 
-impl<T: CheckedPayload + ?Sized> Packet<Ipv4<T>> {
+impl<T: PoD + ?Sized> Packet<Ipv4<T>> {
     /// Strip the IPv4 header and return the payload.
     pub fn into_payload(mut self) -> Packet<T> {
         debug_assert_eq!(
@@ -477,14 +474,14 @@ impl<T: CheckedPayload + ?Sized> Packet<Ipv4<T>> {
         self.cast::<T>()
     }
 }
-impl<T: CheckedPayload + ?Sized> Packet<Ipv6<T>> {
+impl<T: PoD + ?Sized> Packet<Ipv6<T>> {
     /// Strip the IPv6 header and return the payload.
     pub fn into_payload(mut self) -> Packet<T> {
         self.inner.buf.advance(Ipv6Header::LEN);
         self.cast::<T>()
     }
 }
-impl<T: CheckedPayload + ?Sized> Packet<Udp<T>> {
+impl<T: PoD + ?Sized> Packet<Udp<T>> {
     /// Strip the UDP header and return the payload.
     pub fn into_payload(mut self) -> Packet<T> {
         self.inner.buf.advance(UdpHeader::LEN);
@@ -511,7 +508,7 @@ fn validate_tcp(next_protocol: IpNextProtocol, payload: &[u8]) -> eyre::Result<(
 
 impl<Kind> Deref for Packet<Kind>
 where
-    Kind: CheckedPayload + ?Sized,
+    Kind: FromBytes + KnownLayout + Immutable + Unaligned + ?Sized,
 {
     type Target = Kind;
 
@@ -523,7 +520,7 @@ where
 
 impl<Kind> DerefMut for Packet<Kind>
 where
-    Kind: CheckedPayload + ?Sized,
+    Kind: PoD + ?Sized,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         Self::Target::mut_from_bytes(&mut self.inner.buf)
@@ -548,7 +545,7 @@ impl<Kind: ?Sized> Clone for Packet<Kind> {
 
 impl<Kind: Debug> Debug for Packet<Kind>
 where
-    Kind: CheckedPayload + ?Sized,
+    Kind: PoD + ?Sized,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Packet").field(&self.deref()).finish()
