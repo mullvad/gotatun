@@ -129,3 +129,17 @@ impl Ip {
         })
     }
 }
+
+impl IpDecoder {
+    /// Validate as *much* as possible about the IP header.
+    pub const CHECK_ALL: Self = Self {
+        version: true,
+        min_length: true,
+    };
+
+    /// Validate as *little* as possible about the IP header.
+    pub const UNCHECKED: Self = Self {
+        version: false,
+        min_length: false,
+    };
+}

@@ -18,7 +18,7 @@ use eyre::{bail, eyre};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, Unaligned, little_endian};
 
 use crate::packet::util::size_must_be;
-use crate::packet::{CheckedPayload, Packet};
+use crate::packet::{Packet, PoD};
 
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
@@ -275,7 +275,7 @@ impl std::ops::DerefMut for WgDataAndTag {
 
 /// Trait for fields common to both [`WgHandshakeInit`] and [`WgHandshakeResp`].
 pub trait WgHandshakeBase:
-    FromBytes + IntoBytes + KnownLayout + Unaligned + Immutable + CheckedPayload
+    FromBytes + IntoBytes + KnownLayout + Unaligned + Immutable + PoD
 {
     /// Length of the handshake packet, in bytes.
     const LEN: usize;

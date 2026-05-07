@@ -2,7 +2,7 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 use crate::packet::Packet;
 
-use super::CheckedPayload;
+use super::PoD;
 
 /// A trait that enables byte-wise conversion from one packet type to another through zerocopy.
 /// See [`crate::packet::Ipv4Decoder`] for an example.
@@ -47,8 +47,8 @@ where
     /// See also: [`Self::decode_ref`], [`Self::decode_mut`].
     fn decode_owned(&self, source: Packet<Src>) -> Result<Packet<Dst>, DecodeError>
     where
-        Src: CheckedPayload,
-        Dst: CheckedPayload,
+        Src: PoD,
+        Dst: PoD,
     {
         let len = self.validate(&*source)?;
         let mut source = source.into_bytes();
