@@ -32,7 +32,7 @@ use crate::{
     device::{Device, DeviceBuilder, Peer},
     noise::index_table::IndexTable,
     packet::{
-        Ip, IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Packet, PacketBufPool, Udp, WgData,
+        Ip, IpDecoder, IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Packet, PacketBufPool, Udp, WgData,
         WgHandshakeInit, WgHandshakeResp, WgKind,
     },
     tun::{IpRecv, IpSend, MtuWatcher},
