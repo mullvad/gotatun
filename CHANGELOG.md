@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Enable doc_cfg feature for docs.rs.
   https://doc.rust-lang.org/unstable-book/language-features/doc-cfg.html
+- Add `Decoder` trait for parsing and validating byte slices as packet types,
+  with implementations for IPv4/v6/TCP/UDP
+- Add TCP packet types.
+- Add more function for computing internet checksums.
+
+### Changed
+- Rename `CheckedPayload` trait to `PoD`.
 
 
 ## [0.6.0] - 2026-04-30
