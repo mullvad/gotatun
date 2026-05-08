@@ -18,9 +18,12 @@ use super::{DecodeError, Decoder, IpNextProtocol, Udp, UdpDecoder, util::size_mu
 
 /// An IPv6 packet.
 ///
-/// This is a dynamically sized zerocopy type, which means you can compose packet types like
-/// `Ipv6<Udp<WgData>>` and cast them to/from byte slices using [`FromBytes`] and [`IntoBytes`].
-/// [Read more](crate::packet)
+/// This is a dynamically sized [`zerocopy`] type which allows for cheap conversions.
+/// The generic payload allows you to compose packet types like `Ipv6<Udp<WgData>>`.
+///
+/// Use [`Ipv6Decoder`] and [`Ipv6PayloadDecoder`] for parsing into these packet types from
+/// byte slices and such. You can also use [`FromBytes`] and [`IntoBytes`] if you want minimal
+/// validation. [Read more](crate::packet)
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Ipv6<Payload: ?Sized = [u8]> {
