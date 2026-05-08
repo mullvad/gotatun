@@ -23,9 +23,12 @@ use super::util::size_must_be;
 
 /// An IPv4 packet.
 ///
-/// This is a dynamically sized zerocopy type, which means you can compose packet types like
-/// `Ipv4<Udp<WgData>>` and cast them to/from byte slices using [`FromBytes`] and [`IntoBytes`].
-/// [Read more](crate::packet)
+/// This is a dynamically sized [`zerocopy`] type which allows for cheap conversions.
+/// The generic payload allows you to compose packet types like `Ipv4<Udp<WgData>>`.
+///
+/// Use [`Ipv4Decoder`] and [`Ipv4PayloadDecoder`] for parsing into these packet types from
+/// byte slices and such. You can also use [`FromBytes`] and [`IntoBytes`] if you want minimal
+/// validation [Read more](crate::packet).
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv4<Payload: ?Sized = [u8]> {
