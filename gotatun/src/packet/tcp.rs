@@ -315,4 +315,23 @@ mod tests {
         assert_eq!(header.seq_num, 2399249744);
         assert_eq!(header.urgent_pointer, 0);
     }
+
+    const EXAMPLE_IPV4_TCP_SYN: &[u8] = &[
+        0x45, 0x00, 0x00, 0x28, // ver+IHL, DSCP/ECN, total length = 4
+        0x12, 0x34, 0x40, 0x00, // identification, flags=DF, frag offset=0
+        0x40, 0x06, 0xa5, 0x48, // TTL=64, proto=TCP, header checksum
+        0xc0, 0xa8, 0x01, 0x01, // src = 192.168.1.1
+        0xc0, 0xa8, 0x01, 0x02, // dst = 192.168.1.2
+        0x30, 0x39, 0x00, 0x50, // src port = 12345, dst port = 80
+        0x00, 0x00, 0x00, 0x01, // seq = 1
+        0x00, 0x00, 0x00, 0x00, // ack = 0
+        0x50, 0x02, 0xff, 0xff, // data_offset=5, flags=SYN, window=65535
+        0xfc, 0x04, 0x00, 0x00, // checksum=0xfc04, urgent=0
+    ];
+
+    #[test]
+    fn tcp_checksum() {
+        let packet = Ipv4::<Tcp>::try_ref_from_bytes(EXAMPLE_IPV4_TCP_SYN).unwrap();
+        assert_eq!(packet.calculate_tcp_checksum(), 0xfc04);
+    }
 }
