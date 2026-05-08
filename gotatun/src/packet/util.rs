@@ -52,6 +52,26 @@ impl PseudoHeaderV4 {
             length: udp.as_bytes().len().try_into().unwrap(),
         }
     }
+
+    /// Create a new [`PseudoHeaderV4`] from payload.
+    ///
+    /// # Panics
+    ///
+    /// This panics if `payload` is bigger than `u16::MAX`.
+    pub fn from_bytes(
+        source: big_endian::U32,
+        destination: big_endian::U32,
+        protocol: IpNextProtocol,
+        payload: &[u8],
+    ) -> Self {
+        Self {
+            source,
+            destination,
+            _zero: 0,
+            protocol,
+            length: payload.len().try_into().unwrap(),
+        }
+    }
 }
 
 /// Pseudo-header used for computing UDP and TCP checksums.
@@ -99,11 +119,28 @@ pub fn checksum_ipv4_with_skip(payload: &[u8]) -> u16 {
     let sum = checksum_payload_with_skip(payload, SKIP_WORD);
     finalize_csum(sum)
 }
+
 /// Compute an "Internet checksum" with an additional header and a final
 /// inversion of all bits if the checksum is all zeros. This is used for UDP checksums
 /// because 0 means "no checksum" in UDP + IPv4.
 pub fn checksum_udp<H: IntoBytes + Immutable>(header: H, payload: &[u8]) -> u16 {
     let csum = checksum(&[header.as_bytes(), payload]);
+    if csum == 0 {
+        return !0;
+    }
+    csum
+}
+
+/// Compute an "Internet checksum" with an additional header and a final
+/// inversion of all bits if the checksum is all zeros. This is used for UDP checksums
+/// because 0 means "no checksum" in UDP + IPv4.
+///
+/// This also skips any existing checksum field.
+pub fn checksum_udp_with_skip<H: IntoBytes + Immutable>(header: H, payload: &[u8]) -> u16 {
+    const SKIP_INDEX: usize = offset_of!(UdpHeader, checksum) / size_of::<u16>();
+    let mut sum = checksum_payload(header.as_bytes());
+    sum += checksum_payload_with_skip(payload, SKIP_INDEX);
+    let csum = finalize_csum(sum);
     if csum == 0 {
         return !0;
     }
