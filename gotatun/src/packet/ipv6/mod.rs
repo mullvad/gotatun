@@ -10,11 +10,16 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use bitfield_struct::bitfield;
+use duplicate::duplicate_item;
 use eyre::eyre;
 use std::{fmt::Debug, net::Ipv6Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
-use super::{DecodeError, Decoder, IpNextProtocol, Udp, UdpDecoder, util::size_must_be};
+use crate::packet::{Tcp, TcpDecoder};
+
+use super::{
+    DecodeError, Decoder, IpNextProtocol, PseudoHeaderV6, Udp, UdpDecoder, util::size_must_be,
+};
 
 /// An IPv6 packet.
 ///
@@ -209,12 +214,32 @@ impl Decoder<[u8], Ipv6<[u8]>> for Ipv6Decoder {
     }
 }
 
-/// Decode the [`Ipv6::payload`] into [`Udp`].
-impl Decoder<Ipv6<[u8]>, Ipv6<Udp>> for Ipv6PayloadDecoder<UdpDecoder> {
-    fn validate(&self, ipv6: &Ipv6) -> Result<usize, DecodeError> {
-        if self.ip_next_protocol && ipv6.header.next_protocol() != IpNextProtocol::Udp {
-            return Err(DecodeError::InvalidValue("next_protocol"));
+#[duplicate_item(
+    Proto ProtoDecoder proto_str from_proto_fn checksum_fn;
+    [Tcp] [TcpDecoder] ["TCP"] [from_tcp] [checksum_tcp_with_skip];
+    [Udp] [UdpDecoder] ["UDP"] [from_udp] [checksum_udp_with_skip];
+)]
+/// Decode the [`Ipv6::payload`].
+impl Decoder<Ipv6<[u8]>, Ipv6<Proto>> for Ipv6PayloadDecoder<ProtoDecoder> {
+    fn validate(&self, ipv6: &Ipv6<[u8]>) -> Result<usize, DecodeError> {
+        if self.ip_next_protocol && ipv6.header.next_protocol() != IpNextProtocol::Proto {
+            return Err(DecodeError::InvalidValue("protocol"));
         }
+
+        if self.inner.checksum {
+            let proto = Proto::<[u8]>::try_ref_from_bytes(&ipv6.payload)?;
+
+            let header = PseudoHeaderV6::from_proto_fn(
+                ipv6.header.source_address,
+                ipv6.header.destination_address,
+                proto,
+            );
+            let expected_csum = crate::packet::util::checksum_fn(header, proto);
+            if expected_csum != proto.header.checksum.get() {
+                return Err(DecodeError::InvalidValue(concat!(proto_str, " checksum")));
+            }
+        }
+
         let len = self.inner.validate(&ipv6.payload)?;
         Ok(len + Ipv6Header::LEN)
     }
@@ -228,17 +253,22 @@ pub struct Ipv6PayloadDecoder<Inner> {
     pub inner: Inner,
 }
 
-impl Ipv6PayloadDecoder<UdpDecoder> {
-    /// Validate as *much* as possible about the decoded UDP payload.
+#[duplicate_item(
+    Inner;
+    [UdpDecoder];
+    [TcpDecoder];
+)]
+impl Ipv6PayloadDecoder<Inner> {
+    /// Validate as *much* as possible about the decoded payload.
     pub const CHECK_ALL: Self = Self {
         ip_next_protocol: true,
-        inner: UdpDecoder::CHECK_ALL,
+        inner: Inner::CHECK_ALL,
     };
 
-    /// Validate as *little* as possible about the decoded UDP payload.
+    /// Validate as *little* as possible about the decoded payload.
     pub const UNCHECKED: Self = Self {
         ip_next_protocol: false,
-        inner: UdpDecoder::UNCHECKED,
+        inner: Inner::UNCHECKED,
     };
 }
 

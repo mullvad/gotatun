@@ -61,7 +61,7 @@ use std::{
 use bytes::{Buf, BytesMut};
 use duplicate::duplicate_item;
 use either::Either;
-use eyre::{Context, bail, eyre};
+use eyre::{bail, eyre};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 mod decode;
@@ -367,14 +367,14 @@ impl Packet<Ip> {
 impl Packet<Ipv4> {
     /// Try to cast this [`Ipv4`] packet into an [`Udp`] packet.
     ///
-    /// Returns `Packet<Ipv4<Udp>>` if the packet is a valid,
-    /// non-fragmented IPv4 UDP packet with no options (IHL == `5`).
+    /// Returns `Packet<Ipv4<Udp>>` if the packet is a valid, non-fragmented IPv4 UDP packet.
     ///
     /// # Errors
     /// Returns an error if
+    /// - buffer size is too small
+    /// - next_protocol is not UDP
     /// - the packet is a fragment
-    /// - the IHL is not `5`
-    /// - UDP validation fails
+    /// - UDP length is invalid
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv4<Udp>>> {
         let decoder = Ipv4PayloadDecoder {
             ip_next_protocol: true,
@@ -387,53 +387,37 @@ impl Packet<Ipv4> {
         Ok(decoder.decode_owned(self)?)
     }
 
-    /// Try to cast this [`Ipv4`] packet into an [`Tcp`] packet.
+    /// Try to cast this [`Ipv4`] packet into a [`Tcp`] packet.
     ///
-    /// Returns `Packet<Ipv4<Tcp>>` if the packet is a valid,
-    /// non-fragmented IPv4 TCP packet with no options (IHL == `5`).
+    /// Returns `Packet<Ipv4<Tcp>>` if the packet is a valid, non-fragmented IPv4 TCP packet.
     ///
     /// # Errors
     /// Returns an error if
+    /// - buffer size is too small
+    /// - next_protocol is not TCP
     /// - the packet is a fragment
-    /// - the IHL is not `5`
-    /// - TCP validation fails
+    /// - TCP data_offset is invalid
     pub fn try_into_tcp(self) -> eyre::Result<Packet<Ipv4<Tcp>>> {
-        // We validate the IHL here, instead of in the `try_into_ipvx` method,
-        // because there we can still parse the part of the Ipv4 header that is always present
-        // and ignore the options. To parse the TCP packet, we must know that the IHL is 5,
-        // otherwise it will not start at the right offset.
-        self.assert_no_ip_options()?;
-
-        let ip = self.deref();
-        validate_tcp(ip.header.next_protocol(), &ip.payload)
-            .wrap_err_with(|| eyre!("IP header: {:?}", ip.header))?;
-
-        // we have asserted that the packet is a valid IPv4 TCP packet.
-        // update `_kind` to reflect this.
-        Ok(self.cast::<Ipv4<Tcp>>())
-    }
-
-    /// Assert that [`Ipv4Header::ihl`] is 5, which means that the IPv4 header does not contain
-    /// any optional values.
-    fn assert_no_ip_options(&self) -> eyre::Result<()> {
-        match self.header.ihl() {
-            5 => Ok(()),
-            6.. => Err(eyre!("IP header: {:?}", self.header))
-                .wrap_err(eyre!("IPv4 packets with options are not supported")),
-            ihl @ ..5 => {
-                Err(eyre!("IP header: {:?}", self.header)).wrap_err(eyre!("Bad IHL value: {ihl}"))
-            }
-        }
+        let decoder = Ipv4PayloadDecoder {
+            ip_next_protocol: true,
+            dont_fragment: true,
+            inner: TcpDecoder {
+                data_offset: true,
+                checksum: false,
+            },
+        };
+        Ok(decoder.decode_owned(self)?)
     }
 }
 
 impl Packet<Ipv6> {
     /// Try to cast this [`Ipv6`] packet into an [`Udp`] packet.
     ///
-    /// Returns `Packet<Ipv6<Udp>>` if the packet is a valid IPv6 UDP packet.
-    ///
     /// # Errors
-    /// Returns an error if UDP validation fails
+    /// Returns an error if
+    /// - buffer size is too small
+    /// - next_protocol is not UDP
+    /// - UDP length is invalid
     pub fn try_into_udp(self) -> eyre::Result<Packet<Ipv6<Udp>>> {
         let decoder = Ipv6PayloadDecoder {
             ip_next_protocol: true,
@@ -447,18 +431,20 @@ impl Packet<Ipv6> {
 
     /// Try to cast this [`Ipv6`] packet into an [`Tcp`] packet.
     ///
-    /// Returns `Packet<Ipv6<Tcp>>` if the packet is a valid IPv6 TCP packet.
-    ///
     /// # Errors
-    /// Returns an error if TCP validation fails
+    /// Returns an error if
+    /// - buffer size is too small
+    /// - next_protocol is not TCP
+    /// - TCP data_offset is invalid
     pub fn try_into_tcp(self) -> eyre::Result<Packet<Ipv6<Tcp>>> {
-        let ip = self.deref();
-        validate_tcp(ip.header.next_protocol(), &ip.payload)
-            .wrap_err_with(|| eyre!("IP header: {:?}", ip.header))?;
-
-        // we have asserted that the packet is a valid IPv6 TCP packet.
-        // update `_kind` to reflect this.
-        Ok(self.cast::<Ipv6<Tcp>>())
+        let decoder = Ipv6PayloadDecoder {
+            ip_next_protocol: true,
+            inner: TcpDecoder {
+                data_offset: true,
+                checksum: false,
+            },
+        };
+        Ok(decoder.decode_owned(self)?)
     }
 }
 
@@ -487,23 +473,6 @@ impl<T: PoD + ?Sized> Packet<Udp<T>> {
         self.inner.buf.advance(UdpHeader::LEN);
         self.cast::<T>()
     }
-}
-
-fn validate_tcp(next_protocol: IpNextProtocol, payload: &[u8]) -> eyre::Result<()> {
-    let IpNextProtocol::Tcp = next_protocol else {
-        bail!("Expected TCP, but packet was {next_protocol:?}");
-    };
-
-    let tcp = Tcp::ref_from_bytes(payload).map_err(|_| eyre!("Too small to be a TCP packet"))?;
-
-    // Check that `data_offset` is correct by trying to look at the payload.
-    tcp.payload()
-        .ok_or(eyre!("{:?}", tcp.header))
-        .wrap_err_with(|| eyre!("Bad TCP packet"))?;
-
-    // TODO: validate checksum?
-
-    Ok(())
 }
 
 impl<Kind> Deref for Packet<Kind>
