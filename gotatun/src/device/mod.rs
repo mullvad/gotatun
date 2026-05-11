@@ -350,10 +350,9 @@ impl<T: DeviceTransports> DeviceState<T> {
         for allowed_ip in allowed_ips {
             let addr = allowed_ip.network();
             let cidr = allowed_ip.prefix();
+            log::trace!("Adding peer {addr}/{cidr}");
             self.peers_by_ip.insert(addr, cidr, Arc::clone(&peer));
         }
-
-        log::info!("Peer added");
     }
 
     fn create_peer(&mut self, peer_builder: Peer) -> PeerState {
