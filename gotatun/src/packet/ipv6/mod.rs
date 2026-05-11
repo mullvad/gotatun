@@ -10,9 +10,12 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use bitfield_struct::bitfield;
+use duplicate::duplicate_item;
 use eyre::eyre;
 use std::{fmt::Debug, net::Ipv6Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
+
+use crate::packet::{Tcp, TcpDecoder};
 
 use super::{DecodeError, Decoder, IpNextProtocol, Udp, UdpDecoder, util::size_must_be};
 
@@ -220,6 +223,17 @@ impl Decoder<Ipv6<[u8]>, Ipv6<Udp>> for Ipv6PayloadDecoder<UdpDecoder> {
     }
 }
 
+/// Decode the [`Ipv6::payload`] into [`Tcp`].
+impl Decoder<Ipv6<[u8]>, Ipv6<Tcp>> for Ipv6PayloadDecoder<TcpDecoder> {
+    fn validate(&self, ipv6: &Ipv6) -> Result<usize, DecodeError> {
+        if self.ip_next_protocol && ipv6.header.next_protocol() != IpNextProtocol::Tcp {
+            return Err(DecodeError::InvalidValue("next_protocol"));
+        }
+        let len = self.inner.validate(&ipv6.payload)?;
+        Ok(len + Ipv6Header::LEN)
+    }
+}
+
 /// A [`Decoder`] for [`Ipv6::payload`] into a transport protocol like [`Udp`].
 pub struct Ipv6PayloadDecoder<Inner> {
     /// Assert that [`IpNextProtocol`] matches the payload.
@@ -228,17 +242,22 @@ pub struct Ipv6PayloadDecoder<Inner> {
     pub inner: Inner,
 }
 
-impl Ipv6PayloadDecoder<UdpDecoder> {
-    /// Validate as *much* as possible about the decoded UDP payload.
+#[duplicate_item(
+    Inner;
+    [UdpDecoder];
+    [TcpDecoder];
+)]
+impl Ipv6PayloadDecoder<Inner> {
+    /// Validate as *much* as possible about the decoded payload.
     pub const CHECK_ALL: Self = Self {
         ip_next_protocol: true,
-        inner: UdpDecoder::CHECK_ALL,
+        inner: Inner::CHECK_ALL,
     };
 
-    /// Validate as *little* as possible about the decoded UDP payload.
+    /// Validate as *little* as possible about the decoded payload.
     pub const UNCHECKED: Self = Self {
         ip_next_protocol: false,
-        inner: UdpDecoder::UNCHECKED,
+        inner: Inner::UNCHECKED,
     };
 }
 

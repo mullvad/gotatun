@@ -12,9 +12,11 @@
 use std::fmt;
 
 use bitfield_struct::bitfield;
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
-use crate::packet::{IpNextProtocol, PseudoHeaderV4, PseudoHeaderV6, util::size_must_be};
+use crate::packet::{
+    DecodeError, Decoder, IpNextProtocol, PseudoHeaderV4, PseudoHeaderV6, util::size_must_be,
+};
 
 use super::{Ipv4, Ipv6};
 
@@ -61,7 +63,7 @@ pub struct TcpHeader {
     /// Size of the receive window that the segment sender is willing to receive (in window size
     /// units).
     pub window: big_endian::U16,
-    /// TCP checksum. This can be computed using [crate::packet::util::checksum]:
+    /// TCP checksum.
     pub checksum: big_endian::U16,
     /// When URG flag is set, an offset from the sequence number indicating the last urgent data
     /// byte.
@@ -103,6 +105,14 @@ pub struct TcpDataOffset {
 
     #[bits(4)]
     _reserved: u8,
+}
+
+/// A [`Decoder`] for [`Tcp`] packets.
+pub struct TcpDecoder {
+    /// Validate TCP `data_offset` field.
+    pub data_offset: bool,
+    /// Validate TCP checksum field. Only applies if decoding into an IP packet.
+    pub checksum: bool,
 }
 
 impl TcpDataOffset {
@@ -228,7 +238,7 @@ impl Ipv4<Tcp> {
             IpNextProtocol::Tcp,
             self.payload.as_bytes(),
         );
-        crate::packet::util::checksum_tcp_with_skip(header, tcp.as_bytes())
+        crate::packet::util::checksum_tcp_with_skip(header, tcp)
     }
 
     /// Calculate and set the TCP checksum for this packet.
@@ -248,13 +258,41 @@ impl Ipv6<Tcp> {
             IpNextProtocol::Tcp,
             self.payload.as_bytes(),
         );
-        crate::packet::util::checksum_tcp_with_skip(header, tcp.as_bytes())
+        crate::packet::util::checksum_tcp_with_skip(header, tcp)
     }
 
     /// Calculate and set the TCP checksum for this packet.
     pub fn update_tcp_checksum(&mut self) {
         self.payload.header.checksum = self.calculate_tcp_checksum().into();
     }
+}
+
+/// Decode a byte slice into [`Tcp`].
+impl Decoder<[u8], Tcp> for TcpDecoder {
+    fn validate(&self, bytes: &[u8]) -> Result<usize, super::DecodeError> {
+        let tcp = Tcp::try_ref_from_bytes(bytes)?;
+
+        // If data_offset is valid, we will be able to read the payload bytes.
+        if self.data_offset && tcp.payload().is_none() {
+            return Err(DecodeError::InvalidValue("TCP data_offset"));
+        }
+
+        Ok(bytes.len())
+    }
+}
+
+impl TcpDecoder {
+    /// Validate as *much* as possible about the TCP packet.
+    pub const CHECK_ALL: Self = Self {
+        data_offset: true,
+        checksum: true,
+    };
+
+    /// Validate as *little* as possible about the TCP packet.
+    pub const UNCHECKED: Self = Self {
+        data_offset: false,
+        checksum: false,
+    };
 }
 
 impl fmt::Debug for TcpHeader {
@@ -282,7 +320,10 @@ impl fmt::Debug for TcpHeader {
 
 #[cfg(test)]
 mod tests {
-    use crate::packet::{Ipv4, Tcp};
+    use crate::packet::{
+        Decoder, Ipv4, Ipv4Decoder, Ipv4PayloadDecoder, Ipv6Decoder, Ipv6PayloadDecoder, Tcp,
+        TcpDecoder,
+    };
     use zerocopy::TryFromBytes;
 
     const EXAMPLE_IPV4_TCP: &[u8] = &[
@@ -330,8 +371,40 @@ mod tests {
     ];
 
     #[test]
-    fn tcp_checksum() {
-        let packet = Ipv4::<Tcp>::try_ref_from_bytes(EXAMPLE_IPV4_TCP_SYN).unwrap();
+    fn tcp_checksum_v4() {
+        let ipv4 = Ipv4Decoder::CHECK_ALL;
+        let ipv4_tcp = Ipv4PayloadDecoder::<TcpDecoder>::CHECK_ALL;
+        let packet = ipv4.decode_ref(EXAMPLE_IPV4_TCP_SYN).unwrap();
+        let packet = ipv4_tcp.decode_ref(packet).unwrap();
         assert_eq!(packet.calculate_tcp_checksum(), 0xfc04);
+    }
+
+    const EXAMPLE_IPV6_TCP_SYN: &[u8] = &[
+        0x60, 0x05, 0x9a, 0xbc, // version, flow label
+        0x00, 0x28, // payload length
+        0x06, // Next header: TCP
+        0x40, // hop limit
+        // source addr:
+        0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1,
+        // destination addr:
+        0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1,
+        // TCP:
+        0x92, 0x94, 0x10, 0x92, // source port, destination port
+        0x88, 0x49, 0x50, 0xeb, // seqnum
+        0x00, 0x00, 0x00, 0x00, // acknum
+        0xa0, 0x02, 0xff, 0xc4, // flags (SYN), window
+        0xea, 0x98, 0x00, 0x00, // checksum, urgent pointer
+        // tcp options:
+        0x2, 0x4, 0xff, 0xc4, 0x4, 0x2, 0x8, 0xa, 0x96, 0x3, 0x51, 0x2e, 0x0, 0x0, 0x0, 0x0, 0x1,
+        0x3, 0x3, 0xa,
+    ];
+
+    #[test]
+    fn tcp_checksum_v6() {
+        let ipv6 = Ipv6Decoder::CHECK_ALL;
+        let ipv6_tcp = Ipv6PayloadDecoder::<TcpDecoder>::CHECK_ALL;
+        let packet = ipv6.decode_ref(EXAMPLE_IPV6_TCP_SYN).unwrap();
+        let packet = ipv6_tcp.decode_ref(packet).unwrap();
+        assert_eq!(packet.calculate_tcp_checksum(), 0xea98);
     }
 }
