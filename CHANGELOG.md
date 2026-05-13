@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Rename `CheckedPayload` trait to `PoD`.
 
+### Changed
+- Use `jemalloc` default memory allocator in `gotatun-cli`.
+
 
 ## [0.6.0] - 2026-04-30
 ### Added
