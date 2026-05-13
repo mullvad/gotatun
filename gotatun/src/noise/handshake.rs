@@ -434,6 +434,11 @@ impl NoiseParams {
 
         self.static_shared = self.static_private.diffie_hellman(&self.peer_static_public);
     }
+
+    #[cfg(any(feature = "device", test))]
+    fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
+        self.preshared_key = preshared_key;
+    }
 }
 
 impl Handshake {
@@ -497,6 +502,19 @@ impl Handshake {
         public_key: x25519::PublicKey,
     ) {
         self.params.set_static_private(private_key, public_key)
+    }
+
+    /// Update the preshared key and invalidate handshake state derived from the previous value.
+    #[cfg(any(feature = "device", test))]
+    pub(crate) fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
+        self.params.set_preshared_key(preshared_key);
+        // Any in-flight handshake transcript was mixed with the previous PSK and cannot continue.
+        self.previous = HandshakeState::None;
+        self.state = HandshakeState::None;
+        // Replay protection for handshake initiations is tied to the previous crypto context.
+        // Reset it so an immediate retry after a PSK change is not rejected as stale.
+        self.last_handshake_timestamp = Tai64N::zero();
+        self.last_rtt = None;
     }
 
     pub(super) fn receive_handshake_initialization(

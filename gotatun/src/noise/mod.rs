@@ -163,6 +163,18 @@ impl<R: RngCore + Send> Tunn<R> {
         }
     }
 
+    /// Update the preshared key and discard crypto state derived from the previous one.
+    #[cfg(any(feature = "device", test))]
+    pub(crate) fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
+        self.handshake.set_preshared_key(preshared_key);
+        // Established sessions are keyed from the previous PSK and must not remain usable.
+        for s in &mut self.sessions {
+            *s = None;
+        }
+        // Reset timer-driven handshake/keepalive state so the next packet starts a fresh exchange.
+        self.timers.clear();
+    }
+
     /// Encapsulate a single packet.
     ///
     /// If there's an active session, return the encapsulated packet. Otherwise, if needed, return
@@ -803,6 +815,45 @@ mod tests {
             unreachable!("expected WritetoTunnelV4");
         };
         assert_eq!(sent_packet_buf.as_bytes(), recv_packet_buf.as_bytes());
+    }
+
+    #[test]
+    fn set_preshared_key_invalidates_existing_sessions() {
+        let (mut my_tun, _their_tun) = create_two_tuns_and_handshake();
+
+        assert!(my_tun.time_since_last_handshake().is_some());
+
+        my_tun.set_preshared_key(Some([7; 32]));
+
+        assert!(my_tun.time_since_last_handshake().is_none());
+        assert!(matches!(
+            my_tun.handle_outgoing_packet(create_ipv4_udp_packet().into_bytes(), None),
+            Some(WgKind::HandshakeInit(..))
+        ));
+    }
+
+    #[test]
+    fn set_preshared_key_resets_handshake_replay_state() {
+        let (mut my_tun, mut their_tun) = create_two_tuns();
+        let preshared_key = [7; 32];
+
+        my_tun.set_preshared_key(Some(preshared_key));
+
+        let init = create_handshake_init(&mut my_tun);
+        let resp = create_handshake_response(&mut their_tun, init);
+        assert!(matches!(
+            my_tun.handle_incoming_packet(WgKind::HandshakeResp(resp)),
+            TunnResult::Err(WireGuardError::InvalidAeadTag)
+        ));
+
+        their_tun.set_preshared_key(Some(preshared_key));
+        my_tun.set_preshared_key(Some([8; 32]));
+        my_tun.set_preshared_key(Some(preshared_key));
+
+        let init = create_handshake_init(&mut my_tun);
+        let resp = create_handshake_response(&mut their_tun, init);
+        let keepalive = parse_handshake_resp(&mut my_tun, resp);
+        parse_keepalive(&mut their_tun, keepalive);
     }
 
     /// Test that [`Tunn::update_timers`] does not panic if clock jumps back.
