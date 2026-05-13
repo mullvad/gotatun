@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   https://doc.rust-lang.org/unstable-book/language-features/doc-cfg.html
 - Add `mimalloc` and `jemalloc` as optional, alternative memory allocators.
 
+### Changed
+- Use `jemalloc` default memory allocator in `gotatun-cli`.
+
 
 ## [0.6.0] - 2026-04-30
 ### Added
