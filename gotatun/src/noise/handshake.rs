@@ -35,17 +35,61 @@ pub(crate) const LABEL_COOKIE: &[u8; 8] = b"cookie--";
 const KEY_LEN: usize = 32;
 const TIMESTAMP_LEN: usize = 12;
 
-// initiator.chaining_key = HASH(CONSTRUCTION)
-const INITIAL_CHAIN_KEY: [u8; KEY_LEN] = [
-    96, 226, 109, 174, 243, 39, 239, 192, 46, 195, 53, 226, 160, 37, 210, 208, 22, 235, 66, 6, 248,
-    114, 119, 245, 45, 56, 209, 152, 139, 120, 205, 54,
-];
+/// WireGuard Noise protocol construction and identifier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProtocolIdentifier {
+    initial_chain_key: [u8; KEY_LEN],
+    initial_chain_hash: [u8; KEY_LEN],
+}
 
-// initiator.chaining_hash = HASH(initiator.chaining_key || IDENTIFIER)
-const INITIAL_CHAIN_HASH: [u8; KEY_LEN] = [
-    34, 17, 179, 97, 8, 26, 197, 102, 105, 18, 67, 219, 69, 138, 213, 50, 45, 156, 108, 102, 34,
-    147, 232, 183, 14, 225, 156, 101, 186, 7, 158, 243,
-];
+impl ProtocolIdentifier {
+    const STANDARD_NOISE_CONSTRUCTION: &[u8] = b"Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
+    const STANDARD_PROTOCOL_IDENTIFIER: &[u8] = b"WireGuard v1 zx2c4 Jason@zx2c4.com";
+
+    /// Return the standard WireGuard protocol construction and identifier.
+    pub fn standard() -> Self {
+        Self::new(
+            Self::STANDARD_NOISE_CONSTRUCTION,
+            Self::STANDARD_PROTOCOL_IDENTIFIER,
+        )
+    }
+
+    /// Create a protocol identifier from arbitrary construction and identifier bytes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either value is empty.
+    pub fn new(construction: impl AsRef<[u8]>, identifier: impl AsRef<[u8]>) -> Self {
+        let construction = construction.as_ref();
+        let identifier = identifier.as_ref();
+
+        let initial_chain_key = b2s_hash(construction, &[]);
+        let initial_chain_hash = b2s_hash(&initial_chain_key, identifier);
+
+        Self {
+            initial_chain_key,
+            initial_chain_hash,
+        }
+    }
+
+    /// Return the initial chain key.
+    /// initial chain key = HASH(construction)
+    pub(crate) fn initial_chain_key(&self) -> [u8; 32] {
+        self.initial_chain_key
+    }
+
+    /// Return the initial chain hash.
+    /// initial chain hash = HASH(initial chain key || identifier)
+    pub(crate) fn initial_chain_hash(&self) -> [u8; KEY_LEN] {
+        self.initial_chain_hash
+    }
+}
+
+impl Default for ProtocolIdentifier {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
 
 #[inline]
 pub(crate) fn b2s_hash(data1: &[u8], data2: &[u8]) -> [u8; 32] {
@@ -253,6 +297,8 @@ struct NoiseParams {
     sending_mac1_key: [u8; KEY_LEN],
     /// An optional preshared key
     preshared_key: Option<[u8; KEY_LEN]>,
+    /// The agreed Noise protocol identifier
+    protocol_identifier: ProtocolIdentifier,
 }
 
 impl std::fmt::Debug for NoiseParams {
@@ -264,6 +310,7 @@ impl std::fmt::Debug for NoiseParams {
             .field("static_shared", &"<redacted>")
             .field("sending_mac1_key", &self.sending_mac1_key)
             .field("preshared_key", &self.preshared_key)
+            .field("protocol_identifier", &self.protocol_identifier)
             .finish()
     }
 }
@@ -355,13 +402,14 @@ pub struct HalfHandshake {
 pub fn parse_handshake_anon(
     static_private: &x25519::StaticSecret,
     static_public: &x25519::PublicKey,
+    protocol_identifier: &ProtocolIdentifier,
     packet: &WgHandshakeInit,
 ) -> Result<HalfHandshake, WireGuardError> {
     let peer_index = packet.sender_idx.get();
     // initiator.chaining_key = HASH(CONSTRUCTION)
-    let mut chaining_key = INITIAL_CHAIN_KEY;
+    let mut chaining_key = protocol_identifier.initial_chain_key();
     // initiator.hash = HASH(HASH(initiator.chaining_key || IDENTIFIER) || responder.static_public)
-    let mut hash = INITIAL_CHAIN_HASH;
+    let mut hash = protocol_identifier.initial_chain_hash();
     hash = b2s_hash(&hash, static_public.as_bytes());
     // msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
     let peer_ephemeral_public = x25519::PublicKey::from(packet.unencrypted_ephemeral);
@@ -404,6 +452,7 @@ impl NoiseParams {
         static_public: x25519::PublicKey,
         peer_static_public: x25519::PublicKey,
         preshared_key: Option<[u8; 32]>,
+        protocol_identifier: ProtocolIdentifier,
     ) -> NoiseParams {
         let static_shared = static_private.diffie_hellman(&peer_static_public);
 
@@ -416,6 +465,7 @@ impl NoiseParams {
             static_shared,
             sending_mac1_key: initial_sending_mac_key,
             preshared_key,
+            protocol_identifier,
         }
     }
 
@@ -447,12 +497,14 @@ impl Handshake {
         peer_static_public: x25519::PublicKey,
         index_table: IndexTable,
         preshared_key: Option<[u8; 32]>,
+        protocol_identifier: ProtocolIdentifier,
     ) -> Handshake {
         let params = NoiseParams::new(
             static_private,
             static_public,
             peer_static_public,
             preshared_key,
+            protocol_identifier,
         );
 
         Handshake {
@@ -523,9 +575,9 @@ impl Handshake {
         packet: crate::packet::Packet<WgHandshakeInit>,
     ) -> Result<(crate::packet::Packet<WgHandshakeResp>, Session), WireGuardError> {
         // initiator.chaining_key = HASH(CONSTRUCTION)
-        let mut chaining_key = INITIAL_CHAIN_KEY;
+        let mut chaining_key = self.params.protocol_identifier.initial_chain_key();
         // initiator.hash = HASH(HASH(initiator.chaining_key || IDENTIFIER) || responder.static_public)
-        let mut hash = INITIAL_CHAIN_HASH;
+        let mut hash = self.params.protocol_identifier.initial_chain_hash();
         hash = b2s_hash(&hash, self.params.static_public.as_bytes());
         // msg.sender_index = little_endian(initiator.sender_index)
         let peer_index = packet.sender_idx;
@@ -759,9 +811,9 @@ impl Handshake {
         let local_index_val = local_index.value();
 
         // initiator.chaining_key = HASH(CONSTRUCTION)
-        let mut chaining_key = INITIAL_CHAIN_KEY;
+        let mut chaining_key = self.params.protocol_identifier.initial_chain_key();
         // initiator.hash = HASH(HASH(initiator.chaining_key || IDENTIFIER) || responder.static_public)
-        let mut hash = INITIAL_CHAIN_HASH;
+        let mut hash = self.params.protocol_identifier.initial_chain_hash();
         hash = b2s_hash(&hash, self.params.peer_static_public.as_bytes());
         // initiator.ephemeral_private = DH_GENERATE()
         let ephemeral_private = x25519::ReusableSecret::random_from_rng(rand_core::OsRng);
@@ -923,6 +975,30 @@ impl Handshake {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // initiator.chaining_key = HASH(CONSTRUCTION)
+    const STANDARD_INITIAL_CHAIN_KEY: [u8; KEY_LEN] = [
+        96, 226, 109, 174, 243, 39, 239, 192, 46, 195, 53, 226, 160, 37, 210, 208, 22, 235, 66, 6,
+        248, 114, 119, 245, 45, 56, 209, 152, 139, 120, 205, 54,
+    ];
+
+    // initiator.chaining_hash = HASH(initiator.chaining_key || IDENTIFIER)
+    const STANDARD_INITIAL_CHAIN_HASH: [u8; KEY_LEN] = [
+        34, 17, 179, 97, 8, 26, 197, 102, 105, 18, 67, 219, 69, 138, 213, 50, 45, 156, 108, 102,
+        34, 147, 232, 183, 14, 225, 156, 101, 186, 7, 158, 243,
+    ];
+
+    #[test]
+    fn standard_protocol_identifier_matches_wireguard_test_vectors() {
+        assert_eq!(
+            ProtocolIdentifier::standard().initial_chain_key(),
+            STANDARD_INITIAL_CHAIN_KEY
+        );
+        assert_eq!(
+            ProtocolIdentifier::standard().initial_chain_hash(),
+            STANDARD_INITIAL_CHAIN_HASH
+        );
+    }
 
     #[test]
     fn chacha20_seal_rfc7530_test_vector() {
