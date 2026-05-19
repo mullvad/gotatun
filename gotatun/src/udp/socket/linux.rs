@@ -261,15 +261,18 @@ mod gro {
     mod tests {
         use super::UdpSocket;
         use crate::packet::PacketBufPool;
+        use crate::udp::socket::SockOpt;
         use crate::udp::{UdpRecv, UdpSend};
         use std::net::Ipv6Addr;
         use std::time::Duration;
 
         #[tokio::test]
         async fn recv_many_from_preserves_ipv6_source_addr() {
-            let mut receiver = UdpSocket::bind((Ipv6Addr::LOCALHOST, 0).into()).unwrap();
+            let mut receiver =
+                UdpSocket::bind((Ipv6Addr::LOCALHOST, 0).into(), SockOpt::default()).unwrap();
             receiver.enable_udp_gro().ok();
-            let sender = UdpSocket::bind((Ipv6Addr::LOCALHOST, 0).into()).unwrap();
+            let sender =
+                UdpSocket::bind((Ipv6Addr::LOCALHOST, 0).into(), SockOpt::default()).unwrap();
 
             let recv_addr = receiver.local_addr().unwrap();
             let sender_addr = sender.local_addr().unwrap();
