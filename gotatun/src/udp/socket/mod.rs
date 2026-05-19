@@ -39,8 +39,8 @@ mod windows;
 /// An implementation of [`UdpTransportFactory`] for regular UDP sockets. This provides `bind`.
 pub struct UdpSocketFactory;
 
-const UDP_RECV_BUFFER_SIZE: usize = 7 * 1024 * 1024;
-const UDP_SEND_BUFFER_SIZE: usize = 7 * 1024 * 1024;
+const UDP_RECV_BUFFER_SIZE: usize = 1024 * 1024;
+const UDP_SEND_BUFFER_SIZE: usize = 1024 * 1024;
 
 impl UdpTransportFactory for UdpSocketFactory {
     type SendV4 = UdpSocket;
