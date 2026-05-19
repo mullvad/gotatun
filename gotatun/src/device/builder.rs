@@ -90,7 +90,7 @@ impl<X, Y> DeviceBuilder<Nul, X, Y> {
     /// Create a WireGuard device that reads/writes incoming/outgoing packets using a UDP socket.
     /// This is the conventional device kind.
     pub fn with_default_udp(self) -> DeviceBuilder<UdpSocketFactory, X, Y> {
-        self.with_udp(UdpSocketFactory)
+        self.with_udp(UdpSocketFactory::default())
     }
 
     /// Create a WireGuard device with a custom [`UdpTransportFactory`].
@@ -109,6 +109,35 @@ impl<X, Y> DeviceBuilder<Nul, X, Y> {
             #[cfg(target_os = "linux")]
             fwmark: self.fwmark,
         }
+    }
+}
+
+impl<X, Y> DeviceBuilder<UdpSocketFactory, X, Y> {
+    /// Specify the `SO_MARK` argument to the [`UdpTransportFactory`].
+    ///
+    /// You probably only want this when using [`with_default_udp`](Self::with_default_udp).
+    #[cfg(target_os = "linux")]
+    pub const fn with_fwmark(mut self, fwmark: u32) -> Self {
+        self.udp.opts.fwmark = Some(fwmark);
+        self
+    }
+
+    /// Specify the `SO_RCVBUF` argument to the [`UdpTransportFactory`].
+    ///
+    /// Changes the size of the operating system's receive buffer associated
+    /// with the socket.
+    pub const fn udp_recv_buffer_size(mut self, recv_buffer_size: usize) -> Self {
+        self.udp.opts.recv_buffer_size = Some(recv_buffer_size);
+        self
+    }
+
+    /// Specify the `SO_SNDBUF` argument to the [`UdpTransportFactory`].
+    ///
+    /// Changes the size of the operating system's send buffer associated with
+    /// the socket.
+    pub const fn udp_send_buffer_size(mut self, send_buffer_size: usize) -> Self {
+        self.udp.opts.send_buffer_size = Some(send_buffer_size);
+        self
     }
 }
 
@@ -211,15 +240,6 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
     /// By default, the device uses [IndexTable::from_os_rng].
     pub fn with_index_table(mut self, index_table: IndexTable) -> Self {
         self.index_table = Some(index_table);
-        self
-    }
-
-    /// Specify the `SO_MARK` argument to the [`UdpTransportFactory`].
-    ///
-    /// You probably only want this when using [`with_default_udp`](Self::with_default_udp).
-    #[cfg(target_os = "linux")]
-    pub const fn with_fwmark(mut self, fwmark: u32) -> Self {
-        self.fwmark = Some(fwmark);
         self
     }
 }

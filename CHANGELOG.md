@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- Allow UDP send/recv buffer sizes (`SO_SNDBUF`/`SO_RCVBUF`) to be configured via
+  `DeviceBuilder::udp_send_buffer_size` and `DeviceBuilder::udp_recv_buffer_size`.
+
+### Changed
+- `gotatun::udp::socket::UdpSocketFactory` now uses operating system default values for `SO_SNDBUF`
+  and `SO_RCVBUF` (instead of forcibly adjusting them to 7 MB each).
 
 
 ## [0.6.0] - 2026-04-30
