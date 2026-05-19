@@ -49,6 +49,8 @@ pub struct DeviceBuilder<Udp, TunTx, TunRx> {
 
     #[cfg(target_os = "linux")]
     fwmark: Option<u32>,
+    recv_buffer_size: Option<usize>,
+    send_buffer_size: Option<usize>,
 }
 
 impl Default for DeviceBuilder<Nul, Nul, Nul> {
@@ -82,6 +84,8 @@ impl DeviceBuilder<Nul, Nul, Nul> {
             index_table: None,
             #[cfg(target_os = "linux")]
             fwmark: None,
+            recv_buffer_size: None,
+            send_buffer_size: None,
         }
     }
 }
@@ -108,7 +112,29 @@ impl<X, Y> DeviceBuilder<Nul, X, Y> {
             index_table: self.index_table,
             #[cfg(target_os = "linux")]
             fwmark: self.fwmark,
+            recv_buffer_size: self.recv_buffer_size,
+            send_buffer_size: self.send_buffer_size,
         }
+    }
+}
+
+impl<X, Y> DeviceBuilder<UdpSocketFactory, X, Y> {
+    /// Specify the `SO_RCVBUF` argument to the [`UdpTransportFactory`].
+    ///
+    /// Changes the size of the operating system's receive buffer associated
+    /// with the socket.
+    pub const fn udp_recv_buffer_size(mut self, recv_buffer_size: usize) -> Self {
+        self.recv_buffer_size = Some(recv_buffer_size);
+        self
+    }
+
+    /// Specify the `SO_SNDBUF` argument to the [`UdpTransportFactory`].
+    ///
+    /// Changes the size of the operating system's send buffer associated with
+    /// the socket.
+    pub const fn udp_send_buffer_size(mut self, send_buffer_size: usize) -> Self {
+        self.send_buffer_size = Some(send_buffer_size);
+        self
     }
 }
 
@@ -163,6 +189,8 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
             index_table: self.index_table,
             #[cfg(target_os = "linux")]
             fwmark: self.fwmark,
+            recv_buffer_size: self.recv_buffer_size,
+            send_buffer_size: self.send_buffer_size,
         }
     }
 }
@@ -247,6 +275,8 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             tun_rx_mtu: self.tun_rx.mtu(),
             tun_rx: Arc::new(Mutex::new(self.tun_rx)),
             fwmark,
+            recv_buffer_size: self.recv_buffer_size,
+            send_buffer_size: self.send_buffer_size,
             key_pair: None,
             index_table: self.index_table.unwrap_or_else(IndexTable::from_os_rng),
             peers: Default::default(),

@@ -26,6 +26,7 @@ mod transports;
 pub mod uapi;
 
 use crate::noise::index_table::IndexTable;
+use crate::udp::socket::SockOpt;
 use builder::Nul;
 use futures::TryFutureExt;
 use std::collections::HashMap;
@@ -102,6 +103,8 @@ pub const fn build() -> DeviceBuilder<Nul, Nul, Nul> {
 pub(crate) struct DeviceState<T: DeviceTransports> {
     key_pair: Option<(x25519::StaticSecret, x25519::PublicKey)>,
     fwmark: Option<u32>,
+    recv_buffer_size: Option<usize>,
+    send_buffer_size: Option<usize>,
 
     tun_tx: Arc<Mutex<T::IpSend>>,
     /// The tun device reader.
@@ -411,8 +414,12 @@ impl<T: DeviceTransports> DeviceState<T> {
             addr_v4: Ipv4Addr::UNSPECIFIED,
             addr_v6: Ipv6Addr::UNSPECIFIED,
             port: self.port,
-            #[cfg(target_os = "linux")]
-            fwmark: self.fwmark,
+            opts: SockOpt {
+                #[cfg(target_os = "linux")]
+                fwmark: self.fwmark,
+                recv_buffer_size: self.recv_buffer_size,
+                send_buffer_size: self.send_buffer_size,
+            },
         };
         let ((udp4_tx, udp4_rx), (udp6_tx, udp6_rx)) = self
             .udp_factory

@@ -20,6 +20,8 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
+use socket::SockOpt;
+
 use crate::packet::{Packet, PacketBufPool};
 
 #[cfg(feature = "device")]
@@ -67,9 +69,8 @@ pub struct UdpTransportFactoryParams {
     /// The port to bind the UDP socket to.
     pub port: u16,
 
-    /// If `Some`, set `fwmark` on the socket.
-    #[cfg(target_os = "linux")]
-    pub fwmark: Option<u32>,
+    /// Set various socket options when calling [`UdpTransportFactory::bind`].
+    pub opts: SockOpt,
 }
 
 /// An abstraction of `recv_from` for a UDP socket.
