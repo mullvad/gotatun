@@ -53,6 +53,7 @@ impl UdpTransportFactory for UdpSocketFactory {
         params: &UdpTransportFactoryParams,
     ) -> io::Result<((Self::SendV4, Self::RecvV4), (Self::SendV6, Self::RecvV6))> {
         let opts = SockOpt {
+            #[cfg(target_os = "linux")]
             fwmark: params.fwmark,
             recv_buffer_size: self.recv_buffer_size,
             send_buffer_size: self.send_buffer_size,
