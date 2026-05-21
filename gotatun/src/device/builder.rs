@@ -118,6 +118,26 @@ impl<X, Y> DeviceBuilder<Nul, X, Y> {
     }
 }
 
+impl<X, Y> DeviceBuilder<UdpSocketFactory, X, Y> {
+    /// Specify the `SO_RCVBUF` argument to the [`UdpTransportFactory`].
+    ///
+    /// Changes the size of the operating system's receive buffer associated
+    /// with the socket.
+    pub const fn udp_recv_buffer_size(mut self, recv_buffer_size: usize) -> Self {
+        self.recv_buffer_size = Some(recv_buffer_size);
+        self
+    }
+
+    /// Specify the `SO_SNDBUF` argument to the [`UdpTransportFactory`].
+    ///
+    /// Changes the size of the operating system's send buffer associated with
+    /// the socket.
+    pub const fn udp_send_buffer_size(mut self, send_buffer_size: usize) -> Self {
+        self.send_buffer_size = Some(send_buffer_size);
+        self
+    }
+}
+
 impl<X> DeviceBuilder<X, Nul, Nul> {
     /// Create a TUN device with the given name.
     ///
@@ -228,24 +248,6 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
     #[cfg(target_os = "linux")]
     pub const fn with_fwmark(mut self, fwmark: u32) -> Self {
         self.fwmark = Some(fwmark);
-        self
-    }
-
-    /// Specify the `SO_RCVBUF` argument to the [`UdpTransportFactory`].
-    ///
-    /// Changes the size of the operating system's receive buffer associated
-    /// with the socket.
-    pub const fn udp_recv_buffer_size(mut self, recv_buffer_size: usize) -> Self {
-        self.recv_buffer_size = Some(recv_buffer_size);
-        self
-    }
-
-    /// Specify the `SO_SNDBUF` argument to the [`UdpTransportFactory`].
-    ///
-    /// Changes the size of the operating system's send buffer associated with
-    /// the socket.
-    pub const fn udp_send_buffer_size(mut self, send_buffer_size: usize) -> Self {
-        self.send_buffer_size = Some(send_buffer_size);
         self
     }
 }
