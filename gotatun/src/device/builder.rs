@@ -235,6 +235,8 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
     }
 
     /// Specify the `SO_MARK` argument to the [`UdpTransportFactory`].
+    ///
+    /// You probably only want this when using [`with_default_udp`](Self::with_default_udp).
     #[cfg(target_os = "linux")]
     pub const fn with_fwmark(mut self, fwmark: u32) -> Self {
         self.fwmark = Some(fwmark);
