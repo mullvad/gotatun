@@ -36,8 +36,10 @@ mod windows;
 /// An implementation of [`UdpTransportFactory`] for regular UDP sockets. This provides `bind`.
 #[derive(Debug, Default)]
 pub struct UdpSocketFactory {
-    /// Additional socket options.
-    pub(crate) opts: SockOpt,
+    /// If `Some`, set `SO_RCVBUF` on the socket.
+    pub recv_buffer_size: Option<usize>,
+    /// If `Some`, set `SO_SNDBUF` on the socket.
+    pub send_buffer_size: Option<usize>,
 }
 
 impl UdpTransportFactory for UdpSocketFactory {
@@ -50,8 +52,13 @@ impl UdpTransportFactory for UdpSocketFactory {
         &mut self,
         params: &UdpTransportFactoryParams,
     ) -> io::Result<((Self::SendV4, Self::RecvV4), (Self::SendV6, Self::RecvV6))> {
-        let (udp_v4, udp_v6) =
-            bind_sockets(params.addr_v4, params.addr_v6, params.port, self.opts)?;
+        let opts = SockOpt {
+            fwmark: params.fwmark,
+            recv_buffer_size: self.recv_buffer_size,
+            send_buffer_size: self.send_buffer_size,
+        };
+
+        let (udp_v4, udp_v6) = bind_sockets(params.addr_v4, params.addr_v6, params.port, opts)?;
 
         if let Err(err) = udp_v4.enable_udp_gro() {
             log::warn!("Failed to enable UDP GRO for IPv4 socket: {err}");

@@ -411,6 +411,8 @@ impl<T: DeviceTransports> DeviceState<T> {
             addr_v4: Ipv4Addr::UNSPECIFIED,
             addr_v6: Ipv6Addr::UNSPECIFIED,
             port: self.port,
+            #[cfg(target_os = "linux")]
+            fwmark: self.fwmark,
         };
         let ((udp4_tx, udp4_rx), (udp6_tx, udp6_rx)) = self
             .udp_factory
