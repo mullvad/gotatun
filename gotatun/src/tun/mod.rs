@@ -64,7 +64,7 @@ pub trait IpRecv: Send + Sync + 'static {
 #[derive(Clone)]
 pub struct MtuWatcher {
     mtu_source: MtuSource,
-    modifier: i32,
+    modifier: i16,
 }
 
 #[derive(Clone)]
@@ -88,11 +88,7 @@ impl MtuWatcher {
             MtuSource::Constant(mtu) => *mtu,
             MtuSource::Watch(mtu_rx) => *mtu_rx.borrow_and_update(),
         };
-
-        i32::from(mtu)
-            .checked_add(self.modifier)
-            .and_then(|int| u16::try_from(int).ok())
-            .expect("MTU over/underflow")
+        mtu.saturating_add_signed(self.modifier)
     }
 
     /// Wait for the MTU to change and return the new value.
@@ -114,7 +110,7 @@ impl MtuWatcher {
     /// Any downstream (cloned) [Self] will inherit this change, but any upstream [Self] won't.
     pub fn increase(self, value: u16) -> Option<Self> {
         Some(Self {
-            modifier: self.modifier.checked_add(i32::from(value))?,
+            modifier: self.modifier.checked_add(i16::try_from(value).ok()?)?,
             ..self
         })
     }
@@ -124,7 +120,7 @@ impl MtuWatcher {
     /// Any downstream (cloned) [Self] will inherit this change, but any upstream [Self] won't.
     pub fn decrease(self, value: u16) -> Option<Self> {
         Some(Self {
-            modifier: self.modifier.checked_sub(i32::from(value))?,
+            modifier: self.modifier.checked_sub(i16::try_from(value).ok()?)?,
             ..self
         })
     }
