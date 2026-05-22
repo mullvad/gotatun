@@ -285,7 +285,7 @@ mod tests {
             let device_builder = DeviceBuilder::new()
                 .create_tun(&tun_name)
                 .unwrap()
-                .with_udp(UdpSocketFactory)
+                .with_udp(UdpSocketFactory::default())
                 .with_uapi(uapi);
 
             let _device = device_builder.build().await.unwrap();

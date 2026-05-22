@@ -14,9 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with implementations for IPv4/v6/TCP/UDP
 - Add TCP packet types.
 - Add more function for computing internet checksums.
+- Allow UDP send/recv buffer sizes (`SO_SNDBUF`/`SO_RCVBUF`) to be configured via
+  `DeviceBuilder::udp_send_buffer_size` and `DeviceBuilder::udp_recv_buffer_size`.
 
 ### Changed
 - Rename `CheckedPayload` trait to `PoD`.
+- `gotatun::udp::socket::UdpSocketFactory` now uses operating system default values for `SO_SNDBUF`
+  and `SO_RCVBUF` (instead of forcibly adjusting them to 7 MB each).
 
 
 ## [0.6.0] - 2026-04-30
