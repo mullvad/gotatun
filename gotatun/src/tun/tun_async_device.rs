@@ -11,6 +11,9 @@
 
 //! Implementations of [`IpSend`] and [`IpRecv`] for the [`tun`] crate.
 
+/// Re-export [`tun`] crate.
+pub use tun;
+
 use tokio::{sync::watch, time::sleep};
 use tun::AbstractDevice;
 
