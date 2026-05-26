@@ -207,6 +207,7 @@ impl<T: DeviceTransports> DeviceWrite<'_, T> {
 
     /// Remove all peers, returning the number of peers removed.
     pub fn clear_peers(&mut self) -> usize {
+        self.reconfigure = Reconfigure::Yes;
         self.device.clear_peers()
     }
 

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Guard against `MtuWatcher` panicking on extreme MTU values.
+- Reconfigure WireGuard device after calling `DeviceWrite::clear_peers`.
 
 
 ## [0.7.0] - 2026-05-22
