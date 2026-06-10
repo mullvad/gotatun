@@ -127,10 +127,6 @@ mod gro {
         pub(crate) gro_bufs: Box<[BytesMut; MAX_PACKET_COUNT]>,
     }
 
-    // SAFETY: MultiHeaders contains pointers, but we only ever mutate data in
-    // [Self::recv_many_from]. This should be fine.
-    unsafe impl Send for RecvManyBuf {}
-
     impl Default for RecvManyBuf {
         fn default() -> Self {
             let mut gro_buf = BytesMut::zeroed(MAX_PACKET_COUNT * MAX_GRO_SIZE);
