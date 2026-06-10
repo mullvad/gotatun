@@ -24,14 +24,16 @@ pub mod rate_limiter;
 mod session;
 mod timers;
 
-use rand::{Rng, RngCore, SeedableRng, rngs::StdRng};
+use rand::{RngCore, SeedableRng, rngs::StdRng};
 use zerocopy::IntoBytes;
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::index_table::IndexTable;
 use crate::noise::rate_limiter::RateLimiter;
-use crate::noise::timers::{MAX_JITTER, TimerName, Timers};
+use crate::noise::timers::{TimerName, Timers};
+
+pub use crate::noise::timers::TimerParams;
 use crate::packet::{Packet, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind};
 use crate::tun::MtuWatcher;
 use crate::x25519;
@@ -406,21 +408,16 @@ impl<R: RngCore + Send> Tunn<R> {
             self.timer_tick(TimerName::TimeLastHandshakeStarted);
         }
         self.timer_tick(TimerName::TimeLastPacketSent);
-        self.update_handshake_jitter();
+        self.update_rekey_timeout();
 
         self.tx_bytes += packet.as_bytes().len();
 
         Some(packet)
     }
 
-    /// Update jitter to apply to the handshake initiation retry timer.
-    fn update_handshake_jitter(&mut self) {
-        self.timers.handshake_jitter = self.next_jitter();
-    }
-
-    /// Calculate a jitter for the handshake initiation retry timer.
-    fn next_jitter(&mut self) -> Duration {
-        self.jitter_rng.random_range(Duration::ZERO..=MAX_JITTER)
+    /// Sample a new deadline for the handshake initiation retry timer.
+    fn update_rekey_timeout(&mut self) {
+        self.timers.rekey_timeout = self.sample_timer(|p| &p.rekey_timeout);
     }
 
     /// Encapsulate and return all queued packets.
@@ -996,14 +993,17 @@ mod tests {
             FixedRng(200),
         );
 
-        let expected_jitter = my_tun.next_jitter();
+        // The FixedRng makes this draw identical to the one made when the handshake is sent.
+        let expected_deadline = my_tun.sample_timer(|p| &p.rekey_timeout);
+        assert!(expected_deadline >= REKEY_TIMEOUT);
+        assert!(expected_deadline <= REKEY_TIMEOUT + MAX_JITTER);
 
-        // Trigger the initial handshake via handle_outgoing_packet, which sets jitter.
+        // Trigger the initial handshake via handle_outgoing_packet, which samples the deadline.
         let packet = create_ipv4_udp_packet();
         let _ = my_tun.handle_outgoing_packet(packet.into_bytes(), None);
 
         // Just before REKEY_TIMEOUT + jitter: no retry yet.
-        MockClock::advance(REKEY_TIMEOUT + expected_jitter - Duration::from_millis(1));
+        MockClock::advance(expected_deadline - Duration::from_millis(1));
         assert!(
             matches!(my_tun.update_timers(), Ok(None)),
             "retry should not fire before REKEY_TIMEOUT + jitter"
@@ -1015,6 +1015,71 @@ mod tests {
             matches!(my_tun.update_timers(), Ok(Some(WgKind::HandshakeInit(..)))),
             "retry should fire at REKEY_TIMEOUT + jitter"
         );
+    }
+
+    /// Verify that custom [`TimerParams`] move the rekey-after-time and passive keepalive
+    /// deadlines.
+    #[test]
+    #[cfg(feature = "mock_instant")]
+    fn custom_timer_params_applied() {
+        const REKEY_AFTER: Duration = Duration::from_secs(100);
+        const KEEPALIVE: Duration = Duration::from_secs(8);
+        // Far enough away to never interfere with the deadlines under test.
+        const NEW_HANDSHAKE: Duration = Duration::from_secs(1000);
+        const MS: Duration = Duration::from_millis(1);
+
+        MockClock::set_time(Duration::ZERO);
+
+        let (mut my_tun, mut their_tun) = create_two_tuns();
+        my_tun.dangerously_set_timer_params(TimerParams {
+            keepalive_timeout: KEEPALIVE..=KEEPALIVE,
+            new_handshake_timeout: NEW_HANDSHAKE..=NEW_HANDSHAKE,
+            rekey_after_time: REKEY_AFTER..=REKEY_AFTER,
+            ..TimerParams::default()
+        });
+
+        let init = create_handshake_init(&mut my_tun);
+        let resp = create_handshake_response(&mut their_tun, init);
+        let keepalive = parse_handshake_resp(&mut my_tun, resp);
+        parse_keepalive(&mut their_tun, keepalive);
+
+        // Receive a data packet at t = 1 s without answering. The passive keepalive
+        // should fire KEEPALIVE (rather than the default 10 s) after the data arrived.
+        MockClock::advance(Duration::from_secs(1));
+        assert!(matches!(my_tun.update_timers(), Ok(None)));
+
+        let sent_packet_buf = create_ipv4_udp_packet();
+        let data = their_tun
+            .handle_outgoing_packet(sent_packet_buf.into_bytes(), None)
+            .expect("expected encapsulated packet");
+        let _ = my_tun.handle_incoming_packet(data);
+
+        MockClock::advance(KEEPALIVE - MS);
+        assert!(
+            matches!(my_tun.update_timers(), Ok(None)),
+            "keepalive should not fire before the custom timeout"
+        );
+        MockClock::advance(MS);
+        assert!(
+            matches!(my_tun.update_timers(), Ok(Some(WgKind::Data(p))) if p.is_keepalive()),
+            "keepalive should fire at the custom timeout"
+        );
+
+        // Send a data packet on the aging session (t = 1 s + KEEPALIVE). As the initiator,
+        // we should start a new handshake REKEY_AFTER (rather than the default 120 s) after
+        // session establishment (t = 0).
+        let sent_packet_buf = create_ipv4_udp_packet();
+        let _ = my_tun
+            .handle_outgoing_packet(sent_packet_buf.into_bytes(), None)
+            .expect("expected encapsulated packet");
+
+        MockClock::advance(REKEY_AFTER - KEEPALIVE - Duration::from_secs(1) - MS);
+        assert!(
+            matches!(my_tun.update_timers(), Ok(None)),
+            "rekey should not fire before the custom rekey-after-time"
+        );
+        MockClock::advance(MS);
+        update_timer_results_in_handshake(&mut my_tun);
     }
 
     /// Verify that a received keepalive is not answered with a passive keepalive.
