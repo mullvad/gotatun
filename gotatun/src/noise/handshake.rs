@@ -901,6 +901,33 @@ impl Handshake {
     }
 }
 
+/// The known Curve25519 low-order points, decoded from the same base64 form as
+/// the WireGuard kernel selftest (`tools/testing/selftests/wireguard/netns.sh`).
+/// Any clamped scalar multiplied by one of these yields the all-zero
+/// (non-contributory) shared secret, so all of them must be rejected, not just
+/// the all-zero point. The set covers `u = 0`, `u = 1`, the two order-8 points,
+/// `u = p-1`, and the non-canonical encodings of `0` and `1` (`u = p`, `p+1`).
+#[cfg(test)]
+pub(crate) fn low_order_keys() -> [[u8; 32]; 7] {
+    use base64::Engine as _;
+    [
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "4Ot6fDtBuK4WVuP68Z/EatoJjeucMrH9hmIFFl9JuAA=",
+        "X5yVvKNQjCSx0LFVnIPvWwREXMRYHI6G2CJO3dCfEVc=",
+        "7P///////////////////////////////////////38=",
+        "7f///////////////////////////////////////38=",
+        "7v///////////////////////////////////////38=",
+    ]
+    .map(|encoded| {
+        base64::prelude::BASE64_STANDARD
+            .decode(encoded)
+            .expect("valid base64")
+            .try_into()
+            .expect("32-byte key")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -957,5 +984,55 @@ mod tests {
 
         aead_chacha20_open(&mut [], &key, counter, &encrypted_nothing, &aad)
             .expect("Should open what we just sealed");
+    }
+
+    // Build a handshake initiation that `parse_handshake_anon` accepts, sealing
+    // `encrypted_static` under the key an attacker derives from a low-order
+    // ephemeral (whose `es` DH is the publicly-known all-zero value). This
+    // replays the `parse_handshake_anon` key derivation.
+    fn craft_anon_initiation_with_low_order_ephemeral(
+        responder_public: &x25519::PublicKey,
+        ephemeral: [u8; 32],
+    ) -> WgHandshakeInit {
+        let mut chaining_key = INITIAL_CHAIN_KEY;
+        let mut hash = b2s_hash(&INITIAL_CHAIN_HASH, responder_public.as_bytes());
+        hash = b2s_hash(&hash, &ephemeral);
+        chaining_key = b2s_hmac(&b2s_hmac(&chaining_key, &ephemeral), &[0x01]);
+        // es is all-zero for a low-order ephemeral.
+        let temp = b2s_hmac(&chaining_key, &[0u8; 32]);
+        chaining_key = b2s_hmac(&temp, &[0x01]);
+        let key = b2s_hmac2(&temp, &chaining_key, &[0x02]);
+
+        let mut packet = WgHandshakeInit::new();
+        packet.unencrypted_ephemeral = ephemeral;
+        aead_chacha20_seal(
+            packet.encrypted_static.as_mut_bytes(),
+            &key,
+            0,
+            &[7u8; 32],
+            &hash,
+        );
+        packet
+    }
+
+    // A handshake initiation with a low-order ephemeral public key yields a
+    // non-contributory (all-zero) DH; it must be rejected for every low-order
+    // point. The crafted packet is otherwise valid (`encrypted_static` is sealed
+    // with the key derived from the publicly known zero shared secret), so an
+    // implementation that skips the contributory check would accept it.
+    #[test]
+    fn rejects_low_order_ephemeral_in_initiation() {
+        let responder_private = x25519::StaticSecret::random_from_rng(rand_core::OsRng);
+        let responder_public = x25519::PublicKey::from(&responder_private);
+
+        for low_order in low_order_keys() {
+            let packet =
+                craft_anon_initiation_with_low_order_ephemeral(&responder_public, low_order);
+            let result = parse_handshake_anon(&responder_private, &responder_public, &packet);
+            assert!(
+                result.is_err(),
+                "point {low_order:02x?}: handshake must be rejected, got {result:?}"
+            );
+        }
     }
 }
