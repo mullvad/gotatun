@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `noise::TimerParams` for tuning WireGuard timers. This is useful for obfuscation, but note
   that tweaking timers will cause the tunnel to deviate from the WireGuard spec.
 
+### Changed
+- Enlarge the anti-replay sliding window from 1024 to 8192 packets, matching the
+  Linux kernel and wireguard-go. Tolerates more packet reordering before dropping
+  legitimate packets. Costs ~7 KiB more memory per peer.
+
 ### Fixed
 - Add missing jitter for handshakes initiated due to not receiving any packets.
 - Passive keepalives were triggered by received keepalives, not just non-empty data packets. This
