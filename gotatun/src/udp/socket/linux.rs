@@ -221,9 +221,15 @@ mod gro {
                             // Divide packet into GRO-sized segments and copy them into Packet bufs
                             for gro_segment in iov.chunks(gro_size) {
                                 let mut buf = pool.get();
+                                // Drop segments that don't fit the pool buffer. A segment larger
+                                // than the buffer can't be a valid WireGuard packet, and copying
+                                // past the end would panic the receive task.
+                                let Some(dst) = buf.get_mut(..gro_segment.len()) else {
+                                    continue;
+                                };
                                 // TODO: consider splitting the iov backing buffer into multiple
                                 // BytesMut to avoid copying the data here.
-                                buf[..gro_segment.len()].copy_from_slice(gro_segment);
+                                dst.copy_from_slice(gro_segment);
                                 buf.truncate(gro_segment.len());
 
                                 packets.push((buf, source_addr));
@@ -232,7 +238,13 @@ mod gro {
                             // Single packet
                             let size = result.bytes;
                             let mut buf = pool.get();
-                            buf[..size].copy_from_slice(&iov[..size]);
+                            // Drop datagrams that don't fit the pool buffer. An oversized
+                            // datagram can't be a valid WireGuard packet, and copying
+                            // past the end would panic the receive task.
+                            let Some(dst) = buf.get_mut(..size) else {
+                                continue;
+                            };
+                            dst.copy_from_slice(&iov[..size]);
                             buf.truncate(size);
                             packets.push((buf, source_addr));
                         }
