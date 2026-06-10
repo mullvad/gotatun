@@ -207,12 +207,13 @@ impl<R: RngCore + Send> Tunn<R> {
 
     /// Encapsulate a single packet into a [`WgData`].
     ///
-    /// Returns `Err(original_packet)` if there is no active session.
+    /// Returns `Err(original_packet)` if there is no active session, or if the active session's
+    /// sending counter has reached `REJECT_AFTER_MESSAGES`.
     pub fn encapsulate_with_session(&mut self, packet: Packet) -> Result<Packet<WgData>, Packet> {
         let current = self.current;
         if let Some(ref session) = self.sessions[current % N_SESSIONS] {
             // Send the packet using an established session
-            let packet = session.format_packet_data(packet);
+            let packet = session.format_packet_data(packet)?;
             self.timer_tick(TimerName::TimeLastPacketSent);
             // Exclude Keepalive packets from timer update.
             if !packet.is_keepalive() {
@@ -277,7 +278,9 @@ impl<R: RngCore + Send> Tunn<R> {
         let mut p = p.into_bytes();
         p.truncate(0);
 
-        let keepalive_packet = session.format_packet_data(p);
+        let keepalive_packet = session
+            .format_packet_data(p)
+            .expect("a freshly established session's counter cannot be exhausted");
         // Store new session in next slot
         let slot = self.next_session_slot();
         self.put_session(slot, session);
@@ -797,6 +800,35 @@ mod tests {
         // Advance past REKEY_TIMEOUT + max possible jitter to guarantee the retry fires.
         MockClock::advance(REKEY_TIMEOUT + MAX_JITTER + Duration::from_millis(1));
         update_timer_results_in_handshake(&mut my_tun)
+    }
+
+    /// The send path must use the last in-limit counter (REJECT_AFTER_MESSAGES - 1) but then
+    /// refuse to encapsulate any more data (which would reuse an AEAD nonce), beginning a fresh
+    /// handshake instead.
+    #[test]
+    fn outgoing_packet_refused_after_message_limit() {
+        let (mut my_tun, _their_tun) = create_two_tuns_and_handshake();
+
+        // Fast-forward the established session to its last usable counter value.
+        let slot = my_tun.current % N_SESSIONS;
+        my_tun.sessions[slot]
+            .as_ref()
+            .expect("session established after handshake")
+            .set_sending_key_counter(session::REJECT_AFTER_MESSAGES - 1);
+
+        // The last in-limit packet is still encapsulated and sent.
+        let last = my_tun.handle_outgoing_packet(create_ipv4_udp_packet().into_bytes(), None);
+        assert!(
+            matches!(last, Some(WgKind::Data(_))),
+            "expected the last in-limit packet to be sent, got {last:?}"
+        );
+
+        // The next packet hits the limit: no data is sent, a new handshake begins instead.
+        let over = my_tun.handle_outgoing_packet(create_ipv4_udp_packet().into_bytes(), None);
+        assert!(
+            matches!(over, Some(WgKind::HandshakeInit(_))),
+            "expected a new handshake instead of an encapsulated data packet, got {over:?}"
+        );
     }
 
     #[test]
