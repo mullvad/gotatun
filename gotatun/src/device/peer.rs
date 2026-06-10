@@ -16,6 +16,7 @@ use x25519_dalek::PublicKey;
 
 #[cfg(feature = "daita")]
 use crate::device::daita::DaitaSettings;
+use crate::noise::TimerParams;
 
 /// Peer data. Used to construct and update peers in a [`Device`](crate::device::Device).
 #[derive(Clone, Debug)]
@@ -40,6 +41,11 @@ pub struct Peer {
     /// DAITA settings for this peer, if the DAITA feature is enabled.
     #[cfg(feature = "daita")]
     pub daita_settings: Option<DaitaSettings>,
+
+    /// Override of the WireGuard timers for this peer. Use defaults if unspecified.
+    ///
+    /// See [TimerParams].
+    pub danger_timer_params: Option<TimerParams>,
 }
 
 impl Peer {
@@ -55,6 +61,7 @@ impl Peer {
             keepalive: None,
             #[cfg(feature = "daita")]
             daita_settings: None,
+            danger_timer_params: None,
         }
     }
 
@@ -86,6 +93,12 @@ impl Peer {
     #[cfg(feature = "daita")]
     pub fn with_daita(mut self, daita_settings: DaitaSettings) -> Self {
         self.daita_settings = Some(daita_settings);
+        self
+    }
+
+    /// Override the WireGuard timer deadlines for this peer.
+    pub fn dangerously_with_timer_params(mut self, timer_params: TimerParams) -> Self {
+        self.danger_timer_params = Some(timer_params);
         self
     }
 }
