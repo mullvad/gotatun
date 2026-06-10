@@ -14,7 +14,6 @@ use super::errors::WireGuardError;
 use crate::noise::Tunn;
 use crate::packet::WgKind;
 
-use std::mem;
 use std::ops::{Index, IndexMut};
 use std::time::Duration;
 
@@ -68,8 +67,9 @@ pub struct Timers {
     time_started: Instant,
     timers: [Duration; TimerName::Top as usize],
     pub(super) session_timers: [Duration; super::N_SESSIONS],
-    /// Did we receive data without sending anything back?
-    want_keepalive: bool,
+    /// Time the first data packet was received without us sending anything back, if any.
+    /// A passive keepalive is due `KEEPALIVE_TIMEOUT` after this time.
+    want_keepalive: Option<Duration>,
     /// First data packet sent without hearing back
     want_handshake: Option<Duration>,
     persistent_keepalive: usize,
@@ -108,7 +108,7 @@ impl Timers {
             *t = now;
         }
         self.want_handshake = None;
-        self.want_keepalive = false;
+        self.want_keepalive = None;
         self.handshake_jitter = Duration::ZERO;
         self.new_handshake_jitter = Duration::ZERO;
     }
@@ -143,11 +143,15 @@ impl<R: rand::RngCore + Send> Tunn<R> {
 
         match timer_name {
             TimeLastPacketReceived => {
-                self.timers.want_keepalive = true;
                 self.timers.want_handshake = None;
             }
+            TimeLastDataPacketReceived => {
+                if self.timers.want_keepalive.is_none() {
+                    self.timers.want_keepalive = Some(time);
+                }
+            }
             TimeLastPacketSent => {
-                self.timers.want_keepalive = false;
+                self.timers.want_keepalive = None;
             }
             TimeLastDataPacketSent => {
                 if self.timers.want_handshake.is_none() {
@@ -221,7 +225,6 @@ impl<R: rand::RngCore + Send> Tunn<R> {
         // Load timers only once:
         let session_established = self.timers[TimeSessionEstablished];
         let handshake_started = self.timers[TimeLastHandshakeStarted];
-        let aut_packet_sent = self.timers[TimeLastPacketSent];
         let data_packet_received = self.timers[TimeLastDataPacketReceived];
         let data_packet_sent = self.timers[TimeLastDataPacketSent];
         let persistent_keepalive = self.timers.persistent_keepalive;
@@ -313,14 +316,14 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                 }
 
                 if !handshake_initiation_required {
-                    // If a packet has been received from a given peer, but we have not sent one
-                    // back to the given peer in KEEPALIVE ms, we send an empty packet.
-                    if data_packet_received > aut_packet_sent
-                        && now - aut_packet_sent >= KEEPALIVE_TIMEOUT
-                        && mem::replace(&mut self.timers.want_keepalive, false)
+                    // If a data packet has been received from a given peer, but we have not sent
+                    // one back to the given peer in KEEPALIVE ms, we send an empty packet.
+                    if let Some(since) = self.timers.want_keepalive
+                        && now.saturating_sub(since) >= KEEPALIVE_TIMEOUT
                     {
                         log::trace!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
                         keepalive_required = true;
+                        self.timers.want_keepalive = None;
                     }
 
                     // Persistent KEEPALIVE
