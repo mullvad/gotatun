@@ -45,4 +45,8 @@ pub enum WireGuardError {
     LockFailed,
     /// The connection has expired and is no longer valid.
     ConnectionExpired,
+    /// A Diffie-Hellman operation produced a non-contributory (all-zero)
+    /// shared secret, indicating a low-order peer public key. The handshake
+    /// is aborted.
+    InvalidSharedSecret,
 }

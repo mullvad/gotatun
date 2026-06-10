@@ -52,6 +52,9 @@ impl Peer {
     /// Create a new peer with the given public key.
     ///
     /// All other fields are set to their default values.
+    ///
+    /// Note: a low-order (non-contributory) Curve25519 public key is accepted
+    /// here without error, but every handshake with the peer will then fail.
     pub const fn new(public_key: PublicKey) -> Self {
         Self {
             public_key,

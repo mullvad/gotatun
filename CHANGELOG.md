@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Enforce the `Reject-After-Messages` limit on the transport data counter, so a
   session is retired before its AEAD nonce can wrap and repeat.
+- Abort the handshake on a non-contributory (low-order / all-zero) Curve25519
+  Diffie-Hellman result, matching the Linux kernel and wireguard-go. A peer
+  configured with a low-order public key is accepted but can no longer complete
+  a handshake. This adds `WireGuardError::InvalidSharedSecret` which is a breaking change.
 
 #### Linux
 - Fix a remotely triggerable denial of service in the `recvmmsg` receive path.
