@@ -238,8 +238,8 @@ where
             .fetch_add(mtu as usize, atomic::Ordering::SeqCst);
         peer.tunnel
             .encapsulate_with_session(self.create_decoy_packet(mtu))
-            // Encapsulate can only fail when there is no session, just drop the decoy packet in
-            // that case
+            // Encapsulation only fails when there is no usable session (none established, or the
+            // current one hit its message limit); just drop the decoy packet in that case.
             .map_err(|_| ErrorAction::Ignore(IgnoreReason::NoSession))
     }
 

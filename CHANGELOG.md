@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Security
+- Enforce the `Reject-After-Messages` limit on the transport data counter, so a
+  session is retired before its AEAD nonce can wrap and repeat.
+
 #### Linux
 - Fix a remotely triggerable denial of service in the `recvmmsg` receive path.
   An oversized incoming UDP datagram (larger than the receive buffer) panicked
