@@ -185,6 +185,13 @@ impl<T: IntoBytes + FromBytes + KnownLayout + Immutable + ?Sized> Packet<T> {
     }
 }
 
+impl AsRef<[u8]> for Packet<[u8]> {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        self.inner.buf.as_ref()
+    }
+}
+
 // Trivial `From`-conversions between packet types
 #[duplicate_item(
     FromType                ToType;
