@@ -76,6 +76,9 @@ pub struct Timers {
     /// Jitter added to the current [`REKEY_TIMEOUT`] interval.
     /// This should be randomized on each handshake initiation.
     pub(super) handshake_jitter: Duration,
+    /// Jitter added to the new-handshake timeout (`KEEPALIVE_TIMEOUT + REKEY_TIMEOUT`).
+    /// This should be randomized each time the new-handshake timer is armed.
+    new_handshake_jitter: Duration,
 }
 
 impl Timers {
@@ -89,6 +92,7 @@ impl Timers {
             want_handshake: Default::default(),
             persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
             handshake_jitter: Duration::ZERO,
+            new_handshake_jitter: Duration::ZERO,
         }
     }
 
@@ -106,6 +110,7 @@ impl Timers {
         self.want_handshake = None;
         self.want_keepalive = false;
         self.handshake_jitter = Duration::ZERO;
+        self.new_handshake_jitter = Duration::ZERO;
     }
 
     /// Compute the time elapsed since [`Self::time_started`] based on [`Instant::now`].
@@ -145,7 +150,10 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                 self.timers.want_keepalive = false;
             }
             TimeLastDataPacketSent => {
-                self.timers.want_handshake.get_or_insert(time);
+                if self.timers.want_handshake.is_none() {
+                    self.timers.new_handshake_jitter = self.next_jitter();
+                    self.timers.want_handshake = Some(time);
+                }
             }
             _ => {}
         }
@@ -296,7 +304,8 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                 // packet after from that peer for `(KEEPALIVE + REKEY_TIMEOUT)`,
                 // we initiate a new handshake.
                 if let Some(since) = self.timers.want_handshake
-                    && now.saturating_sub(since) >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
+                    && now.saturating_sub(since)
+                        >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT + self.timers.new_handshake_jitter
                 {
                     log::trace!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
