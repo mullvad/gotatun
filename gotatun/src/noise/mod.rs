@@ -88,6 +88,10 @@ pub struct Tunn<R: RngCore + Send = StdRng> {
 
 impl Tunn<StdRng> {
     /// Create a new tunnel using own private key and the peer public key.
+    ///
+    /// Note: if `peer_static_public` is a low-order (non-contributory) Curve25519
+    /// point, no error is returned here, but every handshake with this peer will
+    /// fail.
     pub fn new(
         static_private: x25519::StaticSecret,
         peer_static_public: x25519::PublicKey,
@@ -110,6 +114,10 @@ impl Tunn<StdRng> {
 
 impl<R: RngCore + Send> Tunn<R> {
     /// Create a new tunnel using own private key and the peer public key.
+    ///
+    /// Note: if `peer_static_public` is a low-order (non-contributory) Curve25519
+    /// point, no error is returned here, but every handshake with this peer will
+    /// fail.
     pub fn new_with_rng(
         static_private: x25519::StaticSecret,
         peer_static_public: x25519::PublicKey,
@@ -149,6 +157,11 @@ impl<R: RngCore + Send> Tunn<R> {
     }
 
     /// Update the private key and clear existing sessions.
+    ///
+    /// Note: this recomputes the static-static shared secret with the peer's
+    /// public key. If that key is a low-order (non-contributory) Curve25519
+    /// point, no error is returned here, but every subsequent handshake with
+    /// the peer will fail.
     pub fn set_static_private(
         &mut self,
         static_private: x25519::StaticSecret,
@@ -381,7 +394,15 @@ impl<R: RngCore + Send> Tunn<R> {
 
         let starting_new_handshake = !self.handshake.is_in_progress();
 
-        let packet = self.handshake.format_handshake_initiation();
+        // A non-contributory (low-order) peer static key aborts the handshake
+        // here, so no initiation is sent. See [`Tunn::new`] / [`Tunn::set_static_private`].
+        let packet = match self.handshake.format_handshake_initiation() {
+            Ok(packet) => packet,
+            Err(error) => {
+                log::debug!("Not sending handshake_initiation: {error:?}");
+                return None;
+            }
+        };
         log::debug!("Sending handshake_initiation");
 
         if starting_new_handshake {
