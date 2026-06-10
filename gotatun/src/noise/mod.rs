@@ -638,6 +638,33 @@ mod tests {
         let _init = create_handshake_init(&mut my_tun);
     }
 
+    // A peer configured with a low-order (non-contributory) static public key
+    // must never complete a handshake: the initiator must emit no initiation.
+    // Checked for every known low-order point, not just the all-zero one.
+    #[test]
+    fn low_order_peer_static_key_aborts_initiation() {
+        for low_order in crate::noise::handshake::low_order_keys() {
+            let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(rand_core::OsRng);
+            let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
+            let low_order_peer = x25519_dalek::PublicKey::from(low_order);
+
+            let rate_limiter = Arc::new(RateLimiter::new(&my_public_key, HANDSHAKE_RATE_LIMIT));
+            let mut tun = Tunn::new(
+                my_secret_key,
+                low_order_peer,
+                None,
+                None,
+                IndexTable::from_os_rng(),
+                rate_limiter,
+            );
+
+            assert!(
+                tun.format_handshake_initiation(false).is_none(),
+                "point {low_order:02x?}: initiation must be aborted for a non-contributory peer static key"
+            );
+        }
+    }
+
     #[test]
     // Verify that a valid hanshake is accepted by two linked peers when rate limiting is not
     // applied.
