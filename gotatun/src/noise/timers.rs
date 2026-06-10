@@ -14,12 +14,13 @@ use super::errors::WireGuardError;
 use crate::noise::Tunn;
 use crate::packet::WgKind;
 
-use std::ops::{Index, IndexMut};
+use std::ops::{Index, IndexMut, RangeInclusive};
 use std::time::Duration;
 
 use bytes::BytesMut;
 #[cfg(feature = "mock_instant")]
 use mock_instant::thread_local::Instant;
+use rand::Rng;
 
 #[cfg(not(feature = "mock_instant"))]
 use crate::sleepyinstant::Instant;
@@ -59,6 +60,50 @@ pub enum TimerName {
 
 use self::TimerName::*;
 
+/// Tuning of WireGuard timers.
+///
+/// Each timeout is sampled uniformly from its range when the corresponding timer is armed.
+///
+/// The defaults match the timings from the WireGuard paper.
+///
+/// # Note
+///
+/// Tweaking these values will cause your tunnel to deviate from the WireGuard spec. Use with
+/// caution.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TimerParams {
+    /// How long to wait, after receiving a data packet without sending anything back, before
+    /// sending a passive keepalive.
+    ///
+    /// Sampled when the passive keepalive timer is armed.
+    pub keepalive_timeout: RangeInclusive<Duration>,
+    /// How long to wait, after sending a data packet without hearing anything back, before
+    /// initiating a new handshake.
+    ///
+    /// Sampled when the new-handshake timer is armed.
+    pub new_handshake_timeout: RangeInclusive<Duration>,
+    /// How long to wait before retransmitting an unanswered handshake initiation.
+    ///
+    /// Sampled each time a handshake initiation is sent.
+    pub rekey_timeout: RangeInclusive<Duration>,
+    /// Session age after which the initiator initiates a new handshake when sending data.
+    ///
+    /// Sampled when a session is established.
+    pub rekey_after_time: RangeInclusive<Duration>,
+}
+
+impl Default for TimerParams {
+    fn default() -> Self {
+        TimerParams {
+            keepalive_timeout: KEEPALIVE_TIMEOUT..=KEEPALIVE_TIMEOUT,
+            new_handshake_timeout: (KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)
+                ..=(KEEPALIVE_TIMEOUT + REKEY_TIMEOUT + MAX_JITTER),
+            rekey_timeout: REKEY_TIMEOUT..=(REKEY_TIMEOUT + MAX_JITTER),
+            rekey_after_time: REKEY_AFTER_TIME..=REKEY_AFTER_TIME,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Timers {
     /// Is the owner of the timer the initiator or the responder for the last handshake?
@@ -68,22 +113,30 @@ pub struct Timers {
     timers: [Duration; TimerName::Top as usize],
     pub(super) session_timers: [Duration; super::N_SESSIONS],
     /// Time the first data packet was received without us sending anything back, if any.
-    /// A passive keepalive is due `KEEPALIVE_TIMEOUT` after this time.
+    /// A passive keepalive is due `keepalive_timeout` after this time.
     want_keepalive: Option<Duration>,
     /// First data packet sent without hearing back
     want_handshake: Option<Duration>,
     persistent_keepalive: usize,
-    /// Jitter added to the current [`REKEY_TIMEOUT`] interval.
-    /// This should be randomized on each handshake initiation.
-    pub(super) handshake_jitter: Duration,
-    /// Jitter added to the new-handshake timeout (`KEEPALIVE_TIMEOUT + REKEY_TIMEOUT`).
-    /// This should be randomized each time the new-handshake timer is armed.
-    new_handshake_jitter: Duration,
+    /// Timer deadline ranges that the sampled deadlines below are drawn from.
+    pub(super) params: TimerParams,
+    /// Current passive keepalive deadline.
+    /// Sampled from [`TimerParams::keepalive_timeout`] when `want_keepalive` is armed.
+    keepalive_timeout: Duration,
+    /// Current new-handshake-after-silence deadline.
+    /// Sampled from [`TimerParams::new_handshake_timeout`] when `want_handshake` is armed.
+    new_handshake_timeout: Duration,
+    /// Current handshake retransmit deadline (including jitter).
+    /// Sampled from [`TimerParams::rekey_timeout`] on each handshake initiation.
+    pub(super) rekey_timeout: Duration,
+    /// Current rekey-after-time deadline.
+    /// Sampled from [`TimerParams::rekey_after_time`] when a session is established.
+    rekey_after_time: Duration,
 }
 
 impl Timers {
     pub(super) fn new(persistent_keepalive: Option<u16>) -> Timers {
-        Timers {
+        let mut timers = Timers {
             is_initiator: false,
             time_started: Instant::now(),
             timers: Default::default(),
@@ -91,9 +144,25 @@ impl Timers {
             want_keepalive: Default::default(),
             want_handshake: Default::default(),
             persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
-            handshake_jitter: Duration::ZERO,
-            new_handshake_jitter: Duration::ZERO,
-        }
+            params: TimerParams::default(),
+            keepalive_timeout: Duration::ZERO,
+            new_handshake_timeout: Duration::ZERO,
+            rekey_timeout: Duration::ZERO,
+            rekey_after_time: Duration::ZERO,
+        };
+        timers.dangerously_set_params(TimerParams::default());
+        timers
+    }
+
+    /// Replace the timer params, resetting all sampled deadlines.
+    ///
+    /// See [TimerParams].
+    pub(super) fn dangerously_set_params(&mut self, params: TimerParams) {
+        self.keepalive_timeout = *params.keepalive_timeout.start();
+        self.new_handshake_timeout = *params.new_handshake_timeout.start();
+        self.rekey_timeout = *params.rekey_timeout.start();
+        self.rekey_after_time = *params.rekey_after_time.end();
+        self.params = params;
     }
 
     fn is_initiator(&self) -> bool {
@@ -109,8 +178,7 @@ impl Timers {
         }
         self.want_handshake = None;
         self.want_keepalive = None;
-        self.handshake_jitter = Duration::ZERO;
-        self.new_handshake_jitter = Duration::ZERO;
+        self.dangerously_set_params(self.params.clone());
     }
 
     /// Compute the time elapsed since [`Self::time_started`] based on [`Instant::now`].
@@ -147,6 +215,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
             }
             TimeLastDataPacketReceived => {
                 if self.timers.want_keepalive.is_none() {
+                    self.timers.keepalive_timeout = self.sample_timer(|p| &p.keepalive_timeout);
                     self.timers.want_keepalive = Some(time);
                 }
             }
@@ -155,7 +224,8 @@ impl<R: rand::RngCore + Send> Tunn<R> {
             }
             TimeLastDataPacketSent => {
                 if self.timers.want_handshake.is_none() {
-                    self.timers.new_handshake_jitter = self.next_jitter();
+                    self.timers.new_handshake_timeout =
+                        self.sample_timer(|p| &p.new_handshake_timeout);
                     self.timers.want_handshake = Some(time);
                 }
             }
@@ -163,6 +233,20 @@ impl<R: rand::RngCore + Send> Tunn<R> {
         }
 
         self.timers[timer_name] = time;
+    }
+
+    /// Sample a deadline uniformly from one of the [`TimerParams`] ranges.
+    pub(super) fn sample_timer(
+        &mut self,
+        range: impl FnOnce(&TimerParams) -> &RangeInclusive<Duration>,
+    ) -> Duration {
+        let range = range(&self.timers.params).clone();
+        if range.start() >= range.end() {
+            // Avoid consuming randomness for fixed deadlines.
+            *range.start()
+        } else {
+            self.jitter_rng.random_range(range)
+        }
     }
 
     pub(super) fn timer_tick_session_established(
@@ -174,6 +258,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
         self.timers.session_timers[session_idx % crate::noise::N_SESSIONS] =
             self.timers[TimeCurrent];
         self.timers.is_initiator = is_initiator;
+        self.timers.rekey_after_time = self.sample_timer(|p| &p.rekey_after_time);
     }
 
     // We don't really clear the timers, but we set them to the current time to
@@ -263,12 +348,11 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                     return Err(WireGuardError::ConnectionExpired);
                 }
 
-                if time_init_sent.elapsed() >= REKEY_TIMEOUT + self.timers.handshake_jitter {
+                if time_init_sent.elapsed() >= self.timers.rekey_timeout {
                     // We avoid using `time` here, because it can be earlier than `time_init_sent`.
                     // Once `checked_duration_since` is stable we can use that.
-                    // A handshake initiation is retried after REKEY_TIMEOUT + jitter ms,
-                    // if a response has not been received, where jitter is some random
-                    // value between 0 and 333 ms.
+                    // A handshake initiation is retried after the sampled rekey timeout,
+                    // by default REKEY_TIMEOUT plus some random jitter between 0 and 333 ms.
                     log::debug!("HANDSHAKE(REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
                 }
@@ -280,7 +364,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                     // responder of the handshake, it does not re-initiate a new handshake
                     // after REKEY_AFTER_TIME ms like the original initiator does.
                     if session_established < data_packet_sent
-                        && now - session_established >= REKEY_AFTER_TIME
+                        && now - session_established >= self.timers.rekey_after_time
                     {
                         log::trace!("HANDSHAKE(REKEY_AFTER_TIME (on send))");
                         handshake_initiation_required = true;
@@ -304,11 +388,10 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                 }
 
                 // If we have sent a data packet to a given peer but have not received a
-                // packet after from that peer for `(KEEPALIVE + REKEY_TIMEOUT)`,
-                // we initiate a new handshake.
+                // packet after from that peer for the sampled new-handshake timeout
+                // (`KEEPALIVE + REKEY_TIMEOUT` by default), we initiate a new handshake.
                 if let Some(since) = self.timers.want_handshake
-                    && now.saturating_sub(since)
-                        >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT + self.timers.new_handshake_jitter
+                    && now.saturating_sub(since) >= self.timers.new_handshake_timeout
                 {
                     log::trace!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
@@ -317,9 +400,10 @@ impl<R: rand::RngCore + Send> Tunn<R> {
 
                 if !handshake_initiation_required {
                     // If a data packet has been received from a given peer, but we have not sent
-                    // one back to the given peer in KEEPALIVE ms, we send an empty packet.
+                    // anything back within the sampled keepalive timeout (KEEPALIVE ms by
+                    // default), we send an empty packet.
                     if let Some(since) = self.timers.want_keepalive
-                        && now.saturating_sub(since) >= KEEPALIVE_TIMEOUT
+                        && now.saturating_sub(since) >= self.timers.keepalive_timeout
                     {
                         log::trace!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
                         keepalive_required = true;
@@ -377,6 +461,18 @@ impl<R: rand::RngCore + Send> Tunn<R> {
         } else {
             None
         }
+    }
+
+    /// Get the timer params for this tunnel.
+    pub fn timer_params(&self) -> &TimerParams {
+        &self.timers.params
+    }
+
+    /// Set the timer params for this tunnel, controlling when WireGuard timers fire.
+    ///
+    /// See [TimerParams].
+    pub fn dangerously_set_timer_params(&mut self, params: TimerParams) {
+        self.timers.dangerously_set_params(params);
     }
 
     /// Set the persistent keepalive interval in seconds.
