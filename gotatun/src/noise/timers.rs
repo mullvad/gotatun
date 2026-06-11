@@ -72,7 +72,7 @@ pub struct Timers {
     want_keepalive: Option<Duration>,
     /// First data packet sent without hearing back
     want_handshake: Option<Duration>,
-    persistent_keepalive: usize,
+    persistent_keepalive: Option<Duration>,
     /// Jitter added to the current [`REKEY_TIMEOUT`] interval.
     /// This should be randomized on each handshake initiation.
     pub(super) handshake_jitter: Duration,
@@ -90,7 +90,9 @@ impl Timers {
             session_timers: Default::default(),
             want_keepalive: Default::default(),
             want_handshake: Default::default(),
-            persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
+            persistent_keepalive: persistent_keepalive
+                .filter(|&s| s > 0)
+                .map(|s| Duration::from_secs(s.into())),
             handshake_jitter: Duration::ZERO,
             new_handshake_jitter: Duration::ZERO,
         }
@@ -144,6 +146,10 @@ impl<R: rand::RngCore + Send> Tunn<R> {
         match timer_name {
             TimeLastPacketReceived => {
                 self.timers.want_handshake = None;
+
+                // Reset persistent keepalive timer for any authenticated packet
+                // Ref: https://github.com/torvalds/linux/blob/9716c086c8e8b141d35aa61f2e96a2e83de212a7/drivers/net/wireguard/timers.c#L215-L220
+                self.timers[TimePersistentKeepalive] = time;
             }
             TimeLastDataPacketReceived => {
                 if self.timers.want_keepalive.is_none() {
@@ -155,6 +161,10 @@ impl<R: rand::RngCore + Send> Tunn<R> {
             }
             TimeLastPacketSent => {
                 self.timers.want_keepalive = None;
+
+                // Reset persistent keepalive timer for any authenticated packet
+                // Ref: https://github.com/torvalds/linux/blob/9716c086c8e8b141d35aa61f2e96a2e83de212a7/drivers/net/wireguard/timers.c#L215-L220
+                self.timers[TimePersistentKeepalive] = time;
             }
             TimeLastDataPacketSent => {
                 if self.timers.want_handshake.is_none() {
@@ -330,9 +340,8 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                     }
 
                     // Persistent KEEPALIVE
-                    if persistent_keepalive > 0
-                        && (now - self.timers[TimePersistentKeepalive]
-                            >= Duration::from_secs(persistent_keepalive as _))
+                    if let Some(persistent_keepalive) = persistent_keepalive
+                        && (now - self.timers[TimePersistentKeepalive] >= persistent_keepalive)
                     {
                         log::trace!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
                         self.timer_tick(TimePersistentKeepalive);
@@ -371,26 +380,25 @@ impl<R: rand::RngCore + Send> Tunn<R> {
 
     /// Get the persistent keepalive interval in seconds.
     ///
-    /// Returns `None` if persistent keepalive is disabled (set to 0).
+    /// Returns `None` if persistent keepalive is disabled.
     pub fn persistent_keepalive(&self) -> Option<u16> {
-        let keepalive = self.timers.persistent_keepalive;
-
-        if keepalive > 0 {
-            Some(keepalive as u16)
-        } else {
-            None
-        }
+        self.timers
+            .persistent_keepalive
+            .map(|keepalive| keepalive.as_secs() as u16)
+            .filter(|&keepalive| keepalive > 0)
     }
 
     /// Set the persistent keepalive interval in seconds.
     ///
     /// Pass `None` or `Some(0)` to disable persistent keepalive.
     pub fn set_persistent_keepalive(&mut self, seconds: Option<u16>) {
-        self.timers.persistent_keepalive = usize::from(seconds.unwrap_or(0));
-
-        // Reset timer if we disable persistent keepalive
-        if self.timers.persistent_keepalive == 0 {
+        self.timers.persistent_keepalive = seconds
+            .filter(|&s| s > 0)
+            .map(|s| Duration::from_secs(s.into()));
+        if self.timers.persistent_keepalive.is_none() {
             self.timers[TimePersistentKeepalive] = Duration::ZERO;
+        } else {
+            self.timers[TimePersistentKeepalive] = self.timers[TimeCurrent];
         }
     }
 }
