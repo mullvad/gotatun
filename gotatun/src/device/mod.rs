@@ -367,7 +367,7 @@ impl<T: DeviceTransports> DeviceState<T> {
             .expect("Setting private key creates rate limiter")
             .clone();
 
-        let tunn = Tunn::new(
+        let mut tunn = Tunn::new(
             device_key_pair.0.clone(),
             peer_builder.public_key,
             peer_builder.preshared_key,
@@ -375,6 +375,10 @@ impl<T: DeviceTransports> DeviceState<T> {
             self.index_table.clone(),
             rate_limiter,
         );
+
+        if let Some(timer_params) = peer_builder.danger_timer_params {
+            tunn.dangerously_set_timer_params(timer_params);
+        }
 
         PeerState::new(
             tunn,

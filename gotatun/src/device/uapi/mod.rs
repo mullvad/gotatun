@@ -654,6 +654,7 @@ async fn on_api_set(
                     },
                     #[cfg(feature = "daita")]
                     daita_settings: peer.daita_settings().cloned(),
+                    danger_timer_params: Some(peer.tunnel.timer_params().clone()),
                 }
             }
         };
