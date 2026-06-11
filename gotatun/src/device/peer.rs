@@ -97,7 +97,7 @@ impl Peer {
     }
 
     /// Override the WireGuard timer deadlines for this peer.
-    pub fn with_timer_params(mut self, timer_params: TimerParams) -> Self {
+    pub fn dangerously_with_timer_params(mut self, timer_params: TimerParams) -> Self {
         self.danger_timer_params = Some(timer_params);
         self
     }
