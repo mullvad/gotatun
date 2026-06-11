@@ -20,10 +20,11 @@
 //! denial of service.
 //!
 //! It drives the real `UdpSocket` through the public `UdpRecv` API, so it exercises
-//! whichever receive code path is compiled in. It deliberately does not assert *how*
-//! the oversized datagram is handled (Linux drops it, the generic path truncates it);
-//! it asserts only the universal safety property: the receiver survives and still
-//! delivers a subsequent legitimate datagram.
+//! whichever receive code path is compiled in. The oversized datagram must be
+//! delivered (Linux grows the buffer to fit it; the generic path truncates it to the
+//! pool buffer) ahead of the small valid one, without crashing the receive task. The
+//! first packet's exact size is therefore platform-dependent, so the test only checks
+//! it is the larger filler datagram.
 //!
 //! Windows is excluded: its receive path reads into a 64 KiB buffer (not the 4096
 //! pool buffer), so the overflow this guards against cannot occur there, and
@@ -61,11 +62,10 @@ async fn oversized_datagram_does_not_crash_receiver() {
     let mut recv_buf = <UdpSocket as UdpRecv>::RecvManyBuf::default();
     let mut packets: Vec<(Packet, SocketAddr)> = Vec::new();
 
-    // The receiver must survive the oversized datagram (no panic) and keep working,
-    // proven by the legitimate "hello" still being delivered. A panic or a hang both
-    // fail the test - the latter via the timeout.
+    // Receive until both datagrams have arrived (they may come in one or two recvmmsg
+    // batches). A panic or a hang fails the test - the latter via the timeout.
     tokio::time::timeout(Duration::from_secs(5), async {
-        while !packets.iter().any(|(buf, _)| &buf[..] == b"hello") {
+        while packets.len() < 2 {
             receiver
                 .recv_many_from(&mut recv_buf, &mut pool, &mut packets)
                 .await
@@ -73,5 +73,22 @@ async fn oversized_datagram_does_not_crash_receiver() {
         }
     })
     .await
-    .expect("receiver must survive an oversized datagram and still deliver a valid one");
+    .expect("receiver must survive the oversized datagram and deliver both packets");
+
+    // Datagrams from one sender are delivered in order: the oversized one first, then
+    // the valid "hello". The first packet's size is platform-dependent (Linux grows the
+    // buffer to fit; the generic path truncates to the pool buffer), so only check that
+    // it is the larger filler datagram.
+    assert_eq!(packets.len(), 2, "expected exactly two packets");
+    let (first, _) = &packets[0];
+    let (second, _) = &packets[1];
+    assert!(
+        first.len() > b"hello".len() && first.iter().all(|&b| b == 0xAB),
+        "first packet must be the oversized datagram"
+    );
+    assert_eq!(
+        &second[..],
+        b"hello",
+        "second packet must be the small valid datagram"
+    );
 }
