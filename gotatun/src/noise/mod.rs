@@ -21,6 +21,7 @@ pub mod index_table;
 /// Rate limiting for handshake initiation packets.
 pub mod rate_limiter;
 
+pub(crate) mod dh;
 mod session;
 mod timers;
 
@@ -127,12 +128,11 @@ impl<R: RngCore + Send> Tunn<R> {
         rate_limiter: Arc<RateLimiter>,
         jitter_rng: R,
     ) -> Self {
-        let static_public = x25519::PublicKey::from(&static_private);
+        let static_private = dh::StaticSecret::from(static_private);
 
         Tunn {
             handshake: Handshake::new(
                 static_private,
-                static_public,
                 peer_static_public,
                 index_table,
                 preshared_key,
@@ -170,7 +170,7 @@ impl<R: RngCore + Send> Tunn<R> {
     ) {
         self.rate_limiter = rate_limiter;
         self.handshake
-            .set_static_private(static_private, static_public);
+            .set_static_private(dh::StaticSecret::from(static_private), static_public);
         for s in &mut self.sessions {
             *s = None;
         }
