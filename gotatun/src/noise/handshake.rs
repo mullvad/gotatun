@@ -355,12 +355,12 @@ pub struct HalfHandshake {
 /// # Errors
 ///
 /// Returns an error if the packet is malformed or cryptographic validation fails.
-pub fn parse_handshake_anon(
-    static_private: &x25519::StaticSecret,
+#[cfg(any(feature = "device", test))]
+pub(crate) fn parse_handshake_anon(
+    static_private: &dh::StaticSecret,
     static_public: &x25519::PublicKey,
     packet: &WgHandshakeInit,
 ) -> Result<HalfHandshake, WireGuardError> {
-    let static_private = dh::StaticSecret::from(static_private.clone());
     let peer_index = packet.sender_idx.get();
     // initiator.chaining_key = HASH(CONSTRUCTION)
     let mut chaining_key = INITIAL_CHAIN_KEY;
@@ -1057,8 +1057,9 @@ mod tests {
     // corresponding sending direction (an initiator refusing to emit an initiation).
     #[test]
     fn rejects_low_order_ephemeral_in_initiation() {
-        let responder_private = x25519::StaticSecret::random_from_rng(rand_core::OsRng);
-        let responder_public = x25519::PublicKey::from(&responder_private);
+        let responder_private =
+            dh::StaticSecret::from(x25519::StaticSecret::random_from_rng(rand_core::OsRng));
+        let responder_public = responder_private.public_key();
 
         for low_order in low_order_keys() {
             let packet =
