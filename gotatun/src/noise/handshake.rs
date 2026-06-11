@@ -426,17 +426,9 @@ impl NoiseParams {
     }
 
     /// Set a new private key
-    fn set_static_private(
-        &mut self,
-        static_private: dh::StaticSecret,
-        static_public: x25519::PublicKey,
-    ) {
-        // Check that the public key indeed matches the private key
-        let check_key = static_private.public_key();
-        assert_eq!(check_key.as_bytes(), static_public.as_bytes());
-
+    fn set_static_private(&mut self, static_private: dh::StaticSecret) {
+        self.static_public = static_private.public_key();
         self.static_private = static_private;
-        self.static_public = static_public;
 
         self.static_shared = self.static_private.dh(&self.peer_static_public).ok();
     }
@@ -503,12 +495,8 @@ impl Handshake {
         self.cookies.write_cookie = None;
     }
 
-    pub(crate) fn set_static_private(
-        &mut self,
-        private_key: dh::StaticSecret,
-        public_key: x25519::PublicKey,
-    ) {
-        self.params.set_static_private(private_key, public_key);
+    pub(crate) fn set_static_private(&mut self, private_key: dh::StaticSecret) {
+        self.params.set_static_private(private_key);
         // Invalidate in-flight handshakes
         self.state = HandshakeState::None;
         self.previous = HandshakeState::None;

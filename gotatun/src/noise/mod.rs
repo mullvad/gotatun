@@ -167,12 +167,11 @@ impl<R: RngCore + Send> Tunn<R> {
     pub fn set_static_private(
         &mut self,
         static_private: x25519::StaticSecret,
-        static_public: x25519::PublicKey,
         rate_limiter: Arc<RateLimiter>,
     ) {
         self.rate_limiter = rate_limiter;
         self.handshake
-            .set_static_private(dh::StaticSecret::from(static_private), static_public);
+            .set_static_private(dh::StaticSecret::from(static_private));
         for s in &mut self.sessions {
             *s = None;
         }

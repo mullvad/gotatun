@@ -438,11 +438,10 @@ impl<T: DeviceTransports> DeviceState<T> {
         let rate_limiter = Arc::new(RateLimiter::new(&public_key, HANDSHAKE_RATE_LIMIT));
 
         for peer in self.peers.values_mut() {
-            peer.lock().await.tunnel.set_static_private(
-                private_key.clone(),
-                public_key,
-                Arc::clone(&rate_limiter),
-            )
+            peer.lock()
+                .await
+                .tunnel
+                .set_static_private(private_key.clone(), Arc::clone(&rate_limiter))
         }
 
         self.key_pair = Some((private_key, public_key));

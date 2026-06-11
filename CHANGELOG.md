@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enlarge the anti-replay sliding window from 1024 to 8192 packets, matching the
   Linux kernel and wireguard-go. Tolerates more packet reordering before dropping
   legitimate packets. Costs ~7 KiB more memory per peer.
+- Remove the redundant `static_public` parameter from `Tunn::set_static_private`;
+  it is now derived from the private key. This is a breaking change.
 
 ### Fixed
 - Add missing jitter for handshakes initiated due to not receiving any packets.
