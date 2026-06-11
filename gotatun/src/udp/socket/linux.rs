@@ -217,34 +217,23 @@ mod gro {
                             // Divide packet into GRO-sized segments and copy them into Packet bufs
                             for gro_segment in iov.chunks(gro_size) {
                                 let mut buf = pool.get();
-                                // Drop segments that don't fit the pool buffer. gotatun receives
-                                // into fixed-size pool buffers. GRO segments can only be as large
-                                // as the MTU, so this can only cause drops on networks with
-                                // MTU > 4096.
-                                let Some(dst) = buf.get_mut(..gro_segment.len()) else {
-                                    log::debug!("Dropping GRO segment with size >4096 bytes");
-                                    continue;
-                                };
+                                // Copy the segment into a packet buffer, growing the buffer if the
+                                // segment is larger than the pool's buffer size.
                                 // TODO: consider splitting the iov backing buffer into multiple
                                 // BytesMut to avoid copying the data here.
-                                dst.copy_from_slice(gro_segment);
-                                buf.truncate(gro_segment.len());
-
+                                buf.buf_mut().clear();
+                                buf.buf_mut().extend_from_slice(gro_segment);
                                 packets.push((buf, source_addr));
                             }
                         } else {
                             // Single packet
                             let size = result.bytes;
                             let mut buf = pool.get();
-                            // Drop datagrams that don't fit the pool buffer. IP fragmentation
-                            // allows the source packet here to be up to 64k. But GotaTun
-                            // currently can't handle that, so we drop the packet for now.
-                            let Some(dst) = buf.get_mut(..size) else {
-                                log::debug!("Dropping incoming datagram with size >4096 bytes");
-                                continue;
-                            };
-                            dst.copy_from_slice(&iov[..size]);
-                            buf.truncate(size);
+                            // Copy the datagram into a packet buffer, growing the buffer if the
+                            // datagram is larger than the pool's buffer size (reachable via IP
+                            // fragment reassembly, up to 64k).
+                            buf.buf_mut().clear();
+                            buf.buf_mut().extend_from_slice(&iov[..size]);
                             packets.push((buf, source_addr));
                         }
                     }
@@ -271,10 +260,10 @@ mod gro {
     #[cfg(test)]
     mod tests {
         use super::UdpSocket;
-        use crate::packet::PacketBufPool;
+        use crate::packet::{Packet, PacketBufPool};
         use crate::udp::socket::SockOpt;
         use crate::udp::{UdpRecv, UdpSend};
-        use std::net::Ipv6Addr;
+        use std::net::{Ipv6Addr, SocketAddr};
         use std::time::Duration;
 
         #[tokio::test]
@@ -308,6 +297,51 @@ mod gro {
 
             assert!(!packets.is_empty(), "expected at least one IPv6 packet");
             assert_eq!(packets[0].1, sender_addr);
+        }
+
+        // A datagram larger than the pool buffer must be received in full by growing
+        // the target buffer, not dropped or truncated.
+        //
+        // Note: a single datagram is not GRO-coalesced, so this exercises the non-GRO
+        // receive branch. The GRO branch (segments larger than the buffer) is not
+        // covered here - UDP GRO does not engage on loopback.
+        #[tokio::test]
+        async fn recv_many_from_grows_for_oversized_datagram() {
+            let mut receiver =
+                UdpSocket::bind((Ipv6Addr::LOCALHOST, 0).into(), SockOpt::default()).unwrap();
+            receiver.enable_udp_gro().ok();
+            let recv_addr = receiver.local_addr().unwrap();
+
+            // 10000 bytes is larger than the 4096-byte pool buffer.
+            let payload = vec![0xABu8; 10_000];
+            let sender = std::net::UdpSocket::bind((Ipv6Addr::LOCALHOST, 0)).unwrap();
+            sender.send_to(&payload, recv_addr).unwrap();
+
+            let mut recv_pool = PacketBufPool::<4096>::new(1);
+            let mut recv_many_buf = <UdpSocket as UdpRecv>::RecvManyBuf::default();
+            let mut packets: Vec<(Packet, SocketAddr)> = Vec::new();
+
+            // The datagram is already buffered, so a single read returns it.
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                receiver.recv_many_from(&mut recv_many_buf, &mut recv_pool, &mut packets),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+            assert_eq!(packets.len(), 1, "expected exactly one packet");
+            let (packet, _) = &packets[0];
+            assert_eq!(
+                packet.len(),
+                payload.len(),
+                "oversized datagram must be received in full, not dropped or truncated"
+            );
+            assert_eq!(
+                &packet[..],
+                &payload[..],
+                "datagram must retain same content"
+            );
         }
     }
 }
