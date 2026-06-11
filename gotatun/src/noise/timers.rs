@@ -46,9 +46,9 @@ pub enum TimerName {
     TimeLastPacketReceived,
     /// Time we last send a packet
     TimeLastPacketSent,
-    /// Time we last received and authenticated a DATA packet
+    /// Time we last received and authenticated a DATA packet, except keepalives
     TimeLastDataPacketReceived,
-    /// Time we last send a DATA packet
+    /// Time we last send a DATA packet, except keepalives
     TimeLastDataPacketSent,
     /// Time we last received a cookie
     TimeCookieReceived,
