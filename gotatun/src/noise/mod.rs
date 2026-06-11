@@ -282,7 +282,6 @@ impl<R: RngCore + Send> Tunn<R> {
         log::debug!("Received cookie_reply: {}", p.receiver_idx);
 
         self.handshake.receive_cookie_reply(p)?;
-        self.timer_tick(TimerName::TimeLastPacketReceived);
         self.timer_tick(TimerName::TimeCookieReceived);
 
         Ok(TunnResult::Done)
