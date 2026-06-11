@@ -149,6 +149,9 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                 if self.timers.want_keepalive.is_none() {
                     self.timers.want_keepalive = Some(time);
                 }
+                // The Linux kernel schedules an extra keepalive here if one is already queued:
+                // https://github.com/torvalds/linux/blob/9716c086c8e8b141d35aa61f2e96a2e83de212a7/drivers/net/wireguard/timers.c#L157-L166
+                // This seems unnecessary?
             }
             TimeLastPacketSent => {
                 self.timers.want_keepalive = None;
