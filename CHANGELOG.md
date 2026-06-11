@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Security
+#### Linux
+- Fix a remotely triggerable denial of service in the `recvmmsg` receive path.
+  An oversized incoming UDP datagram (larger than the receive buffer) panicked
+  the receive task, halting all UDP reception. Both single datagrams and
+  GRO-coalesced segments were affected. Such datagrams are now dropped.
 
 
 ## [0.7.1] - 2026-05-26
