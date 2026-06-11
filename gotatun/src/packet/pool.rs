@@ -133,6 +133,43 @@ mod tests {
 
     use super::PacketBufPool;
 
+    /// Growing a packet's buffer beyond the pool's `N` (e.g. via `extend_from_slice`)
+    /// reallocates the data away from the shared allocation. Tests that the pool stays healthy
+    /// The original `N`-sized buffer is recycled via the start pointer and the pool keeps
+    /// handing out usable buffers.
+    #[test]
+    fn packet_grow_beyond_capacity() {
+        const N: usize = 4096;
+        let pool = PacketBufPool::<N>::new(1);
+
+        // Record the address of the pool's single pre-allocated buffer.
+        let buffer_ptr = {
+            let packet = pool.get();
+            let ptr = packet.as_ptr();
+            drop(packet);
+            ptr
+        };
+
+        for _ in 0..10 {
+            // The pool must hand back the original N buffer - recycled after the
+            // previous iteration grew (and so detached) its data - not a fresh one.
+            let mut packet = pool.get();
+            assert_eq!(
+                packet.as_ptr(),
+                buffer_ptr,
+                "the original N buffer must be recycled into the pool after a grow"
+            );
+            assert_eq!(packet.len(), N);
+
+            // Grow well past N; this reallocates the data onto a fresh, larger buffer,
+            // detaching it from the pooled allocation.
+            packet.buf_mut().clear();
+            packet.buf_mut().extend_from_slice(&vec![0x55u8; N * 4]);
+            assert_eq!(packet.len(), N * 4);
+            assert_ne!(packet.as_ptr(), buffer_ptr, "growing must reallocate");
+        }
+    }
+
     /// Test pre-allocation semantics of [PacketBufPool].
     #[test]
     fn pool_prealloc() {
