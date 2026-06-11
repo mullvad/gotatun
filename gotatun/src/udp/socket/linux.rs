@@ -217,9 +217,17 @@ mod gro {
                             // Divide packet into GRO-sized segments and copy them into Packet bufs
                             for gro_segment in iov.chunks(gro_size) {
                                 let mut buf = pool.get();
+                                // Drop segments that don't fit the pool buffer. gotatun receives
+                                // into fixed-size pool buffers. GRO segments can only be as large
+                                // as the MTU, so this can only cause drops on networks with
+                                // MTU > 4096.
+                                let Some(dst) = buf.get_mut(..gro_segment.len()) else {
+                                    log::debug!("Dropping GRO segment with size >4096 bytes");
+                                    continue;
+                                };
                                 // TODO: consider splitting the iov backing buffer into multiple
                                 // BytesMut to avoid copying the data here.
-                                buf[..gro_segment.len()].copy_from_slice(gro_segment);
+                                dst.copy_from_slice(gro_segment);
                                 buf.truncate(gro_segment.len());
 
                                 packets.push((buf, source_addr));
@@ -228,7 +236,14 @@ mod gro {
                             // Single packet
                             let size = result.bytes;
                             let mut buf = pool.get();
-                            buf[..size].copy_from_slice(&iov[..size]);
+                            // Drop datagrams that don't fit the pool buffer. IP fragmentation
+                            // allows the source packet here to be up to 64k. But GotaTun
+                            // currently can't handle that, so we drop the packet for now.
+                            let Some(dst) = buf.get_mut(..size) else {
+                                log::debug!("Dropping incoming datagram with size >4096 bytes");
+                                continue;
+                            };
+                            dst.copy_from_slice(&iov[..size]);
                             buf.truncate(size);
                             packets.push((buf, source_addr));
                         }
