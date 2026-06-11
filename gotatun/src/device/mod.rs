@@ -38,6 +38,7 @@ use tokio::join;
 use tokio::sync::RwLock;
 use tokio::sync::{Mutex, watch};
 
+use crate::noise::dh;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
@@ -565,7 +566,13 @@ impl<T: DeviceTransports> DeviceState<T> {
             let (private_key, public_key) = device.key_pair.clone().expect("Key not set");
             let rate_limiter = device.rate_limiter.clone().unwrap();
             let tun_mtu = device.tun_rx_mtu.clone();
-            (private_key, public_key, rate_limiter, tun_mtu)
+            // Wrap the static key once per task rather than per handshake packet.
+            (
+                dh::StaticSecret::from(private_key),
+                public_key,
+                rate_limiter,
+                tun_mtu,
+            )
         };
 
         while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
