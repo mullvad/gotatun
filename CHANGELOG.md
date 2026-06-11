@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- Remove the redundant `static_public` parameter from `Tunn::set_static_private`;
+  it is now derived from the private key. This is a breaking change.
+
 ### Security
 - Abort the handshake on a non-contributory (low-order / all-zero) Curve25519
   Diffie-Hellman result, matching the Linux kernel and wireguard-go. A peer
