@@ -42,10 +42,11 @@ impl std::fmt::Debug for Session {
 
 // Receiving buffer constants
 const WORD_SIZE: u64 = 64;
-const N_WORDS: u64 = 16; // Suffice to reorder 64*16 = 1024 packets; can be increased at will
+// 64*128 = 8192, matching the WireGuard replay window in both the Linux kernel and wireguard-go
+const N_WORDS: u64 = 128;
 const N_BITS: u64 = WORD_SIZE * N_WORDS;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct ReceivingKeyCounterValidator {
     /// In order to avoid replays while allowing for some reordering of the packets, we keep a
     /// bitmap of received packets, and the value of the highest counter
@@ -53,6 +54,17 @@ struct ReceivingKeyCounterValidator {
     /// Used to estimate packet loss
     receive_cnt: u64,
     bitmap: [u64; N_WORDS as usize],
+}
+
+impl Default for ReceivingKeyCounterValidator {
+    fn default() -> Self {
+        // `derive(Default)` only covers arrays up to length 32, so implement it by hand.
+        Self {
+            next: 0,
+            receive_cnt: 0,
+            bitmap: [0u64; N_WORDS as usize],
+        }
+    }
 }
 
 impl ReceivingKeyCounterValidator {
