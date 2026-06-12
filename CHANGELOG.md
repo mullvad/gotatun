@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the receive task, halting all UDP reception. Both single datagrams and
   GRO-coalesced segments were affected. The receive buffer now grows to fit
   them instead.
+- Fix a bug in the validation of allowed IPs for incoming packets. Peers could
+  send packets with an IP belonging to another, if the allowed IPs of the second
+  was a subnet of the first.
 
 
 ## [0.7.1] - 2026-05-26
