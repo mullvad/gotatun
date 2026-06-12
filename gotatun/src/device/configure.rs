@@ -322,6 +322,8 @@ impl<T: DeviceTransports> DeviceWrite<'_, T> {
 
         if let Update::Set(preshared_key) = preshared_key {
             existing_peer.preshared_key = preshared_key;
+            // Propagate into the noise state, otherwise handshakes keep using the old key.
+            existing_peer.tunnel.set_preshared_key(preshared_key);
         }
 
         if let Update::Set(keepalive) = keepalive {

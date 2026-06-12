@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The passive keepalive timer was relative to the *last sent packet*. This meant that an idle tunnel
   receiving a packet would instantly send a keepalive (instead of waiting for `KEEPALIVE-TIMEOUT`).
 - Do not send persistent keepalives if tunnel is active.
+- Apply runtime preshared-key changes to the tunnel. Changing a peer's preshared
+  key via `DeviceWrite::modify_peer`/`update_peer` updated the stored config but
+  not the noise state, so handshakes kept using the old key.
 
 ### Security
 #### Linux

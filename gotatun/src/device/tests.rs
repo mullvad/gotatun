@@ -179,6 +179,62 @@ async fn test_endpoint_roaming() {
     ping_pong("1.2.3.4".parse().unwrap()).await;
 }
 
+/// A runtime preshared-key change must reach the peer's noise state, not just `PeerState`.
+/// Rotating the PSK on only one side makes it mismatch the (unchanged) other side, so the
+/// handshake can no longer complete; rotating both sides to the same key keeps it working. Before
+/// the fix the change was ignored by the tunnel and traffic still flowed regardless.
+///
+/// Note: `device_pair` has not performed a handshake yet, so the first packet below triggers the
+/// first handshake, which already uses the new PSK. This exercises the propagation, not a rekey of
+/// an established session (a live session keeps its keys until it is rekeyed).
+#[tokio::test]
+#[test_log::test]
+async fn preshared_key_update_propagates_to_tunnel() {
+    let psk = Some([0x42; 32]);
+
+    // Rotating the PSK on only one side: handshake mismatch, nothing reaches Bob's TUN.
+    {
+        let (mut alice, mut bob, _eve) = mock::device_pair().await;
+        let bob_pk = alice.device.peers().await[0].peer.public_key;
+        alice
+            .device
+            .modify_peer(&bob_pk, |p| p.set_preshared_key(psk))
+            .await
+            .unwrap();
+
+        alice.app_tx.send(mock::packet(b"hi")).await;
+        let result = tokio::time::timeout(Duration::from_secs(2), bob.app_rx.recv()).await;
+        assert!(
+            result.is_err(),
+            "one-sided PSK rotation must stop traffic; the tunnel kept using the old key"
+        );
+    }
+
+    // Positive control: rotating both sides to the same PSK still delivers, proving the block
+    // above is the PSK taking effect rather than an unrelated breakage of the harness.
+    {
+        let (mut alice, mut bob, _eve) = mock::device_pair().await;
+        let bob_pk = alice.device.peers().await[0].peer.public_key;
+        let alice_pk = bob.device.peers().await[0].peer.public_key;
+        alice
+            .device
+            .modify_peer(&bob_pk, |p| p.set_preshared_key(psk))
+            .await
+            .unwrap();
+        bob.device
+            .modify_peer(&alice_pk, |p| p.set_preshared_key(psk))
+            .await
+            .unwrap();
+
+        let packet = mock::packet(b"hi");
+        alice.app_tx.send(packet.clone()).await;
+        let got = tokio::time::timeout(Duration::from_secs(2), bob.app_rx.recv())
+            .await
+            .expect("matching rotated PSK must deliver");
+        assert_eq!(got.as_bytes(), packet.as_bytes());
+    }
+}
+
 /// The number of packets we send through the tunnel
 fn packet_count() -> usize {
     mock::packets_of_every_size().len()

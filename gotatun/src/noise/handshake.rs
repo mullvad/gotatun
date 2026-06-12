@@ -499,6 +499,14 @@ impl Handshake {
         self.params.set_static_private(private_key, public_key)
     }
 
+    /// Update the preshared key mixed into future handshakes.
+    ///
+    /// This only changes the key used by subsequent handshakes.
+    /// The established session keys are unaffected.
+    pub(crate) fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
+        self.params.preshared_key = preshared_key;
+    }
+
     pub(super) fn receive_handshake_initialization(
         &mut self,
         packet: crate::packet::Packet<WgHandshakeInit>,
