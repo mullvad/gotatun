@@ -14,7 +14,6 @@ use super::errors::WireGuardError;
 use crate::noise::Tunn;
 use crate::packet::WgKind;
 
-use std::mem;
 use std::ops::{Index, IndexMut};
 use std::time::Duration;
 
@@ -47,9 +46,9 @@ pub enum TimerName {
     TimeLastPacketReceived,
     /// Time we last send a packet
     TimeLastPacketSent,
-    /// Time we last received and authenticated a DATA packet
+    /// Time we last received a valid [`crate::packet::WgData`] packet, except keepalives
     TimeLastDataPacketReceived,
-    /// Time we last send a DATA packet
+    /// Time we last sent a [`crate::packet::WgData`] packet, except keepalives
     TimeLastDataPacketSent,
     /// Time we last received a cookie
     TimeCookieReceived,
@@ -68,14 +67,18 @@ pub struct Timers {
     time_started: Instant,
     timers: [Duration; TimerName::Top as usize],
     pub(super) session_timers: [Duration; super::N_SESSIONS],
-    /// Did we receive data without sending anything back?
-    want_keepalive: bool,
+    /// Time the first data packet was received without us sending anything back, if any.
+    /// A passive keepalive is due `KEEPALIVE_TIMEOUT` after this time.
+    want_keepalive: Option<Duration>,
     /// First data packet sent without hearing back
     want_handshake: Option<Duration>,
-    persistent_keepalive: usize,
+    persistent_keepalive: Option<Duration>,
     /// Jitter added to the current [`REKEY_TIMEOUT`] interval.
     /// This should be randomized on each handshake initiation.
     pub(super) handshake_jitter: Duration,
+    /// Jitter added to the new-handshake timeout (`KEEPALIVE_TIMEOUT + REKEY_TIMEOUT`).
+    /// This should be randomized each time the new-handshake timer is armed.
+    new_handshake_jitter: Duration,
 }
 
 impl Timers {
@@ -87,8 +90,11 @@ impl Timers {
             session_timers: Default::default(),
             want_keepalive: Default::default(),
             want_handshake: Default::default(),
-            persistent_keepalive: usize::from(persistent_keepalive.unwrap_or(0)),
+            persistent_keepalive: persistent_keepalive
+                .filter(|&s| s > 0)
+                .map(|s| Duration::from_secs(s.into())),
             handshake_jitter: Duration::ZERO,
+            new_handshake_jitter: Duration::ZERO,
         }
     }
 
@@ -104,8 +110,9 @@ impl Timers {
             *t = now;
         }
         self.want_handshake = None;
-        self.want_keepalive = false;
+        self.want_keepalive = None;
         self.handshake_jitter = Duration::ZERO;
+        self.new_handshake_jitter = Duration::ZERO;
     }
 
     /// Compute the time elapsed since [`Self::time_started`] based on [`Instant::now`].
@@ -138,14 +145,32 @@ impl<R: rand::RngCore + Send> Tunn<R> {
 
         match timer_name {
             TimeLastPacketReceived => {
-                self.timers.want_keepalive = true;
                 self.timers.want_handshake = None;
+
+                // Reset persistent keepalive timer for any authenticated packet
+                // Ref: https://github.com/torvalds/linux/blob/9716c086c8e8b141d35aa61f2e96a2e83de212a7/drivers/net/wireguard/timers.c#L215-L220
+                self.timers[TimePersistentKeepalive] = time;
+            }
+            TimeLastDataPacketReceived => {
+                if self.timers.want_keepalive.is_none() {
+                    self.timers.want_keepalive = Some(time);
+                }
+                // The Linux kernel schedules an extra keepalive here if one is already queued:
+                // https://github.com/torvalds/linux/blob/9716c086c8e8b141d35aa61f2e96a2e83de212a7/drivers/net/wireguard/timers.c#L157-L166
+                // This seems unnecessary?
             }
             TimeLastPacketSent => {
-                self.timers.want_keepalive = false;
+                self.timers.want_keepalive = None;
+
+                // Reset persistent keepalive timer for any authenticated packet
+                // Ref: https://github.com/torvalds/linux/blob/9716c086c8e8b141d35aa61f2e96a2e83de212a7/drivers/net/wireguard/timers.c#L215-L220
+                self.timers[TimePersistentKeepalive] = time;
             }
             TimeLastDataPacketSent => {
-                self.timers.want_handshake.get_or_insert(time);
+                if self.timers.want_handshake.is_none() {
+                    self.timers.new_handshake_jitter = self.next_jitter();
+                    self.timers.want_handshake = Some(time);
+                }
             }
             _ => {}
         }
@@ -213,7 +238,6 @@ impl<R: rand::RngCore + Send> Tunn<R> {
         // Load timers only once:
         let session_established = self.timers[TimeSessionEstablished];
         let handshake_started = self.timers[TimeLastHandshakeStarted];
-        let aut_packet_sent = self.timers[TimeLastPacketSent];
         let data_packet_received = self.timers[TimeLastDataPacketReceived];
         let data_packet_sent = self.timers[TimeLastDataPacketSent];
         let persistent_keepalive = self.timers.persistent_keepalive;
@@ -296,7 +320,8 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                 // packet after from that peer for `(KEEPALIVE + REKEY_TIMEOUT)`,
                 // we initiate a new handshake.
                 if let Some(since) = self.timers.want_handshake
-                    && now.saturating_sub(since) >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT
+                    && now.saturating_sub(since)
+                        >= KEEPALIVE_TIMEOUT + REKEY_TIMEOUT + self.timers.new_handshake_jitter
                 {
                     log::trace!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
@@ -304,20 +329,20 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                 }
 
                 if !handshake_initiation_required {
-                    // If a packet has been received from a given peer, but we have not sent one
-                    // back to the given peer in KEEPALIVE ms, we send an empty packet.
-                    if data_packet_received > aut_packet_sent
-                        && now - aut_packet_sent >= KEEPALIVE_TIMEOUT
-                        && mem::replace(&mut self.timers.want_keepalive, false)
+                    // If a data packet has been received from a given peer, but we have not sent
+                    // one back to the given peer in KEEPALIVE ms, we send an empty packet.
+                    if let Some(since) = self.timers.want_keepalive
+                        && now.saturating_sub(since) >= KEEPALIVE_TIMEOUT
                     {
                         log::trace!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
                         keepalive_required = true;
+                        self.timers.want_keepalive = None;
                     }
 
                     // Persistent KEEPALIVE
-                    if persistent_keepalive > 0
-                        && (now - self.timers[TimePersistentKeepalive]
-                            >= Duration::from_secs(persistent_keepalive as _))
+                    if let Some(persistent_keepalive) = persistent_keepalive
+                        && (now.saturating_sub(self.timers[TimePersistentKeepalive])
+                            >= persistent_keepalive)
                     {
                         log::trace!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
                         self.timer_tick(TimePersistentKeepalive);
@@ -356,26 +381,25 @@ impl<R: rand::RngCore + Send> Tunn<R> {
 
     /// Get the persistent keepalive interval in seconds.
     ///
-    /// Returns `None` if persistent keepalive is disabled (set to 0).
+    /// Returns `None` if persistent keepalive is disabled.
     pub fn persistent_keepalive(&self) -> Option<u16> {
-        let keepalive = self.timers.persistent_keepalive;
-
-        if keepalive > 0 {
-            Some(keepalive as u16)
-        } else {
-            None
-        }
+        self.timers
+            .persistent_keepalive
+            .map(|keepalive| keepalive.as_secs() as u16)
+            .filter(|&keepalive| keepalive > 0)
     }
 
     /// Set the persistent keepalive interval in seconds.
     ///
     /// Pass `None` or `Some(0)` to disable persistent keepalive.
     pub fn set_persistent_keepalive(&mut self, seconds: Option<u16>) {
-        self.timers.persistent_keepalive = usize::from(seconds.unwrap_or(0));
-
-        // Reset timer if we disable persistent keepalive
-        if self.timers.persistent_keepalive == 0 {
+        self.timers.persistent_keepalive = seconds
+            .filter(|&s| s > 0)
+            .map(|s| Duration::from_secs(s.into()));
+        if self.timers.persistent_keepalive.is_none() {
             self.timers[TimePersistentKeepalive] = Duration::ZERO;
+        } else {
+            self.timers[TimePersistentKeepalive] = self.timers[TimeCurrent];
         }
     }
 }

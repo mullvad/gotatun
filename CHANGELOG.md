@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed
+- Add missing jitter for handshakes initiated due to not receiving any packets.
+- Passive keepalives were triggered by received keepalives, not just non-empty data packets. This
+  meant that two idling GotaTun peers could keep pinging each other with passive keepalives.
+- The passive keepalive timer was relative to the *last sent packet*. This meant that an idle tunnel
+  receiving a packet would instantly send a keepalive (instead of waiting for `KEEPALIVE-TIMEOUT`).
+- Do not send persistent keepalives if tunnel is active.
+
 ### Security
 #### Linux
 - Fix a remotely triggerable denial of service in the `recvmmsg` receive path.

@@ -282,7 +282,6 @@ impl<R: RngCore + Send> Tunn<R> {
         log::debug!("Received cookie_reply: {}", p.receiver_idx);
 
         self.handshake.receive_cookie_reply(p)?;
-        self.timer_tick(TimerName::TimeLastPacketReceived);
         self.timer_tick(TimerName::TimeCookieReceived);
 
         Ok(TunnResult::Done)
@@ -324,7 +323,9 @@ impl<R: RngCore + Send> Tunn<R> {
     fn handle_data(&mut self, packet: Packet<WgData>) -> Result<TunnResult, WireGuardError> {
         let decapsulated_packet = self.decapsulate_with_session(packet)?;
 
-        self.timer_tick(TimerName::TimeLastDataPacketReceived);
+        if !decapsulated_packet.is_empty() {
+            self.timer_tick(TimerName::TimeLastDataPacketReceived);
+        }
 
         Ok(TunnResult::WriteToTunnel(decapsulated_packet))
     }
@@ -926,6 +927,61 @@ mod tests {
             matches!(my_tun.update_timers(), Ok(Some(WgKind::HandshakeInit(..)))),
             "retry should fire at REKEY_TIMEOUT + jitter"
         );
+    }
+
+    /// Verify that a received keepalive is not answered with a passive keepalive.
+    ///
+    /// Only *data* packets must arm the passive keepalive timer. If keepalives counted as
+    /// received data, two idle peers would exchange keepalives indefinitely.
+    #[test]
+    #[cfg(feature = "mock_instant")]
+    fn keepalive_is_not_answered_with_keepalive() {
+        const KEEPALIVE: Duration = Duration::from_secs(10); // KEEPALIVE_TIMEOUT
+
+        MockClock::set_time(Duration::ZERO);
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
+
+        MockClock::advance(Duration::from_secs(1));
+        assert!(matches!(my_tun.update_timers(), Ok(None)));
+        assert!(matches!(their_tun.update_timers(), Ok(None)));
+
+        // Send a data packet at t = 1 s, leaving it unanswered.
+        let data = my_tun
+            .handle_outgoing_packet(create_ipv4_udp_packet().into_bytes(), None)
+            .expect("expected encapsulated packet");
+        let result = their_tun.handle_incoming_packet(data);
+        assert!(matches!(result, TunnResult::WriteToTunnel(..)));
+
+        MockClock::advance(KEEPALIVE - Duration::from_millis(1));
+        let nothing = their_tun
+            .update_timers()
+            .expect("update_timers should succeed");
+        assert!(nothing.is_none(), "expect no packet or keepalive yet");
+
+        // The peer answers with a passive keepalive KEEPALIVE after the data arrived.
+        MockClock::advance(Duration::from_millis(1));
+        let packet = their_tun
+            .update_timers()
+            .expect("update_timers should succeed")
+            .expect("expected some timer packet");
+        assert!(
+            matches!(&packet, WgKind::Data(p) if p.is_keepalive()),
+            "expected keepalive packet, got {packet:?}"
+        );
+
+        assert!(matches!(my_tun.update_timers(), Ok(None)));
+        let result = my_tun.handle_incoming_packet(packet);
+        assert!(matches!(result, TunnResult::WriteToTunnel(p) if p.is_empty()));
+
+        // The received keepalive must not be answered with another keepalive, no matter
+        // how long we wait.
+        for _ in 0..30 {
+            MockClock::advance(Duration::from_secs(1));
+            assert!(
+                matches!(my_tun.update_timers(), Ok(None)),
+                "keepalive must not be answered with a keepalive"
+            );
+        }
     }
 
     /// Verify that one IP hitting the rate limit does not affect a different IP.
