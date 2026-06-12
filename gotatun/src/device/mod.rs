@@ -670,12 +670,21 @@ impl<T: DeviceTransports> DeviceState<T> {
                         continue;
                     };
 
-                    // check whether `peer` is allowed to send us packets from `source`
+                    // Cryptokey-routing reverse-path check (whitepaper §2; kernel
+                    // `wg_allowedips_lookup_src`): the inner source address must be routed to
+                    // *this* peer by longest-prefix match in the device-wide table. A per-peer
+                    // allowed-ips membership test is insufficient - with overlapping prefixes
+                    // across peers (e.g. peer A holds 10.0.0.0/24 and peer B holds 10.0.0.5/32)
+                    // it would let the broad-prefix peer spoof the more-specific peer's source.
                     let (source, packet): (IpAddr, _) = packet.either(
                         |ipv4| (ipv4.header.source().into(), ipv4.into()),
                         |ipv6| (ipv6.header.source().into(), ipv6.into()),
                     );
-                    if !peer.is_allowed_ip(source) {
+                    let routed_to_this_peer = device_guard
+                        .peers_by_ip
+                        .find(source)
+                        .is_some_and(|owner| Arc::ptr_eq(owner, &peer_arc));
+                    if !routed_to_this_peer {
                         if cfg!(debug_assertions) {
                             let unspecified = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0).into();
                             log::warn!(

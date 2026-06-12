@@ -12,7 +12,7 @@
 
 use ipnetwork::IpNetwork;
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 
 use crate::device::AllowedIps;
 #[cfg(feature = "daita")]
@@ -111,10 +111,6 @@ impl PeerState {
 
     pub fn set_endpoint(&mut self, addr: SocketAddr) {
         self.endpoint.addr = Some(addr);
-    }
-
-    pub fn is_allowed_ip<I: Into<IpAddr>>(&self, addr: I) -> bool {
-        self.allowed_ips.find(addr.into()).is_some()
     }
 
     pub fn allowed_ips(&self) -> impl Iterator<Item = IpNetwork> + '_ {
