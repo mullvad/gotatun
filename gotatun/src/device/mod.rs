@@ -670,12 +670,18 @@ impl<T: DeviceTransports> DeviceState<T> {
                         continue;
                     };
 
-                    // check whether `peer` is allowed to send us packets from `source`
+                    // Only accept the incoming packet if an outgoing packet to the source IP address
+                    // would be routed to the same peer. This is determined by the most specific
+                    // matching allowed IP range on the device.
                     let (source, packet): (IpAddr, _) = packet.either(
                         |ipv4| (ipv4.header.source().into(), ipv4.into()),
                         |ipv6| (ipv6.header.source().into(), ipv6.into()),
                     );
-                    if !peer.is_allowed_ip(source) {
+                    let routed_to_this_peer = device_guard
+                        .peers_by_ip
+                        .find(source)
+                        .is_some_and(|owner| Arc::ptr_eq(owner, &peer_arc));
+                    if !routed_to_this_peer {
                         if cfg!(debug_assertions) {
                             let unspecified = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0).into();
                             log::warn!(

@@ -179,6 +179,55 @@ async fn test_endpoint_roaming() {
     ping_pong("1.2.3.4".parse().unwrap()).await;
 }
 
+/// A peer must not inject a packet whose inner source IP belongs
+/// (by longest-prefix match) to a *different* peer, even when the
+/// sending peer's own allowed-ips would cover it. The most specific
+/// allowed IP on the device for the source address of incoming
+/// packets must belong to the peer.
+#[tokio::test]
+#[test_log::test]
+async fn reverse_path_rejects_source_owned_by_another_peer() {
+    use crate::device::Peer;
+    use ipnetwork::Ipv4Network;
+    use std::net::Ipv4Addr;
+    use x25519_dalek::{PublicKey, StaticSecret};
+
+    // Alice has 0.0.0.0/0 as it's allowed IP range
+    let (alice, mut bob, _eve) = mock::device_pair().await;
+
+    // Set up a third peer "Carol" with 10.0.0.5/32 on Bob's device
+    let carol_pub = PublicKey::from(&StaticSecret::random());
+    let added = bob
+        .device
+        .add_peer(
+            Peer::new(carol_pub).with_allowed_ip(
+                Ipv4Network::new(Ipv4Addr::new(10, 0, 0, 5), 32)
+                    .unwrap()
+                    .into(),
+            ),
+        )
+        .await
+        .unwrap();
+    assert!(added);
+
+    // Sanity: a legitimately-sourced packet (within Alice's 0.0.0.0/0) is delivered
+    let legit = mock::packet_from(Ipv4Addr::new(192, 168, 0, 1), b"hi");
+    alice.app_tx.send(legit.clone()).await;
+    let got = tokio::time::timeout(Duration::from_secs(2), bob.app_rx.recv())
+        .await
+        .expect("legit packet must be delivered");
+    assert_eq!(got.as_bytes(), legit.as_bytes());
+
+    // Alice spoofs source 10.0.0.5, which on Bob's device belongs to Carol. Bob must drop it.
+    let spoofed = mock::packet_from(Ipv4Addr::new(10, 0, 0, 5), b"spoofed");
+    alice.app_tx.send(spoofed).await;
+    let result = tokio::time::timeout(Duration::from_secs(1), bob.app_rx.recv()).await;
+    assert!(
+        result.is_err(),
+        "Bob delivered a packet whose source 10.0.0.5 is owned by a different peer"
+    );
+}
+
 /// The number of packets we send through the tunnel
 fn packet_count() -> usize {
     mock::packets_of_every_size().len()
