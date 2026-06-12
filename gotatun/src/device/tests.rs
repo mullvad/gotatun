@@ -179,10 +179,11 @@ async fn test_endpoint_roaming() {
     ping_pong("1.2.3.4".parse().unwrap()).await;
 }
 
-/// Reverse-path / cryptokey routing: a peer must not inject a packet whose inner source IP
-/// belongs (by longest-prefix match) to a *different* peer, even when the sending peer's own
-/// allowed-ips would cover it. Regression for the per-peer-vs-device-wide desync: Alice holds
-/// 0.0.0.0/0, but 10.0.0.5/32 is owned by another peer (Carol) on Bob's device.
+/// A peer must not inject a packet whose inner source IP belongs
+/// (by longest-prefix match) to a *different* peer, even when the
+/// sending peer's own allowed-ips would cover it. The most specific
+/// allowed IP on the device for the source address of incoming
+/// packets must belong to the peer.
 #[tokio::test]
 #[test_log::test]
 async fn reverse_path_rejects_source_owned_by_another_peer() {
@@ -191,10 +192,10 @@ async fn reverse_path_rejects_source_owned_by_another_peer() {
     use std::net::Ipv4Addr;
     use x25519_dalek::{PublicKey, StaticSecret};
 
+    // Alice has 0.0.0.0/0 as it's allowed IP range
     let (alice, mut bob, _eve) = mock::device_pair().await;
 
-    // A third peer "Carol" claims 10.0.0.5/32 on Bob's device. She never connects; she only
-    // owns that address in the device-wide routing table.
+    // Set up a third peer "Carol" with 10.0.0.5/32 on Bob's device
     let carol_pub = PublicKey::from(&StaticSecret::random());
     let added = bob
         .device
@@ -209,9 +210,8 @@ async fn reverse_path_rejects_source_owned_by_another_peer() {
         .unwrap();
     assert!(added);
 
-    // Sanity: a legitimately-sourced packet (within Alice's 0.0.0.0/0) is delivered. This also
-    // drives the handshake to completion.
-    let legit = mock::packet(b"hi");
+    // Sanity: a legitimately-sourced packet (within Alice's 0.0.0.0/0) is delivered
+    let legit = mock::packet_from(Ipv4Addr::new(192, 168, 0, 1), b"hi");
     alice.app_tx.send(legit.clone()).await;
     let got = tokio::time::timeout(Duration::from_secs(2), bob.app_rx.recv())
         .await

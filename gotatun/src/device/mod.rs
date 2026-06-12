@@ -670,12 +670,9 @@ impl<T: DeviceTransports> DeviceState<T> {
                         continue;
                     };
 
-                    // Cryptokey-routing reverse-path check (whitepaper §2; kernel
-                    // `wg_allowedips_lookup_src`): the inner source address must be routed to
-                    // *this* peer by longest-prefix match in the device-wide table. A per-peer
-                    // allowed-ips membership test is insufficient - with overlapping prefixes
-                    // across peers (e.g. peer A holds 10.0.0.0/24 and peer B holds 10.0.0.5/32)
-                    // it would let the broad-prefix peer spoof the more-specific peer's source.
+                    // Only accept the incoming packet if an outgoing packet to the source IP address
+                    // would be routed to the same peer. This is determined by the most specific
+                    // matching allowed IP range on the device.
                     let (source, packet): (IpAddr, _) = packet.either(
                         |ipv4| (ipv4.header.source().into(), ipv4.into()),
                         |ipv6| (ipv6.header.source().into(), ipv6.into()),
