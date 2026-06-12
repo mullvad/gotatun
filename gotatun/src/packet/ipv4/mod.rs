@@ -438,6 +438,12 @@ impl Ipv4Header {
     pub fn compute_checksum(&self) -> u16 {
         crate::packet::util::checksum_ipv4_with_skip(self.as_bytes())
     }
+
+    /// Update the checksum for this IP header.
+    pub fn recompute_checksum(&mut self) {
+        self.header_checksum = 0u16.into();
+        self.header_checksum = crate::packet::util::checksum(&[self.as_bytes()]).into();
+    }
 }
 
 impl Ipv4 {
