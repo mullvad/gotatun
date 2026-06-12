@@ -45,6 +45,13 @@ const WORD_SIZE: u64 = 64;
 const N_WORDS: u64 = 16; // Suffice to reorder 64*16 = 1024 packets; can be increased at will
 const N_BITS: u64 = WORD_SIZE * N_WORDS;
 
+/// The maximum number of transport data messages that may be sent or received under a single
+/// session key, per section 6.2 of the [whitepaper](https://www.wireguard.com/papers/wireguard.pdf)
+/// (`Reject-After-Messages = 2^64 - 2^13 - 1`).
+/// Refusing to use a counter at or beyond this value guarantees the 64-bit AEAD nonce can never
+/// wrap and reuse a nonce with the same key.
+pub(super) const REJECT_AFTER_MESSAGES: u64 = u64::MAX - (1 << 13);
+
 #[derive(Debug, Clone, Default)]
 struct ReceivingKeyCounterValidator {
     /// In order to avoid replays while allowing for some reordering of the packets, we keep a
@@ -195,8 +202,24 @@ impl Session {
         ret
     }
 
+    /// Test-only: fast-forward the sending counter so the `REJECT_AFTER_MESSAGES` limit can be
+    /// exercised without actually sending billions of packets.
+    #[cfg(test)]
+    pub(super) fn set_sending_key_counter(&self, value: u64) {
+        self.sending_key_counter.store(value, Ordering::Relaxed);
+    }
+
     /// Encapsulate `packet` into a [`WgData`].
-    pub(super) fn format_packet_data(&self, packet: Packet) -> Packet<WgData> {
+    ///
+    /// Returns `Err(packet)` (the original, un-encapsulated packet) once the sending counter has
+    /// reached `REJECT_AFTER_MESSAGES`: the session must then be replaced by a fresh handshake
+    /// before more transport data can be sent, so the AEAD nonce can never wrap.
+    pub(super) fn format_packet_data(&self, packet: Packet) -> Result<Packet<WgData>, Packet> {
+        // Check before incrementing so an exhausted counter is never advanced (and thus can never
+        // wrap back around to a previously used value).
+        if self.sending_key_counter.load(Ordering::Relaxed) >= REJECT_AFTER_MESSAGES {
+            return Err(packet);
+        }
         let sending_key_counter = self.sending_key_counter.fetch_add(1, Ordering::Relaxed);
 
         let len = WgData::OVERHEAD + packet.len();
@@ -240,7 +263,7 @@ impl Session {
             unreachable!("is a wireguard data packet");
         };
 
-        packet
+        Ok(packet)
     }
 
     /// Decapsulate `packet` and return the decrypted data.
@@ -253,6 +276,10 @@ impl Session {
         }
 
         let counter = packet.header.counter.get();
+
+        if counter >= REJECT_AFTER_MESSAGES {
+            return Err(WireGuardError::ConnectionExpired);
+        }
 
         // Don't reuse counters, in case this is a replay attack we want to quickly check the
         // counter without running expensive decryption
@@ -293,6 +320,48 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::noise::index_table::IndexTable;
+
+    /// Build a `Session` with throwaway keys and a real receiving index.
+    fn test_session() -> Session {
+        let table: IndexTable = IndexTable::from_os_rng();
+        Session::new(table.new_index(), 0, [0u8; 32], [0u8; 32])
+    }
+
+    /// Craft a (cryptographically invalid) `WgData` packet with a chosen receiver index and
+    /// counter, for exercising the receive-path checks that run before decryption.
+    fn make_data_packet(receiver_idx: u32, counter: u64) -> Packet<WgData> {
+        let mut buf = Packet::from_bytes(BytesMut::zeroed(WgData::OVERHEAD));
+        let data = WgData::mut_from_bytes(buf.buf_mut()).expect("buffer is WgData::OVERHEAD");
+        data.header = WgDataHeader::new()
+            .with_receiver_idx(receiver_idx)
+            .with_counter(counter);
+        let WgKind::Data(packet) = buf.try_into_wg().expect("is a wireguard packet") else {
+            unreachable!("is a wireguard data packet");
+        };
+        packet
+    }
+
+    /// The receive path must reject a counter at/beyond REJECT_AFTER_MESSAGES before decryption,
+    /// while a counter just below the limit is allowed past that check (and fails later at AEAD).
+    #[test]
+    fn test_receive_rejects_counter_at_reject_after_messages() {
+        let session = test_session();
+        let recv_idx = session.receiving_index.value();
+
+        let over_limit = make_data_packet(recv_idx, REJECT_AFTER_MESSAGES);
+        assert!(matches!(
+            session.receive_packet_data(over_limit),
+            Err(WireGuardError::ConnectionExpired)
+        ));
+
+        let in_limit = make_data_packet(recv_idx, REJECT_AFTER_MESSAGES - 1);
+        assert!(matches!(
+            session.receive_packet_data(in_limit),
+            Err(WireGuardError::InvalidAeadTag)
+        ));
+    }
+
     #[test]
     fn test_replay_counter() {
         let mut c: ReceivingKeyCounterValidator = Default::default();
