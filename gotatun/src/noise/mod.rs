@@ -163,6 +163,14 @@ impl<R: RngCore + Send> Tunn<R> {
         }
     }
 
+    /// Update the preshared key used for future handshakes.
+    ///
+    /// The new key applies to subsequent handshakes only. The current session
+    /// keeps working until it is rekeyed, so this does not interrupt traffic.
+    pub fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
+        self.handshake.set_preshared_key(preshared_key);
+    }
+
     /// Encapsulate a single packet.
     ///
     /// If there's an active session, return the encapsulated packet. Otherwise, if needed, return
