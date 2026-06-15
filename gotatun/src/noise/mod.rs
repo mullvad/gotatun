@@ -171,6 +171,11 @@ impl<R: RngCore + Send> Tunn<R> {
         self.handshake.set_preshared_key(preshared_key);
     }
 
+    /// The current preshared key.
+    pub fn preshared_key(&self) -> Option<[u8; 32]> {
+        self.handshake.preshared_key()
+    }
+
     /// Encapsulate a single packet.
     ///
     /// If there's an active session, return the encapsulated packet. Otherwise, if needed, return

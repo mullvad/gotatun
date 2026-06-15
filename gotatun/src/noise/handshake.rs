@@ -507,6 +507,11 @@ impl Handshake {
         self.params.preshared_key = preshared_key;
     }
 
+    /// The preshared key currently mixed into handshakes, if any.
+    pub(crate) fn preshared_key(&self) -> Option<[u8; 32]> {
+        self.params.preshared_key
+    }
+
     pub(super) fn receive_handshake_initialization(
         &mut self,
         packet: crate::packet::Packet<WgHandshakeInit>,

@@ -37,7 +37,6 @@ pub struct PeerState {
     pub(crate) tunnel: Tunn,
     pub(crate) endpoint: Endpoint,
     pub(crate) allowed_ips: AllowedIps<()>,
-    pub(crate) preshared_key: Option<[u8; 32]>,
 
     #[cfg(feature = "daita")]
     daita_settings: Option<DaitaSettings>,
@@ -50,14 +49,12 @@ impl PeerState {
         tunnel: Tunn,
         endpoint: Option<SocketAddr>,
         allowed_ips: &[IpNetwork],
-        preshared_key: Option<[u8; 32]>,
         #[cfg(feature = "daita")] daita_settings: Option<DaitaSettings>,
     ) -> PeerState {
         Self {
             tunnel,
             endpoint: Endpoint { addr: endpoint },
             allowed_ips: allowed_ips.iter().map(|ip| (ip, ())).collect(),
-            preshared_key,
             #[cfg(feature = "daita")]
             daita_settings,
             #[cfg(feature = "daita")]
@@ -127,5 +124,9 @@ impl PeerState {
 
     pub fn persistent_keepalive(&self) -> Option<u16> {
         self.tunnel.persistent_keepalive()
+    }
+
+    pub fn preshared_key(&self) -> Option<[u8; 32]> {
+        self.tunnel.preshared_key()
     }
 }
