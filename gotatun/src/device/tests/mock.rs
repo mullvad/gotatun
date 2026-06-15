@@ -196,9 +196,14 @@ pub fn mock_tun() -> (MockTun, MockAppTx, MockAppRx) {
 
 /// Create a mocked barely passable IPv4 packet containing `payload`.
 pub fn packet(payload: impl AsRef<[u8]>) -> Packet<Ip> {
+    packet_from(Ipv4Addr::new(192, 168, 0, 1), payload)
+}
+
+/// Like [`packet`] but with a chosen source address, for exercising reverse-path checks.
+pub fn packet_from(source: Ipv4Addr, payload: impl AsRef<[u8]>) -> Packet<Ip> {
     let payload = payload.as_ref();
     let packet = Ipv4Header::new(
-        Ipv4Addr::new(192, 168, 0, 1),
+        source,
         Ipv4Addr::new(192, 168, 0, 2),
         IpNextProtocol::Pup,
         payload,
