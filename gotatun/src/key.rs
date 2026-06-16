@@ -62,6 +62,16 @@ impl PeerPublicKey {
         }
     }
 
+    /// The public key for `secret`, wrapped as a `PeerPublicKey`.
+    ///
+    /// A public key derived from a secret key is the basepoint times a clamped
+    /// scalar, which always lands in the prime-order subgroup and so is never
+    /// low-order. Unlike [`PeerPublicKey::new`] this therefore needs no
+    /// validation and cannot fail.
+    pub fn from_secret(secret: &x25519::StaticSecret) -> Self {
+        Self(x25519::PublicKey::from(secret))
+    }
+
     /// The wrapped [`x25519::PublicKey`].
     pub fn as_public_key(&self) -> &x25519::PublicKey {
         &self.0
@@ -130,5 +140,16 @@ mod tests {
                 "point {low_order:02x?}: expected rejection"
             );
         }
+    }
+
+    /// Deriving from a secret yields the same key as validating it.
+    #[test]
+    fn from_secret_matches_validation() {
+        let secret = x25519::StaticSecret::random_from_rng(rand_core::OsRng);
+        let public_key = x25519::PublicKey::from(&secret);
+        assert_eq!(
+            PeerPublicKey::from_secret(&secret),
+            PeerPublicKey::new(public_key).unwrap()
+        );
     }
 }
