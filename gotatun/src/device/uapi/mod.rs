@@ -39,6 +39,7 @@ use super::{Connection, DeviceState, Reconfigure};
 use crate::device::DeviceTransports;
 #[cfg(feature = "daita-uapi")]
 use crate::device::uapi::command::SetUnset;
+use crate::key::PeerPublicKey;
 use crate::serialization::KeyBytes;
 use command::{Get, GetPeer, GetResponse, Peer, Request, Response, Set, SetPeer, SetResponse};
 use eyre::{Context, bail, eyre};
@@ -499,7 +500,7 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
 
         peers.push(GetPeer {
             peer: Peer {
-                public_key: KeyBytes(*public_key.as_bytes()),
+                public_key: KeyBytes(*public_key.as_public_key().as_bytes()),
                 preshared_key: peer
                     .preshared_key
                     .map(|key| command::SetUnset::Set(KeyBytes(key))),
@@ -632,17 +633,27 @@ async fn on_api_set(
             continue;
         }
 
+        // Reject low-order (non-contributory) peer keys up front; a handshake
+        // with such a peer could never succeed.
+        let peer_public_key = match PeerPublicKey::new(public_key) {
+            Ok(key) => key,
+            Err(error) => {
+                log::debug!("Rejecting peer: {error}");
+                return (SetResponse { errno: EINVAL }, reconfigure);
+            }
+        };
+
         let mut new_peer = match device.remove_peer(&public_key).await {
             None => {
                 // New peer
-                crate::device::Peer::new(public_key)
+                crate::device::Peer::new(peer_public_key)
             }
             Some(old_peer) => {
                 // Take existing peer
                 let peer = old_peer.lock().await;
 
                 crate::device::Peer {
-                    public_key,
+                    public_key: peer_public_key,
                     preshared_key: peer.preshared_key,
                     endpoint: peer.endpoint().addr,
                     keepalive: peer.persistent_keepalive(),

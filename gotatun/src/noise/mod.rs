@@ -28,6 +28,7 @@ mod timers;
 use rand::{Rng, RngCore, SeedableRng, rngs::StdRng};
 use zerocopy::IntoBytes;
 
+use crate::key::PeerPublicKey;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::index_table::IndexTable;
@@ -89,13 +90,9 @@ pub struct Tunn<R: RngCore + Send = StdRng> {
 
 impl Tunn<StdRng> {
     /// Create a new tunnel using own private key and the peer public key.
-    ///
-    /// Note: if `peer_static_public` is a low-order (non-contributory) Curve25519
-    /// point, no error is returned here, but every handshake with this peer will
-    /// fail.
     pub fn new(
         static_private: x25519::StaticSecret,
-        peer_static_public: x25519::PublicKey,
+        peer_static_public: PeerPublicKey,
         preshared_key: Option<[u8; 32]>,
         persistent_keepalive: Option<u16>,
         index_table: IndexTable,
@@ -115,13 +112,9 @@ impl Tunn<StdRng> {
 
 impl<R: RngCore + Send> Tunn<R> {
     /// Create a new tunnel using own private key and the peer public key.
-    ///
-    /// Note: if `peer_static_public` is a low-order (non-contributory) Curve25519
-    /// point, no error is returned here, but every handshake with this peer will
-    /// fail.
     pub fn new_with_rng(
         static_private: x25519::StaticSecret,
-        peer_static_public: x25519::PublicKey,
+        peer_static_public: PeerPublicKey,
         preshared_key: Option<[u8; 32]>,
         persistent_keepalive: Option<u16>,
         index_table: IndexTable,
@@ -157,11 +150,6 @@ impl<R: RngCore + Send> Tunn<R> {
     }
 
     /// Update the private key and clear existing sessions.
-    ///
-    /// Note: this recomputes the static-static shared secret with the peer's
-    /// public key. If that key is a low-order (non-contributory) Curve25519
-    /// point, no error is returned here, but every subsequent handshake with
-    /// the peer will fail.
     pub fn set_static_private(
         &mut self,
         static_private: x25519::StaticSecret,
@@ -394,15 +382,7 @@ impl<R: RngCore + Send> Tunn<R> {
 
         let starting_new_handshake = !self.handshake.is_in_progress();
 
-        // A non-contributory (low-order) peer static key aborts the handshake
-        // here, so no initiation is sent. See [`Tunn::new`] / [`Tunn::set_static_private`].
-        let packet = match self.handshake.format_handshake_initiation() {
-            Ok(packet) => packet,
-            Err(error) => {
-                log::debug!("Not sending handshake_initiation: {error:?}");
-                return None;
-            }
-        };
+        let packet = self.handshake.format_handshake_initiation();
         log::debug!("Sending handshake_initiation");
 
         if starting_new_handshake {
@@ -549,7 +529,7 @@ mod tests {
         let rate_limiter = Arc::new(RateLimiter::new(&my_public_key, HANDSHAKE_RATE_LIMIT));
         let my_tun = Tunn::new(
             my_secret_key,
-            their_public_key,
+            PeerPublicKey::new(their_public_key).unwrap(),
             None,
             None,
             IndexTable::from_os_rng(),
@@ -559,7 +539,7 @@ mod tests {
         let rate_limiter = Arc::new(RateLimiter::new(&their_public_key, HANDSHAKE_RATE_LIMIT));
         let their_tun = Tunn::new(
             their_secret_key,
-            my_public_key,
+            PeerPublicKey::new(my_public_key).unwrap(),
             None,
             None,
             IndexTable::from_os_rng(),
@@ -657,40 +637,6 @@ mod tests {
     fn handshake_init() {
         let (mut my_tun, _their_tun) = create_two_tuns();
         let _init = create_handshake_init(&mut my_tun);
-    }
-
-    // Tests the sending direction: an initiator generating a handshake
-    // initiation. The low-order key here stands in for the peer's configured
-    // static public key.
-    //
-    // Such a static key yields a non-contributory (all-zero) DH, so the
-    // initiator must never complete a handshake: it must emit no initiation.
-    // Checked for every known low-order point, not just the all-zero one.
-    //
-    // See `rejects_low_order_ephemeral_in_initiation` in `noise::handshake` for
-    // the receiving direction (a responder rejecting an incoming initiation).
-    #[test]
-    fn low_order_peer_static_key_aborts_initiation() {
-        for low_order in crate::noise::handshake::low_order_keys() {
-            let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(rand_core::OsRng);
-            let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
-            let low_order_peer = x25519_dalek::PublicKey::from(low_order);
-
-            let rate_limiter = Arc::new(RateLimiter::new(&my_public_key, HANDSHAKE_RATE_LIMIT));
-            let mut tun = Tunn::new(
-                my_secret_key,
-                low_order_peer,
-                None,
-                None,
-                IndexTable::from_os_rng(),
-                rate_limiter,
-            );
-
-            assert!(
-                tun.format_handshake_initiation(false).is_none(),
-                "point {low_order:02x?}: initiation must be aborted for a non-contributory peer static key"
-            );
-        }
     }
 
     #[test]
@@ -953,7 +899,7 @@ mod tests {
         let rate_limiter = Arc::new(RateLimiter::new(&my_public_key, HANDSHAKE_RATE_LIMIT));
         let mut my_tun = Tunn::new_with_rng(
             my_secret_key,
-            their_public_key,
+            PeerPublicKey::new(their_public_key).unwrap(),
             None,
             None,
             IndexTable::from_os_rng(),
