@@ -185,7 +185,7 @@ impl<T: DeviceTransports> DeviceRead<'_, T> {
             peers.push(PeerStats {
                 peer: Peer {
                     public_key: *pubkey,
-                    preshared_key: p.preshared_key,
+                    preshared_key: p.tunnel.preshared_key(),
                     allowed_ips: p.allowed_ips.iter().map(|(_, net)| net).collect(),
                     endpoint: p.endpoint.addr,
                     keepalive: p.tunnel.persistent_keepalive(),
@@ -321,7 +321,7 @@ impl<T: DeviceTransports> DeviceWrite<'_, T> {
         } = peer_mut;
 
         if let Update::Set(preshared_key) = preshared_key {
-            existing_peer.preshared_key = preshared_key;
+            existing_peer.tunnel.set_preshared_key(preshared_key);
         }
 
         if let Update::Set(keepalive) = keepalive {

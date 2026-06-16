@@ -434,6 +434,10 @@ impl NoiseParams {
 
         self.static_shared = self.static_private.diffie_hellman(&self.peer_static_public);
     }
+
+    fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
+        self.preshared_key = preshared_key;
+    }
 }
 
 impl Handshake {
@@ -496,7 +500,23 @@ impl Handshake {
         private_key: x25519::StaticSecret,
         public_key: x25519::PublicKey,
     ) {
-        self.params.set_static_private(private_key, public_key)
+        self.params.set_static_private(private_key, public_key);
+        // Invalidate in-flight handshakes
+        self.state = HandshakeState::None;
+        self.previous = HandshakeState::None;
+    }
+
+    /// Update the preshared key and invalidate handshake state derived from the previous value.
+    pub(crate) fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
+        self.params.set_preshared_key(preshared_key);
+        // Invalidate in-flight handshakes
+        self.state = HandshakeState::None;
+        self.previous = HandshakeState::None;
+    }
+
+    /// Get the preshared key
+    pub(crate) fn preshared_key(&self) -> Option<[u8; 32]> {
+        self.params.preshared_key
     }
 
     pub(super) fn receive_handshake_initialization(

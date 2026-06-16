@@ -380,7 +380,6 @@ impl<T: DeviceTransports> DeviceState<T> {
             tunn,
             peer_builder.endpoint,
             peer_builder.allowed_ips.as_slice(),
-            peer_builder.preshared_key,
             #[cfg(feature = "daita")]
             peer_builder.daita_settings,
         )
