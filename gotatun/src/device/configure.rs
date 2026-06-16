@@ -154,7 +154,7 @@ impl<T: DeviceTransports> DeviceRead<'_, T> {
     /// Return all peers on the device
     pub async fn peers(&self) -> Vec<PeerStats> {
         let mut peers = vec![];
-        for (pubkey, peer) in self.device.peers.iter() {
+        for (pubkey, peer) in &self.device.peers {
             let p = peer.lock().await;
 
             #[cfg(feature = "daita")]
@@ -270,7 +270,7 @@ impl<T: DeviceTransports> DeviceWrite<'_, T> {
     /// All fields of the peer will be overwritten. Returns `false` if no peer with this public key
     /// exists. See also [`Self::add_or_update_peer`] and [`Self::modify_peer`].
     pub async fn update_peer(&mut self, peer: Peer) -> bool {
-        self.modify_peer(&peer.public_key, |peer_mut| {
+        self.modify_peer(peer.public_key.as_public_key(), |peer_mut| {
             peer_mut.clear_allowed_ips();
             peer_mut.add_allowed_ips(peer.allowed_ips);
             peer_mut.set_endpoint(peer.endpoint);

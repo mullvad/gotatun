@@ -9,18 +9,21 @@
 //! X25519 key agreement wrappers that make it impossible to accidentally use a
 //! non-contributory (all-zero) Diffie-Hellman result.
 //!
-//! The contributory check is the only way to construct a [`SharedSecret`], and
-//! a [`SharedSecret`] is the only thing in this module that exposes secret
-//! bytes. Because the wrapped `x25519_dalek` types are private to this module,
-//! code outside it cannot reach dalek's unchecked `diffie_hellman` nor read a
-//! raw shared secret. The check is therefore not merely easy to remember, it is
-//! impossible to bypass.
+//! A [`SharedSecret`] can only be obtained either by passing the runtime
+//! contributory check (the fallible `dh` methods) or by agreeing against a
+//! validated [`PeerPublicKey`] (the infallible `dh_validated` methods), which
+//! guarantees the same property at the type level. A [`SharedSecret`] is the
+//! only thing in this module that exposes secret bytes, and because the wrapped
+//! `x25519_dalek` types are private to the module, code outside it cannot reach
+//! dalek's unchecked `diffie_hellman` nor read a raw shared secret. The check is
+//! therefore not merely easy to remember, it is impossible to bypass.
 //!
 //! A non-contributory result is produced by a low-order peer public key. The
 //! Noise spec treats rejecting it as optional (§12.1), but the Linux kernel
 //! WireGuard implementation does so as a fail-fast hardening measure
 //! (`mix_dh`/`curve25519`); this matches its behavior.
 
+use crate::key::PeerPublicKey;
 use crate::noise::errors::WireGuardError;
 use crate::x25519;
 
@@ -42,6 +45,16 @@ impl StaticSecret {
     /// non-contributory (all-zero), indicating a low-order `peer` key.
     pub(crate) fn dh(&self, peer: &x25519::PublicKey) -> Result<SharedSecret, WireGuardError> {
         SharedSecret::checked(self.0.diffie_hellman(peer))
+    }
+
+    /// Performs the key agreement against a validated `peer` key.
+    ///
+    /// Unlike [`StaticSecret::dh`] this is infallible. Whether a result is
+    /// non-contributory depends only on the public key, not the scalar, and a
+    /// [`PeerPublicKey`] is guaranteed not to be low-order, so the result is
+    /// always contributory.
+    pub(crate) fn dh_validated(&self, peer: &PeerPublicKey) -> SharedSecret {
+        SharedSecret(self.0.diffie_hellman(peer.as_public_key()))
     }
 }
 
@@ -77,14 +90,26 @@ impl EphemeralSecret {
     pub(crate) fn dh(&self, peer: &x25519::PublicKey) -> Result<SharedSecret, WireGuardError> {
         SharedSecret::checked(self.0.diffie_hellman(peer))
     }
+
+    /// Performs the key agreement against a validated `peer` key.
+    ///
+    /// Unlike [`EphemeralSecret::dh`] this is infallible. Whether a result is
+    /// non-contributory depends only on the public key, not the scalar, and a
+    /// [`PeerPublicKey`] is guaranteed not to be low-order, so the result is
+    /// always contributory.
+    pub(crate) fn dh_validated(&self, peer: &PeerPublicKey) -> SharedSecret {
+        SharedSecret(self.0.diffie_hellman(peer.as_public_key()))
+    }
 }
 
-/// A shared secret that has passed the non-contributory check.
+/// A contributory shared secret.
 ///
-/// The only constructor is the private [`SharedSecret::checked`], reachable
-/// solely through [`StaticSecret::dh`] / [`EphemeralSecret::dh`], so merely
-/// holding a value of this type is proof the check passed. Its bytes leave the
-/// module only as the `&[u8; 32]` returned by [`SharedSecret::as_bytes`].
+/// Every `SharedSecret` is contributory, established either by the runtime check
+/// in the private [`SharedSecret::checked`] (used by the fallible `dh` methods)
+/// or by agreeing against a validated [`PeerPublicKey`] via the `dh_validated`
+/// methods. Holding a value of this type is therefore proof of contributoriness.
+/// Its bytes leave the module only as the `&[u8; 32]` returned by
+/// [`SharedSecret::as_bytes`].
 pub(crate) struct SharedSecret(x25519::SharedSecret);
 
 impl SharedSecret {

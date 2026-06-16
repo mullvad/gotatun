@@ -38,6 +38,7 @@ use tokio::join;
 use tokio::sync::RwLock;
 use tokio::sync::{Mutex, watch};
 
+use crate::key::PeerPublicKey;
 use crate::noise::dh;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
@@ -118,7 +119,7 @@ pub(crate) struct DeviceState<T: DeviceTransports> {
     /// MTU watcher of the TUN device.
     tun_rx_mtu: MtuWatcher,
 
-    peers: HashMap<x25519::PublicKey, Arc<Mutex<PeerState>>>,
+    peers: HashMap<PeerPublicKey, Arc<Mutex<PeerState>>>,
     peers_by_ip: AllowedIps<Arc<Mutex<PeerState>>>,
     peers_by_idx: parking_lot::Mutex<HashMap<u32, Arc<Mutex<PeerState>>>>,
     index_table: IndexTable,

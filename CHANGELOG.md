@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Add `noise::TimerParams` for tuning WireGuard timers. This is useful for obfuscation, but note
   that tweaking timers will cause the tunnel to deviate from the WireGuard spec.
+- Add `PeerPublicKey`, a peer static public key validated as contributory (not a
+  low-order Curve25519 point), and the `InvalidPeerKey` error returned when
+  validation fails. Construct one with `PeerPublicKey::new`, or
+  `PeerPublicKey::from_secret` for a key derived from a secret you hold.
 
 ### Changed
 - Enlarge the anti-replay sliding window from 1024 to 8192 packets, matching the
@@ -16,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   legitimate packets. Costs ~7 KiB more memory per peer.
 - Remove the redundant `static_public` parameter from `Tunn::set_static_private`;
   it is now derived from the private key. This is a breaking change.
+- `Tunn::new`, `Tunn::new_with_rng` and `Peer::new` now take a `PeerPublicKey`
+  instead of an `x25519::PublicKey`, rejecting low-order (non-contributory) peer
+  keys up front. This is a breaking change.
 
 ### Fixed
 - Add missing jitter for handshakes initiated due to not receiving any packets.
@@ -33,9 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enforce the `Reject-After-Messages` limit on the transport data counter, so a
   session is retired before its AEAD nonce can wrap and repeat.
 - Abort the handshake on a non-contributory (low-order / all-zero) Curve25519
-  Diffie-Hellman result, matching the Linux kernel and wireguard-go. A peer
-  configured with a low-order public key is accepted but can no longer complete
-  a handshake. This adds `WireGuardError::InvalidSharedSecret` which is a breaking change.
+  Diffie-Hellman result, matching the Linux kernel and wireguard-go. This guards
+  the receive path, where the peer ephemeral key arrives from the wire. This adds
+  `WireGuardError::InvalidSharedSecret` which is a breaking change. Low-order peer
+  *static* keys are instead rejected when configuring a peer (see Changed).
 
 #### Linux
 - Fix a remotely triggerable denial of service in the `recvmmsg` receive path.

@@ -22,10 +22,13 @@
 mod crypto;
 #[cfg(feature = "device")]
 pub mod device;
+mod key;
 pub mod noise;
 pub mod packet;
 pub mod tun;
 pub mod udp;
+
+pub use key::{InvalidPeerKey, PeerPublicKey};
 
 mod task;
 
