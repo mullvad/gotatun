@@ -92,6 +92,11 @@ impl PeerState {
         self.tunnel.update_timers()
     }
 
+    /// Drop all sessions and reset the tunnel, forcing a fresh handshake.
+    pub fn reset(&mut self) {
+        self.tunnel.reset();
+    }
+
     #[cfg(feature = "daita")]
     pub fn daita_settings(&self) -> Option<&DaitaSettings> {
         self.daita_settings.as_ref()

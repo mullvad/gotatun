@@ -150,6 +150,16 @@ impl<R: RngCore + Send> Tunn<R> {
         self.handshake.is_expired()
     }
 
+    /// Drop all sessions and reset the handshake and timing state.
+    ///
+    /// After this, the tunnel behaves as if freshly created: the next outgoing
+    /// packet (or persistent keepalive) initiates a new handshake. Used when
+    /// resuming a suspended device to avoid reusing a stale session.
+    pub fn reset(&mut self) {
+        self.clear_all();
+        self.handshake.reset();
+    }
+
     /// Update the private key and clear existing sessions.
     pub fn set_static_private(
         &mut self,

@@ -272,7 +272,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
 
     // We don't really clear the timers, but we set them to the current time to
     // so the reference time frame is the same
-    fn clear_all(&mut self) {
+    pub(super) fn clear_all(&mut self) {
         for session in &mut self.sessions {
             *session = None;
         }
