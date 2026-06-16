@@ -195,17 +195,16 @@ async fn reverse_path_rejects_source_owned_by_another_peer() {
     use crate::key::PeerPublicKey;
     use ipnetwork::Ipv4Network;
     use std::net::Ipv4Addr;
-    use x25519_dalek::{PublicKey, StaticSecret};
+    use x25519_dalek::StaticSecret;
 
     // Alice has 0.0.0.0/0 as it's allowed IP range
     let (alice, mut bob, _eve) = mock::device_pair().await;
 
     // Set up a third peer "Carol" with 10.0.0.5/32 on Bob's device
-    let carol_pub = PublicKey::from(&StaticSecret::random());
     let added = bob
         .device
         .add_peer(
-            Peer::new(PeerPublicKey::new(carol_pub).unwrap()).with_allowed_ip(
+            Peer::new(PeerPublicKey::from_secret(&StaticSecret::random())).with_allowed_ip(
                 Ipv4Network::new(Ipv4Addr::new(10, 0, 0, 5), 32)
                     .unwrap()
                     .into(),

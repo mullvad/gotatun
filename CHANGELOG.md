@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that tweaking timers will cause the tunnel to deviate from the WireGuard spec.
 - Add `PeerPublicKey`, a peer static public key validated as contributory (not a
   low-order Curve25519 point), and the `InvalidPeerKey` error returned when
-  validation fails. Construct one with `PeerPublicKey::new`.
+  validation fails. Construct one with `PeerPublicKey::new`, or
+  `PeerPublicKey::from_secret` for a key derived from a secret you hold.
 
 ### Changed
 - Enlarge the anti-replay sliding window from 1024 to 8192 packets, matching the
