@@ -483,6 +483,12 @@ impl Handshake {
         self.state = HandshakeState::Expired;
     }
 
+    /// Reset the handshake to its initial state, so a fresh handshake can be initiated.
+    pub(crate) fn reset(&mut self) {
+        self.previous = HandshakeState::None;
+        self.state = HandshakeState::None;
+    }
+
     pub(crate) fn is_expired(&self) -> bool {
         matches!(self.state, HandshakeState::Expired)
     }
