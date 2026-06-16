@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Replace `log` with `tracing`.
 
+### Added
+- `Device::suspend` and `Device::resume` to pause and resume all tunnel activity.
+  Suspending stops the timers, inbound, and outbound tasks (no keepalives, handshakes,
+  or data), while retaining peers and config. Resuming rebuilds the connection and
+  forces a fresh handshake. Intended for platforms such as iOS where the host process
+
 
 ## [0.7.2] - 2026-06-25
 ### Added
