@@ -163,16 +163,18 @@ impl<R: RngCore + Send> Tunn<R> {
         }
     }
 
-    /// Update the preshared key and discard crypto state derived from the previous one.
-    #[cfg(any(feature = "device", test))]
-    pub(crate) fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
+    /// Update the preshared key and clear existing sessions.
+    pub fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
         self.handshake.set_preshared_key(preshared_key);
         // Established sessions are keyed from the previous PSK and must not remain usable.
         for s in &mut self.sessions {
             *s = None;
         }
-        // Reset timer-driven handshake/keepalive state so the next packet starts a fresh exchange.
-        self.timers.clear();
+    }
+
+    /// Get the current preshared key.
+    pub fn preshared_key(&self) -> Option<[u8; 32]> {
+        self.handshake.preshared_key()
     }
 
     /// Encapsulate a single packet.
@@ -850,6 +852,9 @@ mod tests {
         their_tun.set_preshared_key(Some(preshared_key));
         my_tun.set_preshared_key(Some([8; 32]));
         my_tun.set_preshared_key(Some(preshared_key));
+
+        #[cfg(feature = "mock_instant")]
+        mock_instant::thread_local::MockClock::advance(Duration::from_micros(1));
 
         let init = create_handshake_init(&mut my_tun);
         let resp = create_handshake_response(&mut their_tun, init);

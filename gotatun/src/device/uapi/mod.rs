@@ -501,7 +501,7 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
             peer: Peer {
                 public_key: KeyBytes(*public_key.as_bytes()),
                 preshared_key: peer
-                    .preshared_key
+                    .preshared_key()
                     .map(|key| command::SetUnset::Set(KeyBytes(key))),
                 endpoint,
                 persistent_keepalive_interval: peer.persistent_keepalive(),
@@ -643,7 +643,7 @@ async fn on_api_set(
 
                 crate::device::Peer {
                     public_key,
-                    preshared_key: peer.preshared_key,
+                    preshared_key: peer.preshared_key(),
                     endpoint: peer.endpoint().addr,
                     keepalive: peer.persistent_keepalive(),
                     allowed_ips: if replace_allowed_ips {

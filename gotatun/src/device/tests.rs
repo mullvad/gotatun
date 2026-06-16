@@ -298,6 +298,9 @@ async fn apply_peer_psk_update(
         }
     };
 
+    #[cfg(feature = "mock_instant")]
+    mock_instant::thread_local::MockClock::advance(Duration::from_micros(1));
+
     assert!(updated, "peer update should affect an existing peer");
 }
 
