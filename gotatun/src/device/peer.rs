@@ -12,10 +12,10 @@
 use std::net::SocketAddr;
 
 use ipnetwork::IpNetwork;
-use x25519_dalek::PublicKey;
 
 #[cfg(feature = "daita")]
 use crate::device::daita::DaitaSettings;
+use crate::key::PeerPublicKey;
 use crate::noise::TimerParams;
 
 /// Peer data. Used to construct and update peers in a [`Device`](crate::device::Device).
@@ -23,7 +23,7 @@ use crate::noise::TimerParams;
 #[non_exhaustive]
 pub struct Peer {
     /// The peer's public key.
-    pub public_key: PublicKey,
+    pub public_key: PeerPublicKey,
     /// The peer's endpoint address (IP and port).
     ///
     /// An incoming handshake from the peer will overwrite the endpoint to the source
@@ -52,10 +52,7 @@ impl Peer {
     /// Create a new peer with the given public key.
     ///
     /// All other fields are set to their default values.
-    ///
-    /// Note: a low-order (non-contributory) Curve25519 public key is accepted
-    /// here without error, but every handshake with the peer will then fail.
-    pub const fn new(public_key: PublicKey) -> Self {
+    pub const fn new(public_key: PeerPublicKey) -> Self {
         Self {
             public_key,
             endpoint: None,
