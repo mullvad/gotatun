@@ -191,6 +191,7 @@ impl<T: DeviceTransports> DeviceRead<'_, T> {
                     keepalive: p.tunnel.persistent_keepalive(),
                     #[cfg(feature = "daita")]
                     daita_settings: daita,
+                    danger_timer_params: Some(p.tunnel.timer_params().clone()),
                 },
                 stats,
             });
