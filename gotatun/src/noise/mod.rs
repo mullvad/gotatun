@@ -165,13 +165,15 @@ impl<R: RngCore + Send> Tunn<R> {
         }
     }
 
-    /// Update the preshared key and clear existing sessions.
+    /// Update the preshared key used for future handshakes.
+    ///
+    /// The new key is only mixed in by subsequent handshakes. The current
+    /// session therefore keeps working until it is rekeyed, so changing
+    /// the key does not interrupt traffic.
+    // Not invalidating current sessions matches the Linux kernel, which update
+    // the key in place and never tear down the session on a configuration change.
     pub fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
         self.handshake.set_preshared_key(preshared_key);
-        // Established sessions are keyed from the previous PSK and must not remain usable.
-        for s in &mut self.sessions {
-            *s = None;
-        }
     }
 
     /// Get the current preshared key.
@@ -614,12 +616,15 @@ mod tests {
 
     fn create_two_tuns_and_handshake() -> (Tunn, Tunn) {
         let (mut my_tun, mut their_tun) = create_two_tuns();
-        let init = create_handshake_init(&mut my_tun);
-        let resp = create_handshake_response(&mut their_tun, init);
-        let keepalive = parse_handshake_resp(&mut my_tun, resp);
-        parse_keepalive(&mut their_tun, keepalive);
-
+        complete_handshake(&mut my_tun, &mut their_tun);
         (my_tun, their_tun)
+    }
+
+    fn complete_handshake(my_tun: &mut Tunn, their_tun: &mut Tunn) {
+        let init = create_handshake_init(my_tun);
+        let resp = create_handshake_response(their_tun, init);
+        let keepalive = parse_handshake_resp(my_tun, resp);
+        parse_keepalive(their_tun, keepalive);
     }
 
     fn create_ipv4_udp_packet() -> Packet<Ipv4> {
@@ -831,64 +836,50 @@ mod tests {
     #[test]
     fn one_ip_packet() {
         let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
-
-        let sent_packet_buf = create_ipv4_udp_packet();
-
-        let data = my_tun
-            .handle_outgoing_packet(sent_packet_buf.clone().into_bytes(), None)
-            .unwrap();
-
-        assert!(matches!(data, WgKind::Data(..)));
-
-        let data = their_tun.handle_incoming_packet(data);
-        let recv_packet_buf = if let TunnResult::WriteToTunnel(recv) = data {
-            recv
-        } else {
-            unreachable!("expected WritetoTunnelV4");
-        };
-        assert_eq!(sent_packet_buf.as_bytes(), recv_packet_buf.as_bytes());
+        assert_packet_roundtrip(&mut my_tun, &mut their_tun);
     }
 
+    /// Changing the preshared key must not tear down the established session: the
+    /// PSK is not part of its transport keys, so traffic keeps flowing even
+    /// though `their_tun` never learned the new key.
     #[test]
-    fn set_preshared_key_invalidates_existing_sessions() {
-        let (mut my_tun, _their_tun) = create_two_tuns_and_handshake();
-
-        assert!(my_tun.time_since_last_handshake().is_some());
-
+    fn set_preshared_key_keeps_existing_session() {
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
         my_tun.set_preshared_key(Some([7; 32]));
-
-        assert!(my_tun.time_since_last_handshake().is_none());
-        assert!(matches!(
-            my_tun.handle_outgoing_packet(create_ipv4_udp_packet().into_bytes(), None),
-            Some(WgKind::HandshakeInit(..))
-        ));
+        assert_packet_roundtrip(&mut my_tun, &mut their_tun);
     }
 
+    /// Send one IP packet over the established session and assert it round-trips.
+    fn assert_packet_roundtrip(from: &mut Tunn, to: &mut Tunn) {
+        let sent = create_ipv4_udp_packet();
+        let data = from
+            .handle_outgoing_packet(sent.clone().into_bytes(), None)
+            .expect("session should encrypt the packet");
+        let TunnResult::WriteToTunnel(received) = to.handle_incoming_packet(data) else {
+            panic!("session should decrypt the packet");
+        };
+        assert_eq!(sent.as_bytes(), received.as_bytes());
+    }
+
+    /// A stored preshared key is mixed into the next handshake: matching keys on
+    /// both sides complete it, a one-sided key fails to authenticate.
     #[test]
-    fn set_preshared_key_resets_handshake_replay_state() {
-        let (mut my_tun, mut their_tun) = create_two_tuns();
+    fn set_preshared_key_applies_to_next_handshake() {
         let preshared_key = [7; 32];
 
+        let (mut my_tun, mut their_tun) = create_two_tuns();
         my_tun.set_preshared_key(Some(preshared_key));
+        their_tun.set_preshared_key(Some(preshared_key));
+        complete_handshake(&mut my_tun, &mut their_tun);
 
+        let (mut my_tun, mut their_tun) = create_two_tuns();
+        my_tun.set_preshared_key(Some(preshared_key));
         let init = create_handshake_init(&mut my_tun);
         let resp = create_handshake_response(&mut their_tun, init);
         assert!(matches!(
             my_tun.handle_incoming_packet(WgKind::HandshakeResp(resp)),
             TunnResult::Err(WireGuardError::InvalidAeadTag)
         ));
-
-        their_tun.set_preshared_key(Some(preshared_key));
-        my_tun.set_preshared_key(Some([8; 32]));
-        my_tun.set_preshared_key(Some(preshared_key));
-
-        #[cfg(feature = "mock_instant")]
-        mock_instant::thread_local::MockClock::advance(Duration::from_micros(1));
-
-        let init = create_handshake_init(&mut my_tun);
-        let resp = create_handshake_response(&mut their_tun, init);
-        let keepalive = parse_handshake_resp(&mut my_tun, resp);
-        parse_keepalive(&mut their_tun, keepalive);
     }
 
     /// Test that [`Tunn::update_timers`] does not panic if clock jumps back.
