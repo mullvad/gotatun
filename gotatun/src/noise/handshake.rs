@@ -506,12 +506,11 @@ impl Handshake {
         self.previous = HandshakeState::None;
     }
 
-    /// Update the preshared key and invalidate handshake state derived from the previous value.
+    /// Store the preshared key used by future handshakes.
+    ///
+    /// Any in-flight handshake and established sessions are deliberately left untouched.
     pub(crate) fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
         self.params.set_preshared_key(preshared_key);
-        // Invalidate in-flight handshakes
-        self.state = HandshakeState::None;
-        self.previous = HandshakeState::None;
     }
 
     /// Get the preshared key
