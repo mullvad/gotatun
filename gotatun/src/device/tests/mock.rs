@@ -25,8 +25,10 @@ use tokio::sync::{
     mpsc::{self, Receiver, Sender},
 };
 use tokio_stream::wrappers::BroadcastStream;
-use x25519_dalek::{PublicKey, StaticSecret};
+use x25519_dalek::StaticSecret;
 use zerocopy::IntoBytes;
+
+use crate::key::PeerPublicKey;
 
 use crate::{
     device::{Device, DeviceBuilder, Peer},
@@ -127,14 +129,11 @@ pub async fn device_pair() -> (MockDevice, MockDevice, MockEavesdropper) {
     let privkey_a = StaticSecret::random();
     let privkey_b = StaticSecret::random();
 
-    let pubkey_a = PublicKey::from(&privkey_a);
-    let pubkey_b = PublicKey::from(&privkey_b);
-
-    let peer_a = Peer::new(pubkey_a)
+    let peer_a = Peer::new(PeerPublicKey::from_secret(&privkey_a))
         .with_endpoint((endpoint_a, port).into())
         .with_allowed_ip(Ipv4Network::new(Ipv4Addr::UNSPECIFIED, 0).unwrap().into());
 
-    let peer_b = Peer::new(pubkey_b)
+    let peer_b = Peer::new(PeerPublicKey::from_secret(&privkey_b))
         .with_endpoint((endpoint_b, port).into())
         .with_allowed_ip(Ipv4Network::new(Ipv4Addr::UNSPECIFIED, 0).unwrap().into());
 

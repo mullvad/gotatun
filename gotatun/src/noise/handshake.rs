@@ -11,6 +11,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::crypto::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
+use crate::key::PeerPublicKey;
+use crate::noise::dh;
 use crate::noise::errors::WireGuardError;
 use crate::noise::index_table::{Index, IndexTable};
 use crate::noise::session::Session;
@@ -244,11 +246,13 @@ struct NoiseParams {
     /// Our static public key
     static_public: x25519::PublicKey,
     /// Our static private key
-    static_private: x25519::StaticSecret,
+    static_private: dh::StaticSecret,
     /// Static public key of the other party
-    peer_static_public: x25519::PublicKey,
-    /// A shared key = DH(`static_private`, `peer_static_public`)
-    static_shared: x25519::SharedSecret,
+    peer_static_public: PeerPublicKey,
+    /// A shared key = DH(`static_private`, `peer_static_public`), precomputed
+    /// once per peer. Always contributory, because `peer_static_public` is a
+    /// validated [`PeerPublicKey`].
+    static_shared: dh::SharedSecret,
     /// A pre-computation of HASH("mac1----", `peer_static_public`) for this peer
     sending_mac1_key: [u8; KEY_LEN],
     /// An optional preshared key
@@ -272,7 +276,7 @@ struct HandshakeInitSentState {
     local_index: Index,
     hash: [u8; KEY_LEN],
     chaining_key: [u8; KEY_LEN],
-    ephemeral_private: x25519::ReusableSecret,
+    ephemeral_private: dh::EphemeralSecret,
     time_sent: Instant,
 }
 
@@ -352,8 +356,9 @@ pub struct HalfHandshake {
 /// # Errors
 ///
 /// Returns an error if the packet is malformed or cryptographic validation fails.
-pub fn parse_handshake_anon(
-    static_private: &x25519::StaticSecret,
+#[cfg(any(feature = "device", test))]
+pub(crate) fn parse_handshake_anon(
+    static_private: &dh::StaticSecret,
     static_public: &x25519::PublicKey,
     packet: &WgHandshakeInit,
 ) -> Result<HalfHandshake, WireGuardError> {
@@ -374,8 +379,10 @@ pub fn parse_handshake_anon(
         &[0x01],
     );
     // temp = HMAC(initiator.chaining_key, DH(initiator.ephemeral_private, responder.static_public))
-    let ephemeral_shared = static_private.diffie_hellman(&peer_ephemeral_public);
-    let temp = b2s_hmac(&chaining_key, &ephemeral_shared.to_bytes());
+    let temp = b2s_hmac(
+        &chaining_key,
+        static_private.dh(&peer_ephemeral_public)?.as_bytes(),
+    );
     // initiator.chaining_key = HMAC(temp, 0x1)
     chaining_key = b2s_hmac(&temp, &[0x01]);
     // key = HMAC(temp, initiator.chaining_key || 0x2)
@@ -400,14 +407,15 @@ pub fn parse_handshake_anon(
 impl NoiseParams {
     /// New noise params struct from our secret key, peers public key, and optional preshared key
     fn new(
-        static_private: x25519::StaticSecret,
-        static_public: x25519::PublicKey,
-        peer_static_public: x25519::PublicKey,
+        static_private: dh::StaticSecret,
+        peer_static_public: PeerPublicKey,
         preshared_key: Option<[u8; 32]>,
     ) -> NoiseParams {
-        let static_shared = static_private.diffie_hellman(&peer_static_public);
+        let static_public = static_private.public_key();
+        let static_shared = static_private.dh_validated(&peer_static_public);
 
-        let initial_sending_mac_key = b2s_hash(LABEL_MAC1, peer_static_public.as_bytes());
+        let initial_sending_mac_key =
+            b2s_hash(LABEL_MAC1, peer_static_public.as_public_key().as_bytes());
 
         NoiseParams {
             static_public,
@@ -420,19 +428,16 @@ impl NoiseParams {
     }
 
     /// Set a new private key
-    fn set_static_private(
-        &mut self,
-        static_private: x25519::StaticSecret,
-        static_public: x25519::PublicKey,
-    ) {
-        // Check that the public key indeed matches the private key
-        let check_key = x25519::PublicKey::from(&static_private);
-        assert_eq!(check_key.as_bytes(), static_public.as_bytes());
-
+    fn set_static_private(&mut self, static_private: dh::StaticSecret) {
+        self.static_public = static_private.public_key();
+        self.static_shared = static_private.dh_validated(&self.peer_static_public);
         self.static_private = static_private;
-        self.static_public = static_public;
+    }
 
-        self.static_shared = self.static_private.diffie_hellman(&self.peer_static_public);
+    /// The precomputed static-static shared secret. Always contributory; see
+    /// [`NoiseParams::static_shared`](Self::static_shared) (the field).
+    fn static_shared(&self) -> &dh::SharedSecret {
+        &self.static_shared
     }
 
     fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
@@ -442,18 +447,12 @@ impl NoiseParams {
 
 impl Handshake {
     pub(crate) fn new(
-        static_private: x25519::StaticSecret,
-        static_public: x25519::PublicKey,
-        peer_static_public: x25519::PublicKey,
+        static_private: dh::StaticSecret,
+        peer_static_public: PeerPublicKey,
         index_table: IndexTable,
         preshared_key: Option<[u8; 32]>,
     ) -> Handshake {
-        let params = NoiseParams::new(
-            static_private,
-            static_public,
-            peer_static_public,
-            preshared_key,
-        );
+        let params = NoiseParams::new(static_private, peer_static_public, preshared_key);
 
         Handshake {
             params,
@@ -495,12 +494,8 @@ impl Handshake {
         self.cookies.write_cookie = None;
     }
 
-    pub(crate) fn set_static_private(
-        &mut self,
-        private_key: x25519::StaticSecret,
-        public_key: x25519::PublicKey,
-    ) {
-        self.params.set_static_private(private_key, public_key);
+    pub(crate) fn set_static_private(&mut self, private_key: dh::StaticSecret) {
+        self.params.set_static_private(private_key);
         // Invalidate in-flight handshakes
         self.state = HandshakeState::None;
         self.previous = HandshakeState::None;
@@ -540,11 +535,13 @@ impl Handshake {
             &[0x01],
         );
         // temp = HMAC(initiator.chaining_key, DH(initiator.ephemeral_private, responder.static_public))
-        let ephemeral_shared = self
-            .params
-            .static_private
-            .diffie_hellman(&peer_ephemeral_public);
-        let temp = b2s_hmac(&chaining_key, &ephemeral_shared.to_bytes());
+        let temp = b2s_hmac(
+            &chaining_key,
+            self.params
+                .static_private
+                .dh(&peer_ephemeral_public)?
+                .as_bytes(),
+        );
         // initiator.chaining_key = HMAC(temp, 0x1)
         chaining_key = b2s_hmac(&temp, &[0x01]);
         // key = HMAC(temp, initiator.chaining_key || 0x2)
@@ -561,7 +558,7 @@ impl Handshake {
         )?;
 
         if !constant_time_eq_n(
-            self.params.peer_static_public.as_bytes(),
+            self.params.peer_static_public.as_public_key().as_bytes(),
             &peer_static_public_decrypted,
         ) {
             return Err(WireGuardError::WrongKey);
@@ -570,7 +567,7 @@ impl Handshake {
         // initiator.hash = HASH(initiator.hash || msg.encrypted_static)
         hash = b2s_hash(&hash, packet.encrypted_static.as_bytes());
         // temp = HMAC(initiator.chaining_key, DH(initiator.static_private, responder.static_public))
-        let temp = b2s_hmac(&chaining_key, self.params.static_shared.as_bytes());
+        let temp = b2s_hmac(&chaining_key, self.params.static_shared().as_bytes());
         // initiator.chaining_key = HMAC(temp, 0x1)
         chaining_key = b2s_hmac(&temp, &[0x01]);
         // key = HMAC(temp, initiator.chaining_key || 0x2)
@@ -599,7 +596,7 @@ impl Handshake {
             },
         );
 
-        Ok(self.format_handshake_response(packet.into_bytes()))
+        self.format_handshake_response(packet.into_bytes())
     }
 
     pub(super) fn receive_handshake_response(
@@ -625,20 +622,22 @@ impl Handshake {
         // responder.chaining_key = HMAC(temp, 0x1)
         let mut chaining_key = b2s_hmac(&temp, &[0x01]);
         // temp = HMAC(responder.chaining_key, DH(responder.ephemeral_private, initiator.ephemeral_public))
-        let ephemeral_shared = state
-            .ephemeral_private
-            .diffie_hellman(&unencrypted_ephemeral);
-        let temp = b2s_hmac(&chaining_key, &ephemeral_shared.to_bytes());
+        let temp = b2s_hmac(
+            &chaining_key,
+            state
+                .ephemeral_private
+                .dh(&unencrypted_ephemeral)?
+                .as_bytes(),
+        );
         // responder.chaining_key = HMAC(temp, 0x1)
         chaining_key = b2s_hmac(&temp, &[0x01]);
         // temp = HMAC(responder.chaining_key, DH(responder.ephemeral_private, initiator.static_public))
         let temp = b2s_hmac(
             &chaining_key,
-            &self
-                .params
+            self.params
                 .static_private
-                .diffie_hellman(&unencrypted_ephemeral)
-                .to_bytes(),
+                .dh(&unencrypted_ephemeral)?
+                .as_bytes(),
         );
         // responder.chaining_key = HMAC(temp, 0x1)
         chaining_key = b2s_hmac(&temp, &[0x01]);
@@ -718,7 +717,10 @@ impl Handshake {
             return Err(WireGuardError::WrongIndex);
         }
         // msg.encrypted_cookie = XAEAD(HASH(LABEL_COOKIE || responder.static_public), msg.nonce, cookie, last_received_msg.mac1)
-        let key = b2s_hash(LABEL_COOKIE, self.params.peer_static_public.as_bytes()); // TODO: pre-compute
+        let key = b2s_hash(
+            LABEL_COOKIE,
+            self.params.peer_static_public.as_public_key().as_bytes(),
+        ); // TODO: pre-compute
 
         let payload = Payload {
             aad: &mac1,
@@ -762,9 +764,12 @@ impl Handshake {
         let mut chaining_key = INITIAL_CHAIN_KEY;
         // initiator.hash = HASH(HASH(initiator.chaining_key || IDENTIFIER) || responder.static_public)
         let mut hash = INITIAL_CHAIN_HASH;
-        hash = b2s_hash(&hash, self.params.peer_static_public.as_bytes());
+        hash = b2s_hash(
+            &hash,
+            self.params.peer_static_public.as_public_key().as_bytes(),
+        );
         // initiator.ephemeral_private = DH_GENERATE()
-        let ephemeral_private = x25519::ReusableSecret::random_from_rng(rand_core::OsRng);
+        let ephemeral_private = dh::EphemeralSecret::random();
         // msg.message_type = 1
         // msg.reserved_zero = { 0, 0, 0 }
         // msg.sender_index = little_endian(initiator.sender_index)
@@ -772,7 +777,7 @@ impl Handshake {
         // msg.unencrypted_ephemeral = DH_PUBKEY(initiator.ephemeral_private)
         handshake
             .unencrypted_ephemeral
-            .copy_from_slice(x25519::PublicKey::from(&ephemeral_private).as_bytes());
+            .copy_from_slice(ephemeral_private.public_key().as_bytes());
         // initiator.hash = HASH(initiator.hash || msg.unencrypted_ephemeral)
         hash = b2s_hash(&hash, &handshake.unencrypted_ephemeral);
         // temp = HMAC(initiator.chaining_key, msg.unencrypted_ephemeral)
@@ -782,8 +787,12 @@ impl Handshake {
             &[0x01],
         );
         // temp = HMAC(initiator.chaining_key, DH(initiator.ephemeral_private, responder.static_public))
-        let ephemeral_shared = ephemeral_private.diffie_hellman(&self.params.peer_static_public);
-        let temp = b2s_hmac(&chaining_key, &ephemeral_shared.to_bytes());
+        let temp = b2s_hmac(
+            &chaining_key,
+            ephemeral_private
+                .dh_validated(&self.params.peer_static_public)
+                .as_bytes(),
+        );
         // initiator.chaining_key = HMAC(temp, 0x1)
         chaining_key = b2s_hmac(&temp, &[0x01]);
         // key = HMAC(temp, initiator.chaining_key || 0x2)
@@ -799,7 +808,7 @@ impl Handshake {
         // initiator.hash = HASH(initiator.hash || msg.encrypted_static)
         hash = b2s_hash(&hash, handshake.encrypted_static.as_bytes());
         // temp = HMAC(initiator.chaining_key, DH(initiator.static_private, responder.static_public))
-        let temp = b2s_hmac(&chaining_key, self.params.static_shared.as_bytes());
+        let temp = b2s_hmac(&chaining_key, self.params.static_shared().as_bytes());
         // initiator.chaining_key = HMAC(temp, 0x1)
         chaining_key = b2s_hmac(&temp, &[0x01]);
         // key = HMAC(temp, initiator.chaining_key || 0x2)
@@ -836,7 +845,7 @@ impl Handshake {
     fn format_handshake_response(
         &mut self,
         buf: crate::packet::Packet,
-    ) -> (crate::packet::Packet<WgHandshakeResp>, Session) {
+    ) -> Result<(crate::packet::Packet<WgHandshakeResp>, Session), WireGuardError> {
         let state = std::mem::replace(&mut self.state, HandshakeState::None);
         let (mut chaining_key, mut hash, peer_ephemeral_public, peer_index) = match state {
             HandshakeState::InitReceived {
@@ -851,7 +860,7 @@ impl Handshake {
         };
 
         // responder.ephemeral_private = DH_GENERATE()
-        let ephemeral_private = x25519::ReusableSecret::random_from_rng(rand_core::OsRng);
+        let ephemeral_private = dh::EphemeralSecret::random();
         let local_index = self.index_table.new_index();
         let local_index_val = local_index.value();
         // msg.message_type = 2
@@ -859,7 +868,7 @@ impl Handshake {
         let mut resp = WgHandshakeResp::new(
             local_index_val,
             peer_index,
-            *x25519::PublicKey::from(&ephemeral_private).as_bytes(),
+            *ephemeral_private.public_key().as_bytes(),
         );
         // msg.sender_index = little_endian(responder.sender_index)
         // msg.receiver_index = little_endian(initiator.sender_index)
@@ -871,16 +880,18 @@ impl Handshake {
         // responder.chaining_key = HMAC(temp, 0x1)
         chaining_key = b2s_hmac(&temp, &[0x01]);
         // temp = HMAC(responder.chaining_key, DH(responder.ephemeral_private, initiator.ephemeral_public))
-        let ephemeral_shared = ephemeral_private.diffie_hellman(&peer_ephemeral_public);
-        let temp = b2s_hmac(&chaining_key, &ephemeral_shared.to_bytes());
+        let temp = b2s_hmac(
+            &chaining_key,
+            ephemeral_private.dh(&peer_ephemeral_public)?.as_bytes(),
+        );
         // responder.chaining_key = HMAC(temp, 0x1)
         chaining_key = b2s_hmac(&temp, &[0x01]);
         // temp = HMAC(responder.chaining_key, DH(responder.ephemeral_private, initiator.static_public))
         let temp = b2s_hmac(
             &chaining_key,
-            &ephemeral_private
-                .diffie_hellman(&self.params.peer_static_public)
-                .to_bytes(),
+            ephemeral_private
+                .dh_validated(&self.params.peer_static_public)
+                .as_bytes(),
         );
         // responder.chaining_key = HMAC(temp, 0x1)
         chaining_key = b2s_hmac(&temp, &[0x01]);
@@ -916,8 +927,39 @@ impl Handshake {
 
         let packet = buf.overwrite_with(&resp);
 
-        (packet, Session::new(local_index, peer_index, temp2, temp3))
+        Ok((packet, Session::new(local_index, peer_index, temp2, temp3)))
     }
+}
+
+/// Every low-order point on Curve25519, decoded from the same base64 form as the
+/// WireGuard kernel selftest (`tools/testing/selftests/wireguard/netns.sh`). Any
+/// clamped scalar multiplied by one of these yields the all-zero
+/// (non-contributory) shared secret.
+///
+/// This is every low-order point on the curve, but not every 32-byte input that
+/// produces an all-zero DH result (Curve25519's twist has its own low-order
+/// points). That is fine: the list is test-only, and the production check
+/// ([`dh::SharedSecret`]) rejects on the all-zero output itself, catching those
+/// too.
+#[cfg(test)]
+pub(crate) fn low_order_keys() -> [[u8; 32]; 7] {
+    use base64::Engine as _;
+    [
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "4Ot6fDtBuK4WVuP68Z/EatoJjeucMrH9hmIFFl9JuAA=",
+        "X5yVvKNQjCSx0LFVnIPvWwREXMRYHI6G2CJO3dCfEVc=",
+        "7P///////////////////////////////////////38=",
+        "7f///////////////////////////////////////38=",
+        "7v///////////////////////////////////////38=",
+    ]
+    .map(|encoded| {
+        base64::prelude::BASE64_STANDARD
+            .decode(encoded)
+            .expect("valid base64")
+            .try_into()
+            .expect("32-byte key")
+    })
 }
 
 #[cfg(test)]
@@ -976,5 +1018,62 @@ mod tests {
 
         aead_chacha20_open(&mut [], &key, counter, &encrypted_nothing, &aad)
             .expect("Should open what we just sealed");
+    }
+
+    // Build a handshake initiation that `parse_handshake_anon` accepts, sealing
+    // `encrypted_static` under the key an attacker derives from a low-order
+    // ephemeral (whose `es` DH is the publicly-known all-zero value). This
+    // replays the `parse_handshake_anon` key derivation.
+    fn craft_anon_initiation_with_low_order_ephemeral(
+        responder_public: &x25519::PublicKey,
+        ephemeral: [u8; 32],
+    ) -> WgHandshakeInit {
+        let mut chaining_key = INITIAL_CHAIN_KEY;
+        let mut hash = b2s_hash(&INITIAL_CHAIN_HASH, responder_public.as_bytes());
+        hash = b2s_hash(&hash, &ephemeral);
+        chaining_key = b2s_hmac(&b2s_hmac(&chaining_key, &ephemeral), &[0x01]);
+        // es is all-zero for a low-order ephemeral.
+        let temp = b2s_hmac(&chaining_key, &[0u8; 32]);
+        chaining_key = b2s_hmac(&temp, &[0x01]);
+        let key = b2s_hmac2(&temp, &chaining_key, &[0x02]);
+
+        let mut packet = WgHandshakeInit::new();
+        packet.unencrypted_ephemeral = ephemeral;
+        aead_chacha20_seal(
+            packet.encrypted_static.as_mut_bytes(),
+            &key,
+            0,
+            &[7u8; 32],
+            &hash,
+        );
+        packet
+    }
+
+    // Tests the receiving direction: a remote initiator sends us a low-order public ephemeral key.
+    //
+    // Such an ephemeral yields a non-contributory (all-zero) DH; it must be
+    // rejected. The peer's ephemeral key is attacker-controlled and arrives on
+    // every handshake, so unlike the peer static key it cannot be validated up
+    // front and must be checked here at runtime.
+    //
+    // The sending direction is handled differently: a low-order peer *static*
+    // key is rejected up front when constructing a `PeerPublicKey`, so it can
+    // never reach the initiation code. See the `rejects_low_order_keys` test in
+    // `crate::key`.
+    #[test]
+    fn rejects_low_order_ephemeral_in_initiation() {
+        let responder_private =
+            dh::StaticSecret::from(x25519::StaticSecret::random_from_rng(rand_core::OsRng));
+        let responder_public = responder_private.public_key();
+
+        for low_order in low_order_keys() {
+            let packet =
+                craft_anon_initiation_with_low_order_ephemeral(&responder_public, low_order);
+            let result = parse_handshake_anon(&responder_private, &responder_public, &packet);
+            assert!(
+                matches!(result, Err(WireGuardError::InvalidSharedSecret)),
+                "point {low_order:02x?}: expected InvalidSharedSecret, got {result:?}"
+            );
+        }
     }
 }

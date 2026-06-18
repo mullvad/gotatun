@@ -38,6 +38,8 @@ use tokio::join;
 use tokio::sync::RwLock;
 use tokio::sync::{Mutex, watch};
 
+use crate::key::PeerPublicKey;
+use crate::noise::dh;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
 use crate::noise::rate_limiter::RateLimiter;
@@ -117,7 +119,7 @@ pub(crate) struct DeviceState<T: DeviceTransports> {
     /// MTU watcher of the TUN device.
     tun_rx_mtu: MtuWatcher,
 
-    peers: HashMap<x25519::PublicKey, Arc<Mutex<PeerState>>>,
+    peers: HashMap<PeerPublicKey, Arc<Mutex<PeerState>>>,
     peers_by_ip: AllowedIps<Arc<Mutex<PeerState>>>,
     peers_by_idx: parking_lot::Mutex<HashMap<u32, Arc<Mutex<PeerState>>>>,
     index_table: IndexTable,
@@ -438,11 +440,10 @@ impl<T: DeviceTransports> DeviceState<T> {
         let rate_limiter = Arc::new(RateLimiter::new(&public_key, HANDSHAKE_RATE_LIMIT));
 
         for peer in self.peers.values_mut() {
-            peer.lock().await.tunnel.set_static_private(
-                private_key.clone(),
-                public_key,
-                Arc::clone(&rate_limiter),
-            )
+            peer.lock()
+                .await
+                .tunnel
+                .set_static_private(private_key.clone(), Arc::clone(&rate_limiter))
         }
 
         self.key_pair = Some((private_key, public_key));
@@ -569,7 +570,12 @@ impl<T: DeviceTransports> DeviceState<T> {
             let (private_key, public_key) = device.key_pair.clone().expect("Key not set");
             let rate_limiter = device.rate_limiter.clone().unwrap();
             let tun_mtu = device.tun_rx_mtu.clone();
-            (private_key, public_key, rate_limiter, tun_mtu)
+            (
+                dh::StaticSecret::from(private_key),
+                public_key,
+                rate_limiter,
+                tun_mtu,
+            )
         };
 
         while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {

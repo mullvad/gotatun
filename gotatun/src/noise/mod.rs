@@ -21,12 +21,14 @@ pub mod index_table;
 /// Rate limiting for handshake initiation packets.
 pub mod rate_limiter;
 
+pub(crate) mod dh;
 mod session;
 mod timers;
 
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use zerocopy::IntoBytes;
 
+use crate::key::PeerPublicKey;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::index_table::IndexTable;
@@ -92,7 +94,7 @@ impl Tunn<StdRng> {
     /// Create a new tunnel using own private key and the peer public key.
     pub fn new(
         static_private: x25519::StaticSecret,
-        peer_static_public: x25519::PublicKey,
+        peer_static_public: PeerPublicKey,
         preshared_key: Option<[u8; 32]>,
         persistent_keepalive: Option<u16>,
         index_table: IndexTable,
@@ -114,19 +116,18 @@ impl<R: RngCore + Send> Tunn<R> {
     /// Create a new tunnel using own private key and the peer public key.
     pub fn new_with_rng(
         static_private: x25519::StaticSecret,
-        peer_static_public: x25519::PublicKey,
+        peer_static_public: PeerPublicKey,
         preshared_key: Option<[u8; 32]>,
         persistent_keepalive: Option<u16>,
         index_table: IndexTable,
         rate_limiter: Arc<RateLimiter>,
         jitter_rng: R,
     ) -> Self {
-        let static_public = x25519::PublicKey::from(&static_private);
+        let static_private = dh::StaticSecret::from(static_private);
 
         Tunn {
             handshake: Handshake::new(
                 static_private,
-                static_public,
                 peer_static_public,
                 index_table,
                 preshared_key,
@@ -154,12 +155,11 @@ impl<R: RngCore + Send> Tunn<R> {
     pub fn set_static_private(
         &mut self,
         static_private: x25519::StaticSecret,
-        static_public: x25519::PublicKey,
         rate_limiter: Arc<RateLimiter>,
     ) {
         self.rate_limiter = rate_limiter;
         self.handshake
-            .set_static_private(static_private, static_public);
+            .set_static_private(dh::StaticSecret::from(static_private));
         for s in &mut self.sessions {
             *s = None;
         }
@@ -545,7 +545,7 @@ mod tests {
         let rate_limiter = Arc::new(RateLimiter::new(&my_public_key, HANDSHAKE_RATE_LIMIT));
         let my_tun = Tunn::new(
             my_secret_key,
-            their_public_key,
+            PeerPublicKey::new(their_public_key).unwrap(),
             None,
             None,
             IndexTable::from_os_rng(),
@@ -555,7 +555,7 @@ mod tests {
         let rate_limiter = Arc::new(RateLimiter::new(&their_public_key, HANDSHAKE_RATE_LIMIT));
         let their_tun = Tunn::new(
             their_secret_key,
-            my_public_key,
+            PeerPublicKey::new(my_public_key).unwrap(),
             None,
             None,
             IndexTable::from_os_rng(),
@@ -998,7 +998,7 @@ mod tests {
         let rate_limiter = Arc::new(RateLimiter::new(&my_public_key, HANDSHAKE_RATE_LIMIT));
         let mut my_tun = Tunn::new_with_rng(
             my_secret_key,
-            their_public_key,
+            PeerPublicKey::new(their_public_key).unwrap(),
             None,
             None,
             IndexTable::from_os_rng(),
