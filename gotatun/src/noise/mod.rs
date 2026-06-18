@@ -591,24 +591,6 @@ mod tests {
         handshake_resp
     }
 
-    fn parse_handshake_resp(
-        tun: &mut Tunn,
-        handshake_resp: Packet<WgHandshakeResp>,
-    ) -> Packet<WgData> {
-        let keepalive = tun.handle_incoming_packet(WgKind::HandshakeResp(handshake_resp));
-        assert!(matches!(keepalive, TunnResult::WriteToNetwork(_)));
-
-        let TunnResult::WriteToNetwork(keepalive) = keepalive else {
-            unreachable!("expected WriteToNetwork")
-        };
-
-        let WgKind::Data(keepalive) = keepalive else {
-            unreachable!("expected WgData, got {keepalive:?}");
-        };
-
-        keepalive
-    }
-
     fn parse_keepalive(tun: &mut Tunn, keepalive: Packet<WgData>) {
         let result = tun.handle_incoming_packet(WgKind::Data(keepalive));
         assert!(matches!(result, TunnResult::WriteToTunnel(p) if p.is_empty()));
@@ -621,10 +603,19 @@ mod tests {
     }
 
     fn complete_handshake(my_tun: &mut Tunn, their_tun: &mut Tunn) {
+        let result = try_handshake(my_tun, their_tun);
+        let TunnResult::WriteToNetwork(WgKind::Data(keepalive)) = result else {
+            panic!("expected a keepalive packet after the handshake, got {result:?}");
+        };
+        parse_keepalive(their_tun, keepalive);
+    }
+
+    /// Drive a handshake up to the point where the initiator processes the
+    /// response, returning that result so callers can assert success or failure.
+    fn try_handshake(my_tun: &mut Tunn, their_tun: &mut Tunn) -> TunnResult {
         let init = create_handshake_init(my_tun);
         let resp = create_handshake_response(their_tun, init);
-        let keepalive = parse_handshake_resp(my_tun, resp);
-        parse_keepalive(their_tun, keepalive);
+        my_tun.handle_incoming_packet(WgKind::HandshakeResp(resp))
     }
 
     fn create_ipv4_udp_packet() -> Packet<Ipv4> {
@@ -757,9 +748,11 @@ mod tests {
     #[test]
     fn full_handshake() {
         let (mut my_tun, mut their_tun) = create_two_tuns();
-        let init = create_handshake_init(&mut my_tun);
-        let resp = create_handshake_response(&mut their_tun, init);
-        let _keepalive = parse_handshake_resp(&mut my_tun, resp);
+        let result = try_handshake(&mut my_tun, &mut their_tun);
+        assert!(
+            matches!(result, TunnResult::WriteToNetwork(WgKind::Data(_))),
+            "expected a keepalive after the handshake, got {result:?}"
+        );
     }
 
     #[test]
@@ -839,14 +832,31 @@ mod tests {
         assert_packet_roundtrip(&mut my_tun, &mut their_tun);
     }
 
-    /// Changing the preshared key must not tear down the established session: the
-    /// PSK is not part of its transport keys, so traffic keeps flowing even
-    /// though `their_tun` never learned the new key.
+    /// Changing the preshared key only affects the next session, never the
+    /// current one. The PSK is not part of the established session's transport
+    /// keys, so traffic keeps flowing even though `their_tun` never learned the
+    /// new key. The next handshake does mix it in, so a one-sided change makes
+    /// the rekey fail to authenticate.
     #[test]
-    fn set_preshared_key_keeps_existing_session() {
+    fn set_preshared_key_only_affects_next_session() {
         let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
+
+        // Only one side adopts a new key.
         my_tun.set_preshared_key(Some([7; 32]));
+
+        // The established session is unaffected and keeps working.
         assert_packet_roundtrip(&mut my_tun, &mut their_tun);
+
+        // A second handshake needs a strictly newer timestamp than the first.
+        #[cfg(feature = "mock_instant")]
+        MockClock::advance(Duration::from_micros(1));
+
+        // The next handshake mixes in the new key, so the diverged PSK breaks it.
+        let result = try_handshake(&mut my_tun, &mut their_tun);
+        assert!(
+            matches!(result, TunnResult::Err(WireGuardError::InvalidAeadTag)),
+            "expected the rekey to fail on the diverged PSK, got {result:?}"
+        );
     }
 
     /// Send one IP packet over the established session and assert it round-trips.
@@ -861,25 +871,38 @@ mod tests {
         assert_eq!(sent.as_bytes(), received.as_bytes());
     }
 
-    /// A stored preshared key is mixed into the next handshake: matching keys on
-    /// both sides complete it, a one-sided key fails to authenticate.
+    /// A handshake completes when both sides set the same preshared key.
     #[test]
-    fn set_preshared_key_applies_to_next_handshake() {
-        let preshared_key = [7; 32];
-
+    fn handshake_completes_with_matching_preshared_key() {
         let (mut my_tun, mut their_tun) = create_two_tuns();
-        my_tun.set_preshared_key(Some(preshared_key));
-        their_tun.set_preshared_key(Some(preshared_key));
+        my_tun.set_preshared_key(Some([7; 32]));
+        their_tun.set_preshared_key(Some([7; 32]));
         complete_handshake(&mut my_tun, &mut their_tun);
+    }
 
+    /// A handshake fails to authenticate when only one side set a preshared key.
+    #[test]
+    fn handshake_fails_with_one_sided_preshared_key() {
         let (mut my_tun, mut their_tun) = create_two_tuns();
-        my_tun.set_preshared_key(Some(preshared_key));
-        let init = create_handshake_init(&mut my_tun);
-        let resp = create_handshake_response(&mut their_tun, init);
-        assert!(matches!(
-            my_tun.handle_incoming_packet(WgKind::HandshakeResp(resp)),
-            TunnResult::Err(WireGuardError::InvalidAeadTag)
-        ));
+        my_tun.set_preshared_key(Some([7; 32]));
+        let result = try_handshake(&mut my_tun, &mut their_tun);
+        assert!(
+            matches!(result, TunnResult::Err(WireGuardError::InvalidAeadTag)),
+            "expected the handshake to fail on the one-sided PSK, got {result:?}"
+        );
+    }
+
+    /// A handshake fails to authenticate when each side set a different preshared key.
+    #[test]
+    fn handshake_fails_with_different_preshared_key() {
+        let (mut my_tun, mut their_tun) = create_two_tuns();
+        my_tun.set_preshared_key(Some([7; 32]));
+        their_tun.set_preshared_key(Some([4; 32]));
+        let result = try_handshake(&mut my_tun, &mut their_tun);
+        assert!(
+            matches!(result, TunnResult::Err(WireGuardError::InvalidAeadTag)),
+            "expected the handshake to fail on the one-sided PSK, got {result:?}"
+        );
     }
 
     /// Test that [`Tunn::update_timers`] does not panic if clock jumps back.
@@ -1029,10 +1052,7 @@ mod tests {
             ..TimerParams::default()
         });
 
-        let init = create_handshake_init(&mut my_tun);
-        let resp = create_handshake_response(&mut their_tun, init);
-        let keepalive = parse_handshake_resp(&mut my_tun, resp);
-        parse_keepalive(&mut their_tun, keepalive);
+        complete_handshake(&mut my_tun, &mut their_tun);
 
         // Receive a data packet at t = 1 s without answering. The passive keepalive
         // should fire KEEPALIVE (rather than the default 10 s) after the data arrived.
