@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+
+## [0.7.2] - 2026-06-25
 ### Added
 - Add `noise::TimerParams` for tuning WireGuard timers. This is useful for obfuscation, but note
   that tweaking timers will cause the tunnel to deviate from the WireGuard spec.
