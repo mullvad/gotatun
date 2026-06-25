@@ -115,22 +115,22 @@ impl UdpSocket {
         // Failing to set buffer sizes is not a fatal error - the tunnel will most likely work just
         // fine, even if not as performant as possible. In that case it is still a good idea to
         // tweak the buffer sizes.
-        if let Some(recv_buffer_size) = opts.recv_buffer_size {
-            if let Err(err) = udp_sock.set_recv_buffer_size(recv_buffer_size) {
-                if cfg!(debug_assertions) {
-                    return Err(err);
-                } else {
-                    log::error!("Failed to change UDP socket receive buffer size: {err}");
-                }
+        if let Some(recv_buffer_size) = opts.recv_buffer_size
+            && let Err(err) = udp_sock.set_recv_buffer_size(recv_buffer_size)
+        {
+            if cfg!(debug_assertions) {
+                return Err(err);
+            } else {
+                log::error!("Failed to change UDP socket receive buffer size: {err}");
             }
         }
-        if let Some(send_buffer_size) = opts.send_buffer_size {
-            if let Err(err) = udp_sock.set_send_buffer_size(send_buffer_size) {
-                if cfg!(debug_assertions) {
-                    return Err(err);
-                } else {
-                    log::error!("Failed to change UDP socket send buffer size: {err}");
-                }
+        if let Some(send_buffer_size) = opts.send_buffer_size
+            && let Err(err) = udp_sock.set_send_buffer_size(send_buffer_size)
+        {
+            if cfg!(debug_assertions) {
+                return Err(err);
+            } else {
+                log::error!("Failed to change UDP socket send buffer size: {err}");
             }
         }
 

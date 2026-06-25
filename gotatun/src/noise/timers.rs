@@ -219,15 +219,14 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                 // Ref: https://github.com/torvalds/linux/blob/9716c086c8e8b141d35aa61f2e96a2e83de212a7/drivers/net/wireguard/timers.c#L215-L220
                 self.timers[TimePersistentKeepalive] = time;
             }
-            TimeLastDataPacketReceived => {
-                if self.timers.want_keepalive.is_none() {
-                    self.timers.keepalive_timeout = self.sample_timer(|p| &p.keepalive_timeout);
-                    self.timers.want_keepalive = Some(time);
-                }
-                // The Linux kernel schedules an extra keepalive here if one is already queued:
-                // https://github.com/torvalds/linux/blob/9716c086c8e8b141d35aa61f2e96a2e83de212a7/drivers/net/wireguard/timers.c#L157-L166
-                // This seems unnecessary?
+            TimeLastDataPacketReceived if self.timers.want_keepalive.is_none() => {
+                self.timers.keepalive_timeout = self.sample_timer(|p| &p.keepalive_timeout);
+                self.timers.want_keepalive = Some(time);
             }
+            // The Linux kernel schedules an extra keepalive here if one is already queued:
+            // https://github.com/torvalds/linux/blob/9716c086c8e8b141d35aa61f2e96a2e83de212a7/drivers/net/wireguard/timers.c#L157-L166
+            // This seems unnecessary?
+            TimeLastDataPacketReceived => {}
             TimeLastPacketSent => {
                 self.timers.want_keepalive = None;
 
@@ -235,12 +234,9 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                 // Ref: https://github.com/torvalds/linux/blob/9716c086c8e8b141d35aa61f2e96a2e83de212a7/drivers/net/wireguard/timers.c#L215-L220
                 self.timers[TimePersistentKeepalive] = time;
             }
-            TimeLastDataPacketSent => {
-                if self.timers.want_handshake.is_none() {
-                    self.timers.new_handshake_timeout =
-                        self.sample_timer(|p| &p.new_handshake_timeout);
-                    self.timers.want_handshake = Some(time);
-                }
+            TimeLastDataPacketSent if self.timers.want_handshake.is_none() => {
+                self.timers.new_handshake_timeout = self.sample_timer(|p| &p.new_handshake_timeout);
+                self.timers.want_handshake = Some(time);
             }
             _ => {}
         }

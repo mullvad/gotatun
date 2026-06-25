@@ -164,10 +164,10 @@ impl UapiServer {
         let api_listener =
             UnixListener::bind(&path).map_err(|e| eyre!("Failed to bind unix socket: {e}"))?;
 
-        if uid.is_some() || gid.is_some() {
-            if let Err(err) = nix::unistd::chown(std::path::Path::new(&path), uid, gid) {
-                log::warn!("Failed to change owner of UDS: {err}");
-            }
+        if (uid.is_some() || gid.is_some())
+            && let Err(err) = nix::unistd::chown(std::path::Path::new(&path), uid, gid)
+        {
+            log::warn!("Failed to change owner of UDS: {err}");
         }
 
         let (tx, rx) = UapiServer::new();
@@ -287,10 +287,10 @@ async fn run_uapi_protocol(
         let line = match reader.next_line().await {
             Ok(Some(line)) => line,
             Ok(None) | Err(_) => {
-                if !buf.is_empty() {
-                    if let Err(e) = dispatch_request(&client, &mut w, &buf).await {
-                        log::error!("Failed to handle UAPI request: {e:#}");
-                    }
+                if !buf.is_empty()
+                    && let Err(e) = dispatch_request(&client, &mut w, &buf).await
+                {
+                    log::error!("Failed to handle UAPI request: {e:#}");
                 }
                 return;
             }
@@ -346,10 +346,10 @@ fn run_uapi_protocol_sync(client: UapiClient, r: impl Read, mut w: impl Write) {
 
     for line in r.lines() {
         let Ok(line) = line else {
-            if !buf.is_empty() {
-                if let Err(e) = dispatch_request_sync(&client, &mut w, &buf) {
-                    log::error!("Failed to handle UAPI request: {e:#}");
-                }
+            if !buf.is_empty()
+                && let Err(e) = dispatch_request_sync(&client, &mut w, &buf)
+            {
+                log::error!("Failed to handle UAPI request: {e:#}");
             }
             return;
         };
