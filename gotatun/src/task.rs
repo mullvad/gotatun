@@ -8,6 +8,7 @@
 //   Copyright (c) Mullvad VPN AB. All rights reserved.
 //
 // SPDX-License-Identifier: MPL-2.0
+#![cfg(any(feature = "device", feature = "tun"))]
 
 use std::pin::Pin;
 use tokio::task::JoinHandle;
@@ -48,7 +49,6 @@ where
 }
 
 impl Task {
-    #[cfg(any(feature = "device", feature = "tun"))]
     #[track_caller]
     pub fn spawn<Fut, O>(name: &'static str, fut: Fut) -> Self
     where
@@ -65,6 +65,21 @@ impl Task {
             handle: Some(handle),
         }
     }
+
+    #[cfg(feature = "device")]
+    pub async fn stop(mut self) {
+        if let Some(handle) = self.handle.take() {
+            handle.abort();
+            match handle.await {
+                Err(e) if e.is_panic() => {
+                    log::error!("task {} panicked: {e:#?}", self.name);
+                }
+                _ => {
+                    log::trace!("stopped task {}", self.name);
+                }
+            }
+        }
+    }
 }
 
 impl Future for Task {
@@ -79,23 +94,6 @@ impl Future for Task {
             .map(Pin::new)
             .expect("Handle is Some until task is stopped or dropped")
             .poll(cx)
-    }
-}
-
-impl Task {
-    #[cfg(feature = "device")]
-    pub async fn stop(mut self) {
-        if let Some(handle) = self.handle.take() {
-            handle.abort();
-            match handle.await {
-                Err(e) if e.is_panic() => {
-                    log::error!("task {} panicked: {e:#?}", self.name);
-                }
-                _ => {
-                    log::trace!("stopped task {}", self.name);
-                }
-            }
-        }
     }
 }
 
