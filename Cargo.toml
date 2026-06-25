@@ -10,7 +10,7 @@ authors = [
   "Mullvad VPN",
 ]
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.95"
 readme = "README.md"
 repository = "https://github.com/mullvad/gotatun"
 license = "MPL-2.0"
