@@ -620,15 +620,10 @@ impl SetPeer {
             replace_allowed_ips,
         } = &mut set_peer;
 
-        loop {
-            // loop until we peek an empty line or end-of-string
-            let Some(line) = lines.peek() else {
-                break;
-            };
-            if line.is_empty() {
-                break;
-            }
-
+        // loop until we peek an empty line or end-of-string
+        while let Some(line) = lines.peek()
+            && !line.is_empty()
+        {
             let (k, v) = to_key_value(line)?;
 
             match k {
