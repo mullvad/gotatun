@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Add `noise::TimerParams` for tuning WireGuard timers. This is useful for obfuscation, but note
   that tweaking timers will cause the tunnel to deviate from the WireGuard spec.
+- Implement `AsRef<[u8]>` for `Packet<[u8]>`
 
 ### Changed
 - Enlarge the anti-replay sliding window from 1024 to 8192 packets, matching the
