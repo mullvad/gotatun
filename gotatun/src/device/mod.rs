@@ -129,6 +129,12 @@ pub(crate) struct DeviceState<T: DeviceTransports> {
     udp_factory: T::UdpTransportFactory,
     connection: Option<Connection<T>>,
 
+    /// Whether the device has been suspended via [`Device::suspend`].
+    ///
+    /// While suspended, the [`Connection`] (and all its tasks) is torn down so no
+    /// traffic flows, but peers, keys, and config are retained for [`Device::resume`].
+    suspended: bool,
+
     /// The task that responds to API requests.
     api: Option<Task>,
 
@@ -282,6 +288,68 @@ impl<T: DeviceTransports> Device<T> {
         if let Some(connection) = device.connection.take() {
             connection.stop().await;
         }
+    }
+
+    /// Suspend the device, stopping all tunnel activity.
+    ///
+    /// This tears down the connection and all its background tasks (timers,
+    /// inbound, and outbound I/O), so no keepalives, handshakes, or data packets are
+    /// sent or received. Peers, keys, and configuration are retained, and the device
+    /// can be brought back with [`Device::resume`].
+    ///
+    /// This is primarily intended for platforms such as iOS, where the host process
+    /// may be suspended by the system: an explicit suspend stops the timers (whose
+    /// clock keeps advancing while suspended) from waking the process and flooding
+    /// the link on resume.
+    ///
+    /// Calling this on an already-suspended device is a no-op.
+    pub async fn suspend(&self) {
+        tracing::debug!("Suspending device");
+
+        let mut device = self.inner.write().await;
+
+        if device.suspended {
+            return;
+        }
+
+        if let Some(connection) = device.connection.take() {
+            connection.stop().await;
+        }
+
+        device.suspended = true;
+    }
+
+    /// Resume a device that was suspended with [`Device::suspend`].
+    ///
+    /// This rebuilds the connection (rebinding sockets and respawning tasks).
+    /// Existing sessions are cleared first, so the tunnel performs a fresh handshake
+    /// rather than reusing a stale session.
+    ///
+    /// Calling this on a device that is not suspended is a no-op.
+    pub async fn resume(&self) -> Result<(), Error> {
+        tracing::debug!("Resuming device");
+
+        {
+            let mut device = self.inner.write().await;
+
+            if !device.suspended {
+                return Ok(());
+            }
+
+            // Force a fresh handshake on resume by dropping any existing sessions.
+            for peer in device.peers.values() {
+                peer.lock().await.reset();
+            }
+
+            device.suspended = false;
+
+            // Nothing to bring up if the device has no peers (and therefore no key).
+            if device.peers.is_empty() {
+                return Ok(());
+            }
+        }
+
+        Connection::set_up(self.inner.clone()).await
     }
 
     /// Wait until an unrecoverable error occurs.

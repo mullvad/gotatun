@@ -6,7 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-
+### Added
+- `Device::suspend` and `Device::resume` to pause and resume all tunnel activity.
+  Suspending stops the timers, inbound, and outbound tasks (no keepalives, handshakes,
+  or data), while retaining peers and config. Resuming rebuilds the connection and
+  forces a fresh handshake. Intended for platforms such as iOS where the host process
+  may be suspended by the system.
 
 ## [0.7.2] - 2026-06-25
 ### Added
@@ -19,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Linux kernel and wireguard-go. Tolerates more packet reordering before dropping
   legitimate packets. Costs ~7 KiB more memory per peer.
 - Bump minimum supported Rust version to 1.95.
+
 
 ### Fixed
 - Add missing jitter for handshakes initiated due to not receiving any packets.

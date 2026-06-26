@@ -346,6 +346,74 @@ async fn send_and_expect_delivery(
     assert_eq!(received.as_bytes(), packet.as_bytes());
 }
 
+/// [`Device::suspend`] stops all traffic; [`Device::resume`] restores it with a fresh handshake.
+#[tokio::test]
+#[test_log::test]
+async fn suspend_and_resume() {
+    use tokio::time::timeout;
+
+    let (alice, mut bob, eve) = mock::device_pair().await;
+
+    // Sniff handshake initiations across the whole test.
+    let mut inits = std::pin::pin!(eve.wg_handshake_init());
+
+    // 1. Establish the tunnel: a packet from alice must reach bob.
+    let before = b"before suspend";
+    alice.app_tx.send(mock::packet(before)).await;
+    let received = timeout(Duration::from_secs(1), bob.app_rx.recv())
+        .await
+        .expect("bob should receive alice's packet before suspend");
+    assert_eq!(received.as_bytes(), mock::packet(before).as_bytes());
+
+    // The initial handshake should have happened.
+    let first_init = timeout(Duration::from_secs(1), inits.next())
+        .await
+        .expect("a handshake init should be observed");
+    assert!(first_init.is_some());
+
+    // 2. Suspend alice. All of its tasks (timers, inbound, outbound) are now stopped.
+    alice.device.suspend().await;
+    // Suspending again is a no-op.
+    alice.device.suspend().await;
+
+    // 3. While suspended, a packet from alice must NOT reach bob.
+    let during = b"during suspend";
+    alice.app_tx.send(mock::packet(during)).await;
+    let no_delivery = timeout(Duration::from_millis(300), bob.app_rx.recv()).await;
+    assert!(
+        no_delivery.is_err(),
+        "no traffic should flow while suspended"
+    );
+
+    // Time passes while the host process is suspended. Advancing the mock clock
+    // (a no-op without the `mock_instant` feature) ensures the fresh handshake
+    // sent after resume carries a strictly later TAI64N timestamp than the first,
+    // so the peer does not reject it as a replay.
+    advance_mock_clock();
+
+    // 4. Resume alice. The buffered packet should now flow, via a fresh handshake.
+    alice.device.resume().await.expect("resume should succeed");
+    // Resuming again is a no-op.
+    alice
+        .device
+        .resume()
+        .await
+        .expect("resume should be idempotent");
+
+    let received = timeout(Duration::from_secs(2), bob.app_rx.recv())
+        .await
+        .expect("bob should receive alice's packet after resume");
+    assert_eq!(received.as_bytes(), mock::packet(during).as_bytes());
+
+    // Resume cleared alice's sessions, so a second handshake init must be observed.
+    let second_init = timeout(Duration::from_secs(2), inits.next())
+        .await
+        .expect("a fresh handshake init should be observed after resume");
+    assert!(second_init.is_some());
+
+    drop((alice, bob));
+}
+
 /// Helper method to test that packets can be sent from one [`Device`] to another.
 /// Use `eavesdrop` to sniff wireguard packets and assert things about the connection.
 async fn test_device_pair(eavesdrop: impl AsyncFnOnce(MockEavesdropper) + Send) {

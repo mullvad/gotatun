@@ -275,6 +275,7 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             rate_limiter: None,
             port: self.port,
             connection: None,
+            suspended: false,
             fatal_error: watch::Sender::new(None),
         };
 
