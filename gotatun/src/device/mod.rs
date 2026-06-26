@@ -37,6 +37,7 @@ use std::time::Duration;
 use tokio::join;
 use tokio::sync::RwLock;
 use tokio::sync::{Mutex, watch};
+use tracing::{Level, instrument};
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
@@ -156,6 +157,7 @@ pub(crate) struct Connection<T: DeviceTransports> {
 }
 
 impl<T: DeviceTransports> Connection<T> {
+    #[instrument(level = Level::TRACE, skip_all, ret)]
     pub async fn set_up(device_arc: Arc<RwLock<DeviceState<T>>>) -> Result<(), Error> {
         let mut device = device_arc.write().await;
         let pool = PacketBufPool::new(MAX_PACKET_BUFS);
@@ -497,6 +499,7 @@ impl<T: DeviceTransports> DeviceState<T> {
         peers_by_idx.lock().insert(sender_idx, Arc::clone(peer));
     }
 
+    #[instrument(level = Level::TRACE, skip_all)]
     async fn handle_timers(device: Weak<RwLock<Self>>, udp4: impl UdpSend, udp6: impl UdpSend) {
         loop {
             tokio::time::sleep(Duration::from_millis(250)).await;
@@ -553,6 +556,7 @@ impl<T: DeviceTransports> DeviceState<T> {
     }
 
     /// Read from UDP socket, decapsulate, write to tunnel device
+    #[instrument(level = Level::TRACE, skip_all)]
     async fn handle_incoming(
         device: Weak<RwLock<Self>>,
         mut tun_tx: impl IpSend,
@@ -707,6 +711,7 @@ impl<T: DeviceTransports> DeviceState<T> {
     }
 
     /// Read from tunnel device, encapsulate, and write to UDP socket for the corresponding peer
+    #[instrument(level = Level::TRACE, skip_all)]
     async fn handle_outgoing(
         device: Weak<RwLock<Self>>,
         mut tun_rx: impl IpRecv,
