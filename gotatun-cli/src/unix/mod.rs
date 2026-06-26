@@ -16,11 +16,12 @@ use eyre::{Context, Result, bail};
 use gotatun::device::uapi::UapiServer;
 use gotatun::device::{DefaultDeviceTransports, Device, DeviceBuilder};
 use gotatun::tun::tun_async_device::TunDevice;
-use std::fs::File;
-use std::future::Future;
-use std::os::unix::net::UnixDatagram;
-use std::path::{Path, PathBuf};
 use std::process::exit;
+use std::{
+    fs::File,
+    os::unix::net::UnixDatagram,
+    path::{Path, PathBuf},
+};
 use tokio::signal::unix::{SignalKind, signal};
 use tracing::{Level, error, info};
 
@@ -80,7 +81,8 @@ fn run() -> Result<()> {
 fn run_foreground(args: Args) -> Result<()> {
     setup_console_logging(args.verbosity);
 
-    with_tokio_runtime(async {
+    let rt = tokio::runtime::Runtime::new().context("Failed to create tokio runtime")?;
+    rt.block_on(async {
         let device = setup_device(args).await.context("Failed to start tunnel")?;
         info!("GotaTun started successfully");
         wait_for_shutdown(device).await;
@@ -94,12 +96,10 @@ fn run_daemon(args: Args) -> Result<()> {
     child_sock
         .set_nonblocking(true)
         .context("Failed to set socket non-blocking")?;
-
     match Daemonize::new().working_directory("/tmp").execute() {
         daemonize::Outcome::Parent(result) => {
             result?;
             wait_for_child(parent_sock)?;
-            println!("GotaTun started successfully");
             Ok(())
         }
         daemonize::Outcome::Child(result) => {
@@ -112,7 +112,9 @@ fn run_daemon(args: Args) -> Result<()> {
 fn run_daemon_child(args: Args, child_sock: UnixDatagram) -> Result<()> {
     let _guard = setup_file_logging(&args.log, args.verbosity)?;
 
-    with_tokio_runtime(async {
+    let dial9_cfg = dial9_tokio_telemetry::Dial9Config::from_env();
+    let dial9_rt = dial9_tokio_telemetry::TracedRuntime::new(dial9_cfg);
+    dial9_rt.block_on(async {
         match setup_device(args).await {
             Ok(device) => {
                 let _ = child_sock.send(CHILD_OK);
@@ -163,14 +165,6 @@ fn setup_console_logging(level: Level) {
         .pretty()
         .with_max_level(level)
         .init();
-}
-
-/// Create a tokio runtime and run the given future on it
-fn with_tokio_runtime(f: impl Future<Output = Result<()>>) -> Result<()> {
-    // Note: We must spawn the tokio runtime after forking the process.
-    // Otherwise, we see issues with file descriptors being bad, etc.
-    let rt = tokio::runtime::Runtime::new().context("Failed to create tokio runtime")?;
-    rt.block_on(f)
 }
 
 async fn wait_for_shutdown(mut device: Device<DefaultDeviceTransports>) {

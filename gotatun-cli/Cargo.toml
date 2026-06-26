@@ -21,6 +21,7 @@ mimalloc = { workspace = true, default-features = false, optional = true }
 [target.'cfg(unix)'.dependencies]
 clap = { workspace = true, features = ["derive", "env"] }
 daemonize = { workspace = true }
+dial9-tokio-telemetry = "0.3.13"
 eyre = { workspace = true }
 gotatun = { workspace = true, features = ["device", "tun"] }
 libc = { workspace = true }

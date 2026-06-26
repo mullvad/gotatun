@@ -1,2 +1,19 @@
 [target.'cfg(unix)']
-runner = 'sudo -E'
+runner = "sudo -E"
+
+# These flags apply globally across all targets. Note: if your ~/.cargo/config.toml
+# defines target-specific rustflags (e.g. for a custom linker), those take precedence
+# over [build] rustflags on that target. In that case, you must also add these flags
+# to the target-specific section in your local config:
+#
+#   [target.x86_64-unknown-linux-gnu]
+#   rustflags = ["--cfg", "tokio_unstable", "-C", "force-frame-pointers=yes", ...]
+#
+[build]
+rustflags = [
+  "--cfg",
+  "tokio_unstable",
+  # For profiling, you also need:
+  "-C",
+  "force-frame-pointers=yes"
+]
