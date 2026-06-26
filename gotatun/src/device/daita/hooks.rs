@@ -93,8 +93,8 @@ impl DaitaHooks {
             max_delayed_packets,
             min_delay_capacity,
         } = daita_settings;
-        log::info!("Initializing DAITA");
-        log::debug!("Using maybenot machines: {maybenot_machines:?}");
+        tracing::info!("Initializing DAITA");
+        tracing::debug!("Using maybenot machines: {maybenot_machines:?}");
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (action_tx, action_rx) = mpsc::unbounded_channel();
@@ -232,7 +232,7 @@ impl DaitaHooks {
             _ => {
                 // bad packet, let the normal packet parser deal with the error
                 if cfg!(debug_assertions) {
-                    log::debug!("Malformed IP packet");
+                    tracing::debug!("Malformed IP packet");
                 }
                 return Some(packet);
             }
@@ -274,7 +274,7 @@ fn pad_to_constant_size(packet: &mut Packet, mtu: usize) -> Result<usize, ()> {
     let start_len = packet.len();
     if start_len > mtu {
         if cfg!(debug_assertions) {
-            log::warn!(
+            tracing::warn!(
                 "Packet size {start_len} exceeded MTU {mtu}. Either the TUN MTU changed, or there's a bug.",
             );
         }

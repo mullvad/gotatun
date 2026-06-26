@@ -84,7 +84,7 @@ impl UapiClient {
     /// Returns a [`Response`] with `errno != 0` if the request fails.
     pub async fn send(&self, request: impl Into<Request>) -> eyre::Result<Response> {
         let request = request.into();
-        log::trace!("Handling API request: {request:?}");
+        tracing::trace!("Handling API request: {request:?}");
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
             .send((request, response_tx))
@@ -92,7 +92,7 @@ impl UapiClient {
             .map_err(|_| eyre!("Channel closed"))?;
         response_rx
             .await
-            .inspect(|response| log::trace!("Sending API response: {response:?}"))
+            .inspect(|response| tracing::trace!("Sending API response: {response:?}"))
             .map_err(|_| eyre!("Channel closed"))
     }
 
@@ -104,14 +104,14 @@ impl UapiClient {
     /// Returns a [`Response`] with `errno != 0` if the request fails.
     pub fn send_sync(&self, request: impl Into<Request>) -> eyre::Result<Response> {
         let request = request.into();
-        log::trace!("Handling API request: {request:?}");
+        tracing::trace!("Handling API request: {request:?}");
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
             .blocking_send((request, response_tx))
             .map_err(|_| eyre!("Channel closed"))?;
         response_rx
             .blocking_recv()
-            .inspect(|response| log::trace!("Sending API response: {response:?}"))
+            .inspect(|response| tracing::trace!("Sending API response: {response:?}"))
             .map_err(|_| eyre!("Channel closed"))
     }
 }
@@ -167,7 +167,7 @@ impl UapiServer {
         if (uid.is_some() || gid.is_some())
             && let Err(err) = nix::unistd::chown(std::path::Path::new(&path), uid, gid)
         {
-            log::warn!("Failed to change owner of UDS: {err}");
+            tracing::warn!("Failed to change owner of UDS: {err}");
         }
 
         let (tx, rx) = UapiServer::new();
@@ -178,7 +178,7 @@ impl UapiServer {
                     break;
                 };
 
-                log::info!("New UAPI connection on unix socket");
+                tracing::info!("New UAPI connection on unix socket");
 
                 let client = tx.clone();
                 tokio::spawn(async move {
@@ -218,20 +218,20 @@ impl UapiServer {
                 let server = match server {
                     Ok(s) => s,
                     Err(e) => {
-                        log::error!("Failed to create named pipe: {e}");
+                        tracing::error!("Failed to create named pipe: {e}");
                         break;
                     }
                 };
                 match server.connect().await {
                     Ok(()) => {}
                     Err(e) => {
-                        log::error!("Failed to accept named pipe connection: {e}");
+                        tracing::error!("Failed to accept named pipe connection: {e}");
                         break;
                     }
                 }
                 first = false;
 
-                log::debug!("New UAPI connection on named pipe");
+                tracing::debug!("New UAPI connection on named pipe");
 
                 let client = tx.clone();
                 tokio::spawn(async move {
@@ -290,7 +290,7 @@ async fn run_uapi_protocol(
                 if !buf.is_empty()
                     && let Err(e) = dispatch_request(&client, &mut w, &buf).await
                 {
-                    log::error!("Failed to handle UAPI request: {e:#}");
+                    tracing::error!("Failed to handle UAPI request: {e:#}");
                 }
                 return;
             }
@@ -309,7 +309,7 @@ async fn run_uapi_protocol(
         }
 
         if let Err(e) = dispatch_request(&client, &mut w, &buf).await {
-            log::error!("Failed to handle UAPI request: {e:#}");
+            tracing::error!("Failed to handle UAPI request: {e:#}");
             return;
         }
 
@@ -332,7 +332,7 @@ async fn dispatch_request(
 
     let response_str = format!("{response}\n");
     if let Err(e) = w.write_all(response_str.as_bytes()).await {
-        log::error!("Failed to write API response: {e}");
+        tracing::error!("Failed to write API response: {e}");
     }
 
     Ok(())
@@ -349,7 +349,7 @@ fn run_uapi_protocol_sync(client: UapiClient, r: impl Read, mut w: impl Write) {
             if !buf.is_empty()
                 && let Err(e) = dispatch_request_sync(&client, &mut w, &buf)
             {
-                log::error!("Failed to handle UAPI request: {e:#}");
+                tracing::error!("Failed to handle UAPI request: {e:#}");
             }
             return;
         };
@@ -365,7 +365,7 @@ fn run_uapi_protocol_sync(client: UapiClient, r: impl Read, mut w: impl Write) {
         }
 
         if let Err(e) = dispatch_request_sync(&client, &mut w, &buf) {
-            log::error!("Failed to handle UAPI request: {e:#}");
+            tracing::error!("Failed to handle UAPI request: {e:#}");
             return;
         }
 
@@ -381,7 +381,7 @@ fn dispatch_request_sync(client: &UapiClient, w: &mut impl Write, s: &str) -> ey
     };
 
     if let Err(e) = writeln!(w, "{response}") {
-        log::error!("Failed to write API response: {e}");
+        tracing::error!("Failed to write API response: {e}");
     }
 
     Ok(())
@@ -397,7 +397,7 @@ impl Debug for UapiServer {
 fn create_sock_dir() -> eyre::Result<()> {
     match std::fs::create_dir(SOCK_DIR) {
         Ok(_) => {
-            log::info!("Created socket directory at {SOCK_DIR}");
+            tracing::info!("Created socket directory at {SOCK_DIR}");
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             // Directory already exists, which is fine
@@ -435,7 +435,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                             Ok(()) => Response::Set(response),
                             Err(err) => {
                                 // TODO: error message
-                                log::error!("Failed to set up stuff: {err}");
+                                tracing::error!("Failed to set up stuff: {err}");
                                 // TODO: response code
                                 Response::Set(SetResponse { errno: EINVAL })
                             }
@@ -564,7 +564,7 @@ async fn on_api_set(
     if let Some(protocol_version) = protocol_version
         && protocol_version != "1"
     {
-        log::warn!("Invalid API protocol version: {protocol_version}");
+        tracing::warn!("Invalid API protocol version: {protocol_version}");
         return (SetResponse { errno: EINVAL }, Reconfigure::No);
     }
 

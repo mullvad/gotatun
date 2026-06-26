@@ -37,6 +37,7 @@ use std::time::Duration;
 use tokio::join;
 use tokio::sync::RwLock;
 use tokio::sync::{Mutex, watch};
+use tracing::{Level, instrument};
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
@@ -156,6 +157,7 @@ pub(crate) struct Connection<T: DeviceTransports> {
 }
 
 impl<T: DeviceTransports> Connection<T> {
+    #[instrument(level = Level::TRACE, skip_all, ret)]
     pub async fn set_up(device_arc: Arc<RwLock<DeviceState<T>>>) -> Result<(), Error> {
         let mut device = device_arc.write().await;
         let pool = PacketBufPool::new(MAX_PACKET_BUFS);
@@ -269,7 +271,7 @@ impl<T: DeviceTransports> Device<T> {
     }
 
     async fn stop_inner(device: Arc<RwLock<DeviceState<T>>>) {
-        log::debug!("Stopping device");
+        tracing::debug!("Stopping device");
 
         let mut device = device.write().await;
 
@@ -294,7 +296,7 @@ impl<T: DeviceTransports> Device<T> {
 impl<T: DeviceTransports> Drop for Device<T> {
     fn drop(&mut self) {
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
-            log::warn!("Failed to get tokio runtime handle");
+            tracing::warn!("Failed to get tokio runtime handle");
             return;
         };
         let device = self.inner.clone();
@@ -331,7 +333,7 @@ impl<T: DeviceTransports> DeviceState<T> {
             self.peers_by_ip
                 .remove(&|p: &Arc<Mutex<PeerState>>| Arc::ptr_eq(&peer, p));
 
-            log::info!("Peer removed");
+            tracing::info!("Peer removed");
 
             Some(peer)
         } else {
@@ -353,7 +355,7 @@ impl<T: DeviceTransports> DeviceState<T> {
             self.peers_by_ip.insert(addr, cidr, Arc::clone(&peer));
         }
 
-        log::info!("Peer added");
+        tracing::info!("Peer added");
     }
 
     fn create_peer(&mut self, peer_builder: Peer) -> PeerState {
@@ -497,6 +499,7 @@ impl<T: DeviceTransports> DeviceState<T> {
         peers_by_idx.lock().insert(sender_idx, Arc::clone(peer));
     }
 
+    #[instrument(level = Level::TRACE, skip_all)]
     async fn handle_timers(device: Weak<RwLock<Self>>, udp4: impl UdpSend, udp6: impl UdpSend) {
         loop {
             tokio::time::sleep(Duration::from_millis(250)).await;
@@ -546,13 +549,14 @@ impl<T: DeviceTransports> DeviceState<T> {
                     }
                     Ok(None) => {}
                     Err(WireGuardError::ConnectionExpired) => {}
-                    Err(e) => log::error!("Timer error = {e:?}: {e:?}"),
+                    Err(e) => tracing::error!("Timer error = {e:?}: {e:?}"),
                 }
             }
         }
     }
 
     /// Read from UDP socket, decapsulate, write to tunnel device
+    #[instrument(level = Level::TRACE, skip_all)]
     async fn handle_incoming(
         device: Weak<RwLock<Self>>,
         mut tun_tx: impl IpSend,
@@ -578,7 +582,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                 Err(TunnResult::WriteToNetwork(WgKind::CookieReply(cookie))) => {
                     // Note: Cookies should not affect counters.
                     if let Err(_err) = udp_tx.send_to(cookie.into(), addr).await {
-                        log::trace!("udp.send_to failed");
+                        tracing::trace!("udp.send_to failed");
                         break;
                     }
                     continue;
@@ -644,7 +648,7 @@ impl<T: DeviceTransports> DeviceState<T> {
 
                     for packet in packets {
                         if let Err(_err) = udp_tx.send_to(packet.into(), addr).await {
-                            log::trace!("udp.send_to failed");
+                            tracing::trace!("udp.send_to failed");
                             break;
                         }
                     }
@@ -687,7 +691,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                     if !routed_to_this_peer {
                         if cfg!(debug_assertions) {
                             let unspecified = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0).into();
-                            log::warn!(
+                            tracing::warn!(
                                 "peer at {} is not allowed to send us packets from: {source}",
                                 peer.endpoint().addr.unwrap_or(unspecified)
                             );
@@ -696,7 +700,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                     }
 
                     if let Err(e) = tun_tx.send(packet).await {
-                        log::trace!("buffered_tun_send.send failed");
+                        tracing::trace!("buffered_tun_send.send failed");
                         return Err(Error::IoError(e));
                     }
                 }
@@ -707,6 +711,7 @@ impl<T: DeviceTransports> DeviceState<T> {
     }
 
     /// Read from tunnel device, encapsulate, and write to UDP socket for the corresponding peer
+    #[instrument(level = Level::TRACE, skip_all)]
     async fn handle_outgoing(
         device: Weak<RwLock<Self>>,
         mut tun_rx: impl IpRecv,
@@ -726,7 +731,7 @@ impl<T: DeviceTransports> DeviceState<T> {
             let packets = match tun_rx.recv(&mut packet_pool).await {
                 Ok(packets) => packets,
                 Err(e) => {
-                    log::error!("Unexpected error on tun interface: {e:?}");
+                    tracing::error!("Unexpected error on tun interface: {e:?}");
                     return Err(Error::IoError(e));
                 }
             };
@@ -745,7 +750,7 @@ impl<T: DeviceTransports> DeviceState<T> {
 
                 let Some(peer_arc) = device_guard.peers_by_ip.find(dst_addr).cloned() else {
                     if cfg!(debug_assertions) {
-                        log::trace!("Dropping packet with no routable peer");
+                        tracing::trace!("Dropping packet with no routable peer");
                     }
 
                     // Drop packet if no peer has allowed IPs for destination
@@ -759,7 +764,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                     // whitepaper: If [peer_addr] matches no peer, it is dropped, and the sender is
                     // informed by a standard ICMP “no route to host” packet, as well as returning
                     // -ENOKEY to user space.
-                    log::error!("No endpoint");
+                    tracing::error!("No endpoint");
                     continue;
                 };
 

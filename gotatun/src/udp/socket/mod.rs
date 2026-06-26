@@ -62,10 +62,10 @@ impl UdpTransportFactory for UdpSocketFactory {
         let (udp_v4, udp_v6) = bind_sockets(params.addr_v4, params.addr_v6, params.port, opts)?;
 
         if let Err(err) = udp_v4.enable_udp_gro() {
-            log::warn!("Failed to enable UDP GRO for IPv4 socket: {err}");
+            tracing::warn!("Failed to enable UDP GRO for IPv4 socket: {err}");
         }
         if let Err(err) = udp_v6.enable_udp_gro() {
-            log::warn!("Failed to enable UDP GRO for IPv6 socket: {err}");
+            tracing::warn!("Failed to enable UDP GRO for IPv6 socket: {err}");
         }
 
         Ok(((udp_v4.clone(), udp_v4), (udp_v6.clone(), udp_v6)))
@@ -121,7 +121,7 @@ impl UdpSocket {
             if cfg!(debug_assertions) {
                 return Err(err);
             } else {
-                log::error!("Failed to change UDP socket receive buffer size: {err}");
+                tracing::error!("Failed to change UDP socket receive buffer size: {err}");
             }
         }
         if let Some(send_buffer_size) = opts.send_buffer_size
@@ -130,7 +130,7 @@ impl UdpSocket {
             if cfg!(debug_assertions) {
                 return Err(err);
             } else {
-                log::error!("Failed to change UDP socket send buffer size: {err}");
+                tracing::error!("Failed to change UDP socket send buffer size: {err}");
             }
         }
 
@@ -187,7 +187,7 @@ fn bind_v6_with_retry(
             Ok(sock) => break sock,
             Err(err) if is_bind_retry_error(&err) && retries < BIND_MAX_RETRIES => {
                 retries += 1;
-                log::debug!(
+                tracing::debug!(
                     "IPv6 port {port} already in use, retrying ({retries}/{BIND_MAX_RETRIES})"
                 );
                 udp_v4 = UdpSocket::bind((addr_v4, 0).into(), opts)?;

@@ -289,7 +289,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
             if time_now - *t > REJECT_AFTER_TIME {
                 // Forget about expired sesssions
                 if let Some(session) = self.sessions[i].take() {
-                    log::trace!(
+                    tracing::trace!(
                         "SESSION_EXPIRED(REJECT_AFTER_TIME): {}",
                         session.receiving_index
                     );
@@ -338,7 +338,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
             // All ephemeral private keys and symmetric session keys are zeroed out after
             // (REJECT_AFTER_TIME * 3) ms if no new keys have been exchanged.
             if now - session_established >= REJECT_AFTER_TIME * 3 {
-                log::trace!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
+                tracing::trace!("CONNECTION_EXPIRED(REJECT_AFTER_TIME * 3)");
                 self.handshake.set_expired();
                 self.clear_all();
                 return Err(WireGuardError::ConnectionExpired);
@@ -351,7 +351,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                     // the retries give up and cease, and clear all existing packets queued
                     // up to be sent. If a packet is explicitly queued up to be sent, then
                     // this timer is reset.
-                    log::debug!("CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
+                    tracing::debug!("CONNECTION_EXPIRED(REKEY_ATTEMPT_TIME)");
                     self.handshake.set_expired();
                     self.clear_all();
                     return Err(WireGuardError::ConnectionExpired);
@@ -362,7 +362,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                     // Once `checked_duration_since` is stable we can use that.
                     // A handshake initiation is retried after the sampled rekey timeout,
                     // by default REKEY_TIMEOUT plus some random jitter between 0 and 333 ms.
-                    log::debug!("HANDSHAKE(REKEY_TIMEOUT)");
+                    tracing::debug!("HANDSHAKE(REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
                 }
             } else {
@@ -375,7 +375,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                     if session_established < data_packet_sent
                         && now - session_established >= self.timers.rekey_after_time
                     {
-                        log::trace!("HANDSHAKE(REKEY_AFTER_TIME (on send))");
+                        tracing::trace!("HANDSHAKE(REKEY_AFTER_TIME (on send))");
                         handshake_initiation_required = true;
                     }
 
@@ -387,7 +387,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                         && now - session_established
                             >= REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT
                     {
-                        log::trace!(
+                        tracing::trace!(
                             "HANDSHAKE(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - \
                         REKEY_TIMEOUT \
                         (on receive))"
@@ -402,7 +402,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                 if let Some(since) = self.timers.want_handshake
                     && now.saturating_sub(since) >= self.timers.new_handshake_timeout
                 {
-                    log::trace!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
+                    tracing::trace!("HANDSHAKE(KEEPALIVE + REKEY_TIMEOUT)");
                     handshake_initiation_required = true;
                     self.timers.want_handshake = None;
                 }
@@ -414,7 +414,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                     if let Some(since) = self.timers.want_keepalive
                         && now.saturating_sub(since) >= self.timers.keepalive_timeout
                     {
-                        log::trace!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
+                        tracing::trace!("KEEPALIVE(KEEPALIVE_TIMEOUT)");
                         keepalive_required = true;
                         self.timers.want_keepalive = None;
                     }
@@ -424,7 +424,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
                         && (now.saturating_sub(self.timers[TimePersistentKeepalive])
                             >= persistent_keepalive)
                     {
-                        log::trace!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
+                        tracing::trace!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
                         self.timer_tick(TimePersistentKeepalive);
                         keepalive_required = true;
                     }

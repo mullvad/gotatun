@@ -29,7 +29,7 @@ pub struct Task {
 
 pub trait TaskOutput: Sized + Send + 'static {
     fn handle(self, task_name: &'static str) {
-        log::trace!("task {task_name:?} exited");
+        tracing::trace!("task {task_name:?} exited");
     }
 }
 
@@ -43,7 +43,7 @@ where
     fn handle(self, task_name: &'static str) {
         match self {
             Ok(..) => ().handle(task_name),
-            Err(e) => log::error!("task {task_name:?} errored: {e:?}"),
+            Err(e) => tracing::error!("task {task_name:?} errored: {e:?}"),
         }
     }
 }
@@ -72,10 +72,10 @@ impl Task {
             handle.abort();
             match handle.await {
                 Err(e) if e.is_panic() => {
-                    log::error!("task {} panicked: {e:#?}", self.name);
+                    tracing::error!("task {} panicked: {e:#?}", self.name);
                 }
                 _ => {
-                    log::trace!("stopped task {}", self.name);
+                    tracing::trace!("stopped task {}", self.name);
                 }
             }
         }
@@ -100,7 +100,7 @@ impl Future for Task {
 impl Drop for Task {
     fn drop(&mut self) {
         if let Some(handle) = self.handle.take() {
-            log::trace!("dropped task {}", self.name);
+            tracing::trace!("dropped task {}", self.name);
 
             // Note that the task future isn't dropped when calling abort.
             // It is dropped by the tokio runtime at some point in the future.

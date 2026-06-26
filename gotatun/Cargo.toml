@@ -51,7 +51,6 @@ ip_network = { workspace = true }
 ip_network_table = { workspace = true }
 ipnetwork = { workspace = true }
 libc = { workspace = true }
-log = { workspace = true }
 maybenot = { workspace = true, optional = true }
 mock_instant = { workspace = true, optional = true }
 parking_lot = { workspace = true }
@@ -64,6 +63,7 @@ socket2 = { workspace = true, features = ["all"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt", "time", "macros", "net", "io-util"] }
 tokio-util = { version = "0.7.18", default-features = false }
+tracing = { workspace = true }
 tun = { workspace = true, default-features = false, features = ["async"], optional = true }
 typed-builder = { workspace = true }
 x25519-dalek = { workspace = true, features = [
