@@ -10,8 +10,10 @@
 // SPDX-License-Identifier: MPL-2.0
 #![cfg(any(feature = "device", feature = "tun"))]
 
+use futures::executor::block_on;
 use std::pin::Pin;
-use tokio::task::JoinHandle;
+use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 
 /// A wrapper around [`JoinHandle`] that.
 /// - Aborts the task on Drop.
@@ -24,7 +26,11 @@ pub struct Task {
     /// INVARIANT: This will be `Some` until either of:
     /// - Self is dropped.
     /// - [`Self::stop`] is called.
-    handle: Option<JoinHandle<()>>,
+    handle: Option<std::thread::JoinHandle<Option<()>>>,
+
+    output: oneshot::Receiver<()>,
+
+    ct: CancellationToken,
 }
 
 pub trait TaskOutput: Sized + Send + 'static {
@@ -55,23 +61,37 @@ impl Task {
         Fut: Future<Output = O> + Send + 'static,
         O: TaskOutput,
     {
-        let handle = tokio::spawn(async move {
-            let output = fut.await;
-            TaskOutput::handle(output, name);
-        });
+        let ct = CancellationToken::new();
+        let child_ct = ct.child_token();
+        let rt_handle = tokio::runtime::Handle::current();
+        let (output_tx, output_rx) = oneshot::channel();
+        let handle = std::thread::Builder::new()
+            .name(name.into())
+            .spawn(move || {
+                let _runtime = rt_handle.enter();
+                block_on(child_ct.run_until_cancelled_owned(async move {
+                    let output = fut.await;
+                    TaskOutput::handle(output, name);
+                    _ = output_tx.send(());
+                }))
+            })
+            .unwrap();
 
         Task {
             name,
             handle: Some(handle),
+            ct,
+            output: output_rx,
         }
     }
 
     #[cfg(feature = "device")]
     pub async fn stop(mut self) {
+        self.ct.cancel();
         if let Some(handle) = self.handle.take() {
-            handle.abort();
-            match handle.await {
-                Err(e) if e.is_panic() => {
+            let result = tokio::task::block_in_place(|| handle.join());
+            match result {
+                Err(e) => {
                     tracing::error!("task {} panicked: {e:#?}", self.name);
                 }
                 _ => {
@@ -83,29 +103,25 @@ impl Task {
 }
 
 impl Future for Task {
-    type Output = <JoinHandle<()> as Future>::Output;
+    type Output = ();
 
     fn poll(
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        self.handle
-            .as_mut()
-            .map(Pin::new)
-            .expect("Handle is Some until task is stopped or dropped")
-            .poll(cx)
+        Pin::new(&mut self.output).poll(cx).map(|_| ())
     }
 }
 
 impl Drop for Task {
     fn drop(&mut self) {
-        if let Some(handle) = self.handle.take() {
+        if let Some(_handle) = self.handle.take() {
             tracing::trace!("dropped task {}", self.name);
 
-            // Note that the task future isn't dropped when calling abort.
-            // It is dropped by the tokio runtime at some point in the future.
+            // Note that the task future isn't stopped immediately when cancelled.
+            // It is stopped by the tokio runtime at some point in the future.
             // Prefer calling `Task::stop` for tasks that need to be promptly cleaned up.
-            handle.abort();
+            self.ct.cancel();
         }
     }
 }
