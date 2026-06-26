@@ -269,7 +269,7 @@ mod gro {
             };
 
             if result == 0 {
-                log::debug!("Enabled UDP GRO");
+                tracing::debug!("Enabled UDP GRO");
                 Ok(())
             } else {
                 Err(io::Error::last_os_error())
@@ -300,7 +300,7 @@ mod gro {
 
             let sock = socket2::Socket::new(Domain::IPV4, Type::DGRAM, None)
                 .inspect_err(|err| {
-                    log::error!("Failed to create socket: {err}");
+                    tracing::error!("Failed to create socket: {err}");
                 })
                 .ok()?;
 
@@ -320,7 +320,7 @@ mod gro {
             };
 
             if result != 0 {
-                log::error!(
+                tracing::error!(
                     "Failed to get WSARecvMsg function pointer: {}",
                     io::Error::last_os_error()
                 );

@@ -247,7 +247,7 @@ impl<R: RngCore + Send> Tunn<R> {
         &mut self,
         p: Packet<WgHandshakeInit>,
     ) -> Result<TunnResult, WireGuardError> {
-        log::debug!("Received handshake_initiation: {}", p.sender_idx);
+        tracing::debug!("Received handshake_initiation: {}", p.sender_idx);
 
         let n_bytes = p.as_bytes().len();
         let (packet, session) = self.handshake.receive_handshake_initialization(p)?;
@@ -270,7 +270,7 @@ impl<R: RngCore + Send> Tunn<R> {
         &mut self,
         p: Packet<WgHandshakeResp>,
     ) -> Result<TunnResult, WireGuardError> {
-        log::debug!(
+        tracing::debug!(
             "Received handshake_response: {} {}",
             p.receiver_idx,
             p.sender_idx,
@@ -293,14 +293,14 @@ impl<R: RngCore + Send> Tunn<R> {
         self.timer_tick_session_established(true, slot); // New session established, we are the initiator
         self.set_current_session(slot);
 
-        log::debug!("Sending keepalive");
+        tracing::debug!("Sending keepalive");
         self.tx_bytes += keepalive_packet.as_bytes().len();
 
         Ok(TunnResult::WriteToNetwork(keepalive_packet.into())) // Send a keepalive as a response
     }
 
     fn handle_cookie_reply(&mut self, p: &WgCookieReply) -> Result<TunnResult, WireGuardError> {
-        log::debug!("Received cookie_reply: {}", p.receiver_idx);
+        tracing::debug!("Received cookie_reply: {}", p.receiver_idx);
 
         self.handshake.receive_cookie_reply(p)?;
         self.timer_tick(TimerName::TimeCookieReceived);
@@ -320,7 +320,7 @@ impl<R: RngCore + Send> Tunn<R> {
                 >= self.timers.session_timers[cur_slot % N_SESSIONS]
         {
             self.current = new_slot;
-            log::trace!("New session slot: {new_slot}");
+            tracing::trace!("New session slot: {new_slot}");
         }
     }
 
@@ -371,7 +371,7 @@ impl<R: RngCore + Send> Tunn<R> {
             .filter_map(|(i, s)| s.as_ref().map(|s| (i, s)))
             .find(|(_, s)| s.receiving_index.value() == r_idx)
             .ok_or_else(|| {
-                log::trace!("No session available: {r_idx}");
+                tracing::trace!("No session available: {r_idx}");
                 WireGuardError::NoCurrentSession
             })?;
 
@@ -404,7 +404,7 @@ impl<R: RngCore + Send> Tunn<R> {
         let starting_new_handshake = !self.handshake.is_in_progress();
 
         let packet = self.handshake.format_handshake_initiation();
-        log::debug!("Sending handshake_initiation");
+        tracing::debug!("Sending handshake_initiation");
 
         if starting_new_handshake {
             self.timer_tick(TimerName::TimeLastHandshakeStarted);
@@ -507,7 +507,7 @@ fn pad_to_x16(mut packet: Packet, tun_mtu: &mut MtuWatcher) -> Packet {
         let mtu = usize::from(mtu);
 
         if cfg!(debug_assertions) && packet.len() > mtu {
-            log::debug!("Packet length exceeded MTU: {} > {mtu}", packet.len());
+            tracing::debug!("Packet length exceeded MTU: {} > {mtu}", packet.len());
         }
 
         // Checking the mtu is inherently racey, so we need to be tolerant if packet.len() > mtu.

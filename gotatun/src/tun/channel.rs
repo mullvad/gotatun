@@ -51,7 +51,7 @@ impl IpSend for TunChannelTx {
         let ip_packet = match packet.try_into_ipvx() {
             Ok(p) => p,
             Err(e) => {
-                log::trace!("Invalid IP packet: {e:?}");
+                tracing::trace!("Invalid IP packet: {e:?}");
                 return Ok(());
             }
         };
@@ -74,7 +74,7 @@ impl IpSend for TunChannelTx {
                             .await
                             .expect("receiver exists");
                     }
-                    Err(e) => log::trace!("Invalid UDP packet: {e:?}"),
+                    Err(e) => tracing::trace!("Invalid UDP packet: {e:?}"),
                 }
             }
             Either::Right(ipv6) => match ipv6.try_into_udp() {
@@ -84,7 +84,7 @@ impl IpSend for TunChannelTx {
                         .await
                         .expect("receiver exists");
                 }
-                Err(e) => log::trace!("Invalid UDP packet: {e:?}"),
+                Err(e) => tracing::trace!("Invalid UDP packet: {e:?}"),
             },
         }
 
@@ -188,7 +188,7 @@ mod fragmentation {
             if (more_fragments && fragment_len % 8 != 0)
                 || fragment_len + fragment_offset as usize * 8 > Ipv4::MAX_LEN
             {
-                log::trace!(
+                tracing::trace!(
                     "Invalid fragment size: {fragment_len} or fragment offset: {fragment_offset}, dropping"
                 );
                 return None;
@@ -200,7 +200,7 @@ mod fragmentation {
                 if fragment_map.len() >= MAX_CONCURRENT_FRAGS {
                     let (dropped_id, _) =
                         fragment_map.pop_front().expect("Fragment map is not empty");
-                    log::trace!(
+                    tracing::trace!(
                         "Fragment map at full capacity {MAX_CONCURRENT_FRAGS}, dropping oldest fragment with ID {dropped_id:?} to make space"
                     );
                     // TODO: send "Fragment Reassembly Timeout" ICMP message, per RFC792
@@ -218,7 +218,7 @@ mod fragmentation {
             let Err(i) =
                 fragments.binary_search_by_key(&fragment_offset, |f| f.header.fragment_offset())
             else {
-                log::trace!(
+                tracing::trace!(
                     "Fragment with offset {fragment_offset} already existed for for ID {id:?} and was dropped"
                 );
                 return None;
@@ -232,7 +232,7 @@ mod fragmentation {
                 && let prev_frag_len = &fragments[prev_i].payload.len()
                 && prev_frag_offset + (prev_frag_len / 8) as u16 > fragment_offset
             {
-                log::trace!(
+                tracing::trace!(
                     "Fragment with offset {fragment_offset} overlaps with existing fragment with offset {prev_frag_offset} and length {prev_frag_len} for ID {id:?}, dropping",
                 );
                 return None;
@@ -241,7 +241,7 @@ mod fragmentation {
                 && let next_frag_offset = next_frag.header.fragment_offset()
                 && fragment_offset + (fragment_len / 8) as u16 > next_frag_offset
             {
-                log::trace!(
+                tracing::trace!(
                     "Fragment with offset {fragment_offset} and length {fragment_len} overlaps with existing fragment with offset {next_frag_offset} for ID {id:?}, dropping",
                 );
                 return None;
@@ -435,7 +435,7 @@ mod fragmentation {
                 *count += 1;
                 if let Some(ip_packet) = res {
                     let udp_packet = ip_packet.try_into_udp().unwrap();
-                    log::debug!(
+                    tracing::debug!(
                         "Reassembled UDP payload (ascii): {:?}",
                         String::from_utf8_lossy(&udp_packet.payload.payload)
                     );
@@ -489,7 +489,7 @@ mod fragmentation {
                 count += 1;
                 if let Some(ip_packet) = res {
                     let udp_packet = ip_packet.try_into_udp().unwrap();
-                    log::debug!(
+                    tracing::debug!(
                         "Reassembled UDP payload (ascii): {:?}",
                         String::from_utf8_lossy(&udp_packet.payload.payload)
                     );

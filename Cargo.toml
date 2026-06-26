@@ -39,7 +39,6 @@ ip_network = "0.4.1"
 ip_network_table = "0.2.0"
 ipnetwork = "0.21.1"
 libc = "0.2.180"
-log = "0.4.29"
 maybenot = "2.2.2"
 mimalloc = { version = "0.1", default-features = false }
 mock_instant = "0.6"
@@ -52,7 +51,7 @@ rand_chacha = "0.9.0"
 rand_core = "0.6.4"
 ring = "0.17.14"
 socket2 = "0.6.0"
-test-log = "0.2.19"
+test-log = { version = "0.2.19", default-features = false, features = ["trace"] }
 thiserror = "1"
 tikv-jemallocator = { version = "0.6", default-features = false }
 tokio = "1.43.0"

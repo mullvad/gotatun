@@ -153,7 +153,7 @@ impl DelayWatcher {
             futures::select! {
                 () = tokio::time::sleep_until(*expires_at).fuse() => {},
                 () = self.delay_abort.notified().fuse() => {
-                    log::trace!("Delay aborted with remaining capacity {}", self.delay_queue_tx.capacity());
+                    tracing::trace!("Delay aborted with remaining capacity {}", self.delay_queue_tx.capacity());
                 },
             }
         } else {
@@ -180,7 +180,7 @@ impl DelayWatcher {
             if let Err(TrySendError::Closed(packet) | TrySendError::Full(packet)) =
                 self.delay_queue_tx.try_send(packet)
             {
-                log::trace!("Packet sent as it couldn't be delayed");
+                tracing::trace!("Packet sent as it couldn't be delayed");
                 // If the queue is closed or full, we can't delay anymore, so we
                 // send the packet anyway.
                 // TODO: this would be an out of order packet, not ideal.
