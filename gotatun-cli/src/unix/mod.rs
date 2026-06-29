@@ -12,6 +12,7 @@
 
 use clap::Parser;
 use daemonize::Daemonize;
+use dial9_tokio_telemetry::Dial9Config;
 use eyre::{Context, Result, bail};
 use gotatun::device::uapi::UapiServer;
 use gotatun::device::{DefaultDeviceTransports, Device, DeviceBuilder};
@@ -112,7 +113,19 @@ fn run_daemon(args: Args) -> Result<()> {
 fn run_daemon_child(args: Args, child_sock: UnixDatagram) -> Result<()> {
     let _guard = setup_file_logging(&args.log, args.verbosity)?;
 
-    let dial9_cfg = dial9_tokio_telemetry::Dial9Config::from_env();
+    // let dial9_cfg = dial9_tokio_telemetry::Dial9Config::from_env();
+    let dial9_cfg = Dial9Config::builder()
+        .base_path("/tmp/dial9-traces/trace.bin")
+        .max_total_size(5 * 1024 * 1024) // keep at most 5 MiB on disk
+        // .max_file_size(1024 * 1024) // optional: defaults to min(100 MiB, max_total_size / 4)
+        // .rotation_period(std::time::Duration::from_secs(300)) // optional: rotate every 5 min (default: 60 s)
+        .with_runtime(|r| r.with_runtime_name("main").with_task_tracking(true)) // TracedRuntime knobs
+        .with_tokio(|t| {
+            t.worker_threads(4);
+        }) // tokio knobs
+        .build()
+        .unwrap();
+
     let dial9_rt = dial9_tokio_telemetry::TracedRuntime::new(dial9_cfg);
     dial9_rt.block_on(async {
         match setup_device(args).await {
@@ -144,17 +157,30 @@ fn wait_for_child(sock: UnixDatagram) -> Result<()> {
 
 fn setup_file_logging(
     log_file: &Path,
-    level: Level,
+    _level: Level,
 ) -> Result<tracing_appender::non_blocking::WorkerGuard> {
     let file = File::create(log_file)
         .with_context(|| format!("Could not create log file {}", log_file.display()))?;
 
     let (non_blocking, guard) = tracing_appender::non_blocking(file);
 
-    tracing_subscriber::fmt()
-        .with_max_level(level)
-        .with_writer(non_blocking)
-        .with_ansi(false)
+    use dial9_tokio_telemetry::tracing_layer::Dial9TokioLayer;
+    use tracing_subscriber::prelude::*;
+
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                // .with_max_level(level)
+                .with_writer(non_blocking)
+                .with_ansi(false),
+        )
+        .with(
+            Dial9TokioLayer::new().with_filter(
+                tracing_subscriber::filter::Targets::new()
+                    .with_target("gotatun", tracing::Level::TRACE)
+                    .with_default(tracing::Level::ERROR),
+            ),
+        )
         .init();
 
     Ok(guard)
