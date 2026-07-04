@@ -627,8 +627,8 @@ impl<T: DeviceTransports> DeviceState<T> {
 
             match tunnel.handle_incoming_packet(parsed_packet) {
                 TunnResult::Done => {
-                    // Update the peer endpoint if we received any authenticated packet
-                    peer.set_endpoint(addr);
+                    // Don't update the peer endpoint on cookie replies, for consistency
+                    // with both the Linux kernel and wireguard-go.
                 }
                 TunnResult::Err(_) => continue,
                 // Flush pending queue
