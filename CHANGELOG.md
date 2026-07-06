@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Replace `log` with `tracing`.
 
+### Fixed
+- Do not update peer endpoint/roam on received cookie replies.
+  This change is made to be consistent with Linux kernel and wireguard-go.
+
 
 ## [0.7.2] - 2026-06-25
 ### Added
