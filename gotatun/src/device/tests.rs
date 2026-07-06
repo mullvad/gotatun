@@ -20,7 +20,7 @@ use tokio::{
 };
 use zerocopy::IntoBytes;
 
-use crate::noise::index_table::IndexTable;
+use crate::noise::{ProtocolIdentifier, index_table::IndexTable};
 use crate::packet::{Ip, Packet};
 
 pub mod mock;
@@ -267,6 +267,25 @@ async fn update_peer_preshared_key_reaches_tunnel() {
         advance_mock_clock();
     })
     .await;
+}
+
+#[tokio::test]
+#[test_log::test]
+async fn custom_protocol_identifier_device_pair() {
+    let protocol_identifier = ProtocolIdentifier::new(
+        b"gotatun custom construction test",
+        b"gotatun custom protocol test",
+    );
+    let (alice, mut bob, _eve) =
+        mock::device_pair_with_protocol_identifier(protocol_identifier).await;
+    let packet = mock::packet(b"Hello!");
+
+    alice.app_tx.send(packet.clone()).await;
+    let received = tokio::time::timeout(Duration::from_secs(1), bob.app_rx.recv())
+        .await
+        .expect("custom protocol identifier handshake timed out");
+
+    assert_eq!(received.as_bytes(), packet.as_bytes());
 }
 
 /// The number of packets we send through the tunnel
