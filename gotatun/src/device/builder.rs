@@ -46,6 +46,7 @@ pub struct DeviceBuilder<Udp, TunTx, TunRx> {
     // TODO: consider turning this into a typestate, and adding a special case for single peer
     peers: Vec<Peer>,
     index_table: Option<IndexTable>,
+    suspended: bool,
 
     #[cfg(target_os = "linux")]
     fwmark: Option<u32>,
@@ -80,6 +81,7 @@ impl DeviceBuilder<Nul, Nul, Nul> {
             port: 0,
             peers: Vec::new(),
             index_table: None,
+            suspended: false,
             #[cfg(target_os = "linux")]
             fwmark: None,
         }
@@ -106,6 +108,7 @@ impl<X, Y> DeviceBuilder<Nul, X, Y> {
             port: self.port,
             peers: self.peers,
             index_table: self.index_table,
+            suspended: self.suspended,
             #[cfg(target_os = "linux")]
             fwmark: self.fwmark,
         }
@@ -181,6 +184,7 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
             port: self.port,
             peers: self.peers,
             index_table: self.index_table,
+            suspended: self.suspended,
             #[cfg(target_os = "linux")]
             fwmark: self.fwmark,
         }
@@ -234,6 +238,14 @@ impl<X, Y, Z> DeviceBuilder<X, Y, Z> {
         self
     }
 
+    /// Set the device to be suspended or resumed on build.
+    ///
+    /// By default, the device is brought up in the resumed state.
+    pub fn suspended(mut self, suspended: bool) -> Self {
+        self.suspended = suspended;
+        self
+    }
+
     /// Specify the `SO_MARK` argument to the [`UdpTransportFactory`].
     ///
     /// You probably only want this when using [`with_default_udp`](Self::with_default_udp).
@@ -275,7 +287,7 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
             rate_limiter: None,
             port: self.port,
             connection: None,
-            suspended: false,
+            suspended: self.suspended,
             fatal_error: watch::Sender::new(None),
         };
 
