@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Do not update peer endpoint/roam on received cookie replies.
   This change is made to be consistent with Linux kernel and wireguard-go.
+- Continue with IPv4-only UDP transport on Linux when IPv6 sockets are unavailable.
 
 
 ## [0.7.2] - 2026-06-25

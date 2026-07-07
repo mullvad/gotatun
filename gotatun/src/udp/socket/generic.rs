@@ -23,7 +23,7 @@ impl UdpSend for super::UdpSocket {
     type SendManyBuf = ();
 
     async fn send_to(&self, packet: Packet, target: SocketAddr) -> io::Result<()> {
-        self.inner.send_to(&packet, target).await?;
+        self.socket()?.send_to(&packet, target).await?;
         Ok(())
     }
 
@@ -37,7 +37,7 @@ impl UdpRecv for super::UdpSocket {
 
     async fn recv_from(&mut self, pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
         let mut buf = pool.get();
-        let (n, src) = self.inner.recv_from(&mut buf).await?;
+        let (n, src) = self.socket()?.recv_from(&mut buf).await?;
         buf.truncate(n);
         Ok((buf, src))
     }
