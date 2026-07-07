@@ -11,8 +11,6 @@
 
 //! Implementations of [`super::UdpSend`] and [`super::UdpRecv`] traits for [`UdpSocket`].
 
-#[cfg(unix)]
-use std::os::fd::AsFd;
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -59,7 +57,21 @@ impl UdpTransportFactory for UdpSocketFactory {
             send_buffer_size: self.send_buffer_size,
         };
 
-        let (udp_v4, udp_v6) = bind_sockets(params.addr_v4, params.addr_v6, params.port, opts)?;
+        let (udp_v4, udp_v6) = cfg_select! {
+            target_os = "linux" => {
+                match bind_sockets(params.addr_v4, params.addr_v6, params.port, opts) {
+                    Err(err) if is_ipv6_unavailable(&err) => {
+                        tracing::warn!(
+                            "IPv6 UDP sockets are unavailable; continuing with IPv4-only UDP transport"
+                        );
+                        let udp_v4 = bind_ipv4_socket(params.addr_v4, params.port, opts)?;
+                        (udp_v4, UdpSocket::disabled_ipv6())
+                    }
+                    sockets => sockets?
+                }
+            }
+            _ => { bind_sockets(params.addr_v4, params.addr_v6, params.port, opts)? }
+        };
 
         if let Err(err) = udp_v4.enable_udp_gro() {
             tracing::warn!("Failed to enable UDP GRO for IPv4 socket: {err}");
@@ -68,14 +80,23 @@ impl UdpTransportFactory for UdpSocketFactory {
             tracing::warn!("Failed to enable UDP GRO for IPv6 socket: {err}");
         }
 
-        Ok(((udp_v4.clone(), udp_v4), (udp_v6.clone(), udp_v6)))
+        let udp_v6 = (udp_v6.clone(), udp_v6);
+
+        Ok(((udp_v4.clone(), udp_v4), udp_v6))
     }
 }
 
 /// Default UDP socket implementation
 #[derive(Clone)]
 pub struct UdpSocket {
-    inner: Arc<tokio::net::UdpSocket>,
+    inner: UdpSocketInner,
+}
+
+#[derive(Clone)]
+enum UdpSocketInner {
+    Socket(Arc<tokio::net::UdpSocket>),
+    #[cfg(target_os = "linux")]
+    DisabledIpv6,
 }
 
 /// Options set on the socket created by [`UdpSocket::bind`].
@@ -139,13 +160,34 @@ impl UdpSocket {
         let inner = tokio::net::UdpSocket::from_std(udp_sock.into())?;
 
         Ok(Self {
-            inner: Arc::new(inner),
+            inner: UdpSocketInner::Socket(Arc::new(inner)),
         })
+    }
+
+    #[cfg(target_os = "linux")]
+    fn disabled_ipv6() -> Self {
+        Self {
+            inner: UdpSocketInner::DisabledIpv6,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn is_disabled_ipv6(&self) -> bool {
+        matches!(&self.inner, UdpSocketInner::DisabledIpv6)
+    }
+
+    #[inline(always)]
+    pub(crate) fn socket(&self) -> io::Result<&tokio::net::UdpSocket> {
+        match &self.inner {
+            UdpSocketInner::Socket(socket) => Ok(socket),
+            #[cfg(target_os = "linux")]
+            UdpSocketInner::DisabledIpv6 => Err(disabled_ipv6_error()),
+        }
     }
 
     /// Returns the local address that this socket is bound to.
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.inner.local_addr()
+        self.socket()?.local_addr()
     }
 }
 
@@ -170,6 +212,11 @@ fn bind_sockets(
             Ok((udp_v4, udp_v6))
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn bind_ipv4_socket(addr_v4: Ipv4Addr, port: u16, opts: SockOpt) -> io::Result<UdpSocket> {
+    UdpSocket::bind((addr_v4, port).into(), opts)
 }
 
 /// When using a random port, the port chosen for IPv4 might already be in use on IPv6.
@@ -199,6 +246,22 @@ fn bind_v6_with_retry(
     Ok((udp_v4, udp_v6))
 }
 
+#[cfg(target_os = "linux")]
+fn is_ipv6_unavailable(err: &io::Error) -> bool {
+    matches!(
+        err.raw_os_error(),
+        Some(libc::EAFNOSUPPORT | libc::EADDRNOTAVAIL)
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn disabled_ipv6_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::Unsupported,
+        "IPv6 UDP sockets are unavailable",
+    )
+}
+
 fn is_bind_retry_error(err: &io::Error) -> bool {
     #[cfg(not(target_os = "windows"))]
     {
@@ -212,17 +275,76 @@ fn is_bind_retry_error(err: &io::Error) -> bool {
     }
 }
 
-#[cfg(unix)]
-impl AsFd for UdpSocket {
-    fn as_fd(&self) -> std::os::unix::prelude::BorrowedFd<'_> {
-        self.inner.as_fd()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
+    use crate::packet::{Packet, PacketBufPool};
+    #[cfg(target_os = "linux")]
+    use crate::udp::{UdpRecv, UdpSend};
     use std::net::{Ipv4Addr, Ipv6Addr};
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn recognizes_unavailable_ipv6_errors() {
+        let error = io::Error::from_raw_os_error(libc::EAFNOSUPPORT);
+        assert!(is_ipv6_unavailable(&error));
+
+        let error = io::Error::from_raw_os_error(libc::EADDRNOTAVAIL);
+        assert!(is_ipv6_unavailable(&error));
+
+        let error = io::Error::from(io::ErrorKind::AddrInUse);
+        assert!(!is_ipv6_unavailable(&error));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn disabled_ipv6_send_returns_unsupported() {
+        let socket = UdpSocket::disabled_ipv6();
+        let error = socket
+            .send_to(Packet::default(), (Ipv6Addr::LOCALHOST, 1).into())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn disabled_ipv6_recv_returns_unsupported() {
+        let mut socket = UdpSocket::disabled_ipv6();
+        let mut pool = PacketBufPool::new(1);
+        let mut recv_many_buf = <UdpSocket as UdpRecv>::RecvManyBuf::default();
+        let mut packets = Vec::new();
+
+        let error = socket.recv_from(&mut pool).await.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+
+        let error = socket
+            .recv_many_from(&mut recv_many_buf, &mut pool, &mut packets)
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn disabled_ipv6_socket_options_are_noops() {
+        let socket = UdpSocket::disabled_ipv6();
+
+        assert!(socket.set_fwmark(1).is_ok());
+        assert!(socket.enable_udp_gro().is_ok());
+        assert_eq!(UdpSend::local_addr(&socket).unwrap(), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn bind_ipv4_socket_uses_ipv4() {
+        let socket =
+            bind_ipv4_socket(Ipv4Addr::LOCALHOST, 0, SockOpt::default()).expect("bind IPv4");
+
+        assert!(socket.local_addr().unwrap().is_ipv4());
+    }
 
     /// Test that `bind_sockets` retries when the IPv6 port is already in use.
     ///
