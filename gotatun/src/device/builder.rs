@@ -184,7 +184,7 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
             port: self.port,
             peers: self.peers,
             index_table: self.index_table,
-            suspended: false,
+            suspended: self.suspended,
             #[cfg(target_os = "linux")]
             fwmark: self.fwmark,
         }
