@@ -436,7 +436,7 @@ async fn reconfigure_while_suspended_stays_down() {
     // listen port so the mock's source-port addressing stays intact on resume.
     alice
         .device
-        .set_listen_port(51820)
+        .set_listen_port(1)
         .await
         .expect("reconfigure should succeed while suspended");
 
