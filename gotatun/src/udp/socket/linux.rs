@@ -121,18 +121,16 @@ mod gro {
     // TODO: Fix constant
     const MAX_GRO_SIZE: usize = MAX_SEGMENTS * 4096;
 
+    use super::super::disabled_ipv6_error;
     use super::MAX_PACKET_COUNT;
     use crate::packet::{Packet, PacketBufPool};
     use crate::udp::{UdpRecv, socket::UdpSocket};
     use bytes::BytesMut;
     use nix::cmsg_space;
     use nix::sys::socket::{ControlMessageOwned, MsgFlags, MultiHeaders, SockaddrStorage};
+    use std::io::{self, IoSliceMut};
     use std::net::SocketAddr;
     use std::os::fd::AsRawFd;
-    use std::{
-        future,
-        io::{self, IoSliceMut},
-    };
     use tokio::io::Interest;
 
     pub struct RecvManyBuf {
@@ -158,7 +156,7 @@ mod gro {
             pool: &mut PacketBufPool,
         ) -> io::Result<(Packet, SocketAddr)> {
             if self.is_disabled_ipv6() {
-                return future::pending::<io::Result<(Packet, SocketAddr)>>().await;
+                return Err(disabled_ipv6_error());
             }
 
             let mut buf = pool.get();
@@ -174,7 +172,7 @@ mod gro {
             packets: &mut Vec<(Packet, SocketAddr)>,
         ) -> io::Result<()> {
             if self.is_disabled_ipv6() {
-                return future::pending::<io::Result<()>>().await;
+                return Err(disabled_ipv6_error());
             }
 
             let socket = self.socket()?;

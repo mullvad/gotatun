@@ -11,8 +11,6 @@
 
 //! Implementations of [`super::UdpSend`] and [`super::UdpRecv`] traits for [`UdpSocket`].
 
-#[cfg(unix)]
-use std::os::fd::AsFd;
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -186,6 +184,7 @@ impl UdpSocket {
         matches!(&self.inner, UdpSocketInner::DisabledIpv6)
     }
 
+    #[inline(always)]
     pub(crate) fn socket(&self) -> io::Result<&tokio::net::UdpSocket> {
         match &self.inner {
             UdpSocketInner::Socket(socket) => Ok(socket),
@@ -284,22 +283,13 @@ fn is_bind_retry_error(err: &io::Error) -> bool {
     }
 }
 
-#[cfg(unix)]
-impl AsFd for UdpSocket {
-    fn as_fd(&self) -> std::os::unix::prelude::BorrowedFd<'_> {
-        self.socket()
-            .expect("disabled IPv6 socket has no file descriptor")
-            .as_fd()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     #[cfg(target_os = "linux")]
-    use crate::packet::Packet;
+    use crate::packet::{Packet, PacketBufPool};
     #[cfg(target_os = "linux")]
-    use crate::udp::UdpSend;
+    use crate::udp::{UdpRecv, UdpSend};
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     #[cfg(target_os = "linux")]
@@ -324,6 +314,24 @@ mod tests {
             .await
             .unwrap_err();
 
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn disabled_ipv6_recv_returns_unsupported() {
+        let mut socket = UdpSocket::disabled_ipv6();
+        let mut pool = PacketBufPool::new(1);
+        let mut recv_many_buf = <UdpSocket as UdpRecv>::RecvManyBuf::default();
+        let mut packets = Vec::new();
+
+        let error = socket.recv_from(&mut pool).await.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+
+        let error = socket
+            .recv_many_from(&mut recv_many_buf, &mut pool, &mut packets)
+            .await
+            .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::Unsupported);
     }
 
