@@ -877,7 +877,7 @@ dependencies = [
 
 [[package]]
 name = "gotatun-cli"
-version = "0.7.2"
+version = "0.8.0"
 dependencies = [
  "clap 3.2.25",
  "daemonize",
