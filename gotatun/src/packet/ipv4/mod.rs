@@ -465,7 +465,7 @@ where
 
 impl<P> Ipv4<Ipv4Options<P>>
 where
-    P: TryFromBytes + Immutable + KnownLayout,
+    P: TryFromBytes + Immutable + KnownLayout + ?Sized,
 {
     fn options_and_payload_bytes(&self) -> eyre::Result<(&[u8], &[u8])> {
         let header_len = usize::from(self.header.ihl()) * size_of::<u32>();
