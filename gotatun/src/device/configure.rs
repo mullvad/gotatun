@@ -15,6 +15,7 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use ipnetwork::IpNetwork;
 use x25519_dalek::{PublicKey, StaticSecret};
 
+use crate::PresharedKey;
 use crate::device::Error;
 use crate::device::{Connection, Device, DeviceState, DeviceTransports, Peer, Reconfigure};
 
@@ -91,7 +92,7 @@ impl<T> From<Option<T>> for Update<T> {
 #[derive(Default)]
 #[non_exhaustive]
 pub struct PeerMut {
-    preshared_key: Update<[u8; 32]>,
+    preshared_key: Update<PresharedKey>,
     endpoint: Update<SocketAddr>,
     keepalive: Update<u16>,
 
@@ -100,8 +101,12 @@ pub struct PeerMut {
 }
 
 impl PeerMut {
-    /// Set or clear the preshared key for this peer.
-    pub fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
+    /// Set or clear the preshared key used by this peer's handshakes.
+    ///
+    /// This update does not invalidate established transport sessions. An
+    /// in-flight handshake can fail if the remote peer generated a message
+    /// using the previous key.
+    pub fn set_preshared_key(&mut self, preshared_key: Option<PresharedKey>) {
         self.preshared_key = preshared_key.into();
     }
 
@@ -151,7 +156,11 @@ impl<T: DeviceTransports> DeviceRead<'_, T> {
         self.device.fwmark
     }
 
-    /// Return all peers on the device
+    /// Return all peers on the device.
+    ///
+    /// Each returned configuration owns an independent clone of its PSK. Those
+    /// clones zeroize on drop, but retaining the result also retains the copied
+    /// secret material.
     pub async fn peers(&self) -> Vec<PeerStats> {
         let mut peers = vec![];
         for (pubkey, peer) in self.device.peers.iter() {
@@ -185,7 +194,7 @@ impl<T: DeviceTransports> DeviceRead<'_, T> {
             peers.push(PeerStats {
                 peer: Peer {
                     public_key: *pubkey,
-                    preshared_key: p.tunnel.preshared_key(),
+                    preshared_key: p.tunnel.preshared_key().cloned(),
                     allowed_ips: p.allowed_ips.iter().map(|(_, net)| net).collect(),
                     endpoint: p.endpoint.addr,
                     keepalive: p.tunnel.persistent_keepalive(),
@@ -269,13 +278,19 @@ impl<T: DeviceTransports> DeviceWrite<'_, T> {
     ///
     /// All fields of the peer will be overwritten. Returns `false` if no peer with this public key
     /// exists. See also [`Self::add_or_update_peer`] and [`Self::modify_peer`].
-    pub async fn update_peer(&mut self, peer: Peer) -> bool {
-        self.modify_peer(&peer.public_key, |peer_mut| {
+    pub async fn update_peer(&mut self, mut peer: Peer) -> bool {
+        let public_key = peer.public_key;
+        let allowed_ips = std::mem::take(&mut peer.allowed_ips);
+        let endpoint = peer.endpoint;
+        let keepalive = peer.keepalive;
+        let preshared_key = peer.preshared_key.take();
+
+        self.modify_peer(&public_key, |peer_mut| {
             peer_mut.clear_allowed_ips();
-            peer_mut.add_allowed_ips(peer.allowed_ips);
-            peer_mut.set_endpoint(peer.endpoint);
-            peer_mut.set_keepalive(peer.keepalive);
-            peer_mut.set_preshared_key(peer.preshared_key);
+            peer_mut.add_allowed_ips(allowed_ips);
+            peer_mut.set_endpoint(endpoint);
+            peer_mut.set_keepalive(keepalive);
+            peer_mut.set_preshared_key(preshared_key);
         })
         .await
     }
