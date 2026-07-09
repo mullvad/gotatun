@@ -6,16 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `Device::suspend` and `Device::resume` to pause and resume all tunnel activity.
+  Suspending stops the timers, inbound, and outbound tasks (no keepalives, handshakes,
+  or data), while retaining peers and config. Resuming rebuilds the connection and
+  forces a fresh handshake. Intended for platforms such as iOS where I/O can be
+  cooperatively suspended for lower power use.
+
 ### Changed
 - Replace `log` with `tracing`.
+
+### Removed
+- Remove `AsFd` implementation for `UdpSocket`.
 
 ### Fixed
 - Do not update peer endpoint/roam on received cookie replies.
   This change is made to be consistent with Linux kernel and wireguard-go.
 - Continue with IPv4-only UDP transport on Linux when IPv6 sockets are unavailable.
-
-### Removed
-- Remove `AsFd` implementation for `UdpSocket`.
 
 
 ## [0.7.2] - 2026-06-25
