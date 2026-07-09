@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+
+## [0.8.0] - 2026-07-09
 ### Added
 - `Device::suspend` and `Device::resume` to pause and resume all tunnel activity.
   Suspending stops the timers, inbound, and outbound tasks (no keepalives, handshakes,
