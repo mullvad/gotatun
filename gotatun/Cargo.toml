@@ -64,6 +64,7 @@ x25519-dalek = {
   ]
 }
 zerocopy = { workspace = true, features = ["derive", "std"] }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports"] }
