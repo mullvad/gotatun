@@ -16,6 +16,7 @@ use std::net::SocketAddr;
 
 use tokio::sync::watch;
 
+use crate::PresharedKey;
 use crate::device::AllowedIps;
 #[cfg(feature = "daita")]
 use crate::device::daita::{DaitaHooks, DaitaSettings};
@@ -193,7 +194,7 @@ impl PeerState {
         self.tunnel.persistent_keepalive()
     }
 
-    pub fn preshared_key(&self) -> Option<[u8; 32]> {
+    pub fn preshared_key(&self) -> Option<&PresharedKey> {
         self.tunnel.preshared_key()
     }
 }
