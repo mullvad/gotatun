@@ -64,6 +64,7 @@ typed-builder = "0.21.0"
 windows-sys = { version = ">=0.60, <=0.61" }
 x25519-dalek = "2.0.1"
 zerocopy = "0.8.27"
+zeroize = "1.8.2"
 
 [profile.bench]
 lto = true  # Enable full link-time optimization.
