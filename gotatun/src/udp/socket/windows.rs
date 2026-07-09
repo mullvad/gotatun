@@ -48,7 +48,7 @@ impl UdpSend for super::UdpSocket {
     type SendManyBuf = SendmmsgBuf;
 
     async fn send_to(&self, packet: Packet, target: SocketAddr) -> io::Result<()> {
-        tokio::net::UdpSocket::send_to(&self.inner, &packet, target).await?;
+        tokio::net::UdpSocket::send_to(self.socket()?, &packet, target).await?;
         Ok(())
     }
 
@@ -67,7 +67,8 @@ impl UdpSend for super::UdpSocket {
 
         check_send_max_number_of_packets(*MAX_GSO_SEGMENTS, packets)?;
 
-        let client_socket_ref = socket2::SockRef::from(&*self.inner);
+        let socket = self.socket()?;
+        let client_socket_ref = socket2::SockRef::from(socket);
 
         let mut packets_iter = packets.drain(..);
         let mut saved_packet = None;
@@ -123,7 +124,7 @@ impl UdpSend for super::UdpSocket {
                 continue;
             }
 
-            self.inner
+            socket
                 .async_io(Interest::WRITABLE, || {
                     use std::io::IoSlice;
 
@@ -162,7 +163,7 @@ impl UdpRecv for super::UdpSocket {
 
     async fn recv_from(&mut self, pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
         let mut buf = pool.get();
-        let (n, src) = self.inner.recv_from(&mut buf).await?;
+        let (n, src) = self.socket()?.recv_from(&mut buf).await?;
         buf.truncate(n);
         Ok((buf, src))
     }
@@ -203,7 +204,7 @@ mod gro {
             pool: &mut PacketBufPool,
         ) -> io::Result<(Packet, SocketAddr)> {
             let mut buf = pool.get();
-            let (n, src) = self.inner.recv_from(&mut buf).await?;
+            let (n, src) = self.socket()?.recv_from(&mut buf).await?;
             buf.truncate(n);
             Ok((buf, src))
         }
@@ -214,13 +215,12 @@ mod gro {
             pool: &mut PacketBufPool,
             packets: &mut Vec<(Packet, SocketAddr)>,
         ) -> io::Result<()> {
-            let socket = self.inner.clone();
+            let socket = self.socket()?;
             recv_buf.gro_buf.resize(MAX_COALESCED_SIZE, 0);
 
-            let msg = self
-                .inner
+            let msg = socket
                 .async_io(Interest::READABLE, || {
-                    recvmsg(recv_buf.gro_buf.as_mut_slice(), &mut recv_buf.cmsg, &socket)
+                    recvmsg(recv_buf.gro_buf.as_mut_slice(), &mut recv_buf.cmsg, socket)
                 })
                 .await?;
 
@@ -254,7 +254,7 @@ mod gro {
 
         /// Enable receive offloading
         fn enable_udp_gro(&self) -> io::Result<()> {
-            let raw_sock = self.inner.as_raw_socket();
+            let raw_sock = self.socket()?.as_raw_socket();
             let val: u32 = u32::try_from(MAX_COALESCED_SIZE).unwrap();
 
             // SAFETY: We are passing valid pointers

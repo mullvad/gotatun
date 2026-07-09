@@ -36,7 +36,7 @@ impl UdpSend for super::UdpSocket {
     type SendManyBuf = SendmmsgBuf;
 
     async fn send_to(&self, packet: Packet, target: SocketAddr) -> io::Result<()> {
-        tokio::net::UdpSocket::send_to(&self.inner, &packet, target).await?;
+        tokio::net::UdpSocket::send_to(self.socket()?, &packet, target).await?;
         Ok(())
     }
 
@@ -47,7 +47,8 @@ impl UdpSend for super::UdpSocket {
     ) -> io::Result<()> {
         check_send_max_number_of_packets(MAX_PACKET_COUNT, packets)?;
 
-        let fd = self.inner.as_raw_fd();
+        let socket = self.socket()?;
+        let fd = socket.as_raw_fd();
 
         buf.targets.clear();
 
@@ -63,8 +64,7 @@ impl UdpSend for super::UdpSocket {
         let pkts = &packets_buf[..len];
         let mut packet_buf_start = 0;
         while packet_buf_start < len {
-            let result = self
-                .inner
+            let result = socket
                 .async_io(Interest::WRITABLE, || {
                     let mut multiheaders =
                         MultiHeaders::preallocate(pkts[packet_buf_start..].len(), None);
@@ -94,12 +94,21 @@ impl UdpSend for super::UdpSocket {
     }
 
     fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
+        #[cfg(target_os = "linux")]
+        if self.is_disabled_ipv6() {
+            return Ok(None);
+        }
+
         UdpSocket::local_addr(self).map(Some)
     }
 
     #[cfg(target_os = "linux")]
     fn set_fwmark(&self, mark: u32) -> io::Result<()> {
-        setsockopt(&self.inner, sockopt::Mark, &mark)?;
+        if self.is_disabled_ipv6() {
+            return Ok(());
+        }
+
+        setsockopt(self.socket()?, sockopt::Mark, &mark)?;
         Ok(())
     }
 }
@@ -112,6 +121,7 @@ mod gro {
     // TODO: Fix constant
     const MAX_GRO_SIZE: usize = MAX_SEGMENTS * 4096;
 
+    use super::super::disabled_ipv6_error;
     use super::MAX_PACKET_COUNT;
     use crate::packet::{Packet, PacketBufPool};
     use crate::udp::{UdpRecv, socket::UdpSocket};
@@ -145,8 +155,12 @@ mod gro {
             &mut self,
             pool: &mut PacketBufPool,
         ) -> io::Result<(Packet, SocketAddr)> {
+            if self.is_disabled_ipv6() {
+                return Err(disabled_ipv6_error());
+            }
+
             let mut buf = pool.get();
-            let (n, src) = self.inner.recv_from(&mut buf).await?;
+            let (n, src) = self.socket()?.recv_from(&mut buf).await?;
             buf.truncate(n);
             Ok((buf, src))
         }
@@ -157,9 +171,14 @@ mod gro {
             pool: &mut PacketBufPool,
             packets: &mut Vec<(Packet, SocketAddr)>,
         ) -> io::Result<()> {
-            let fd = self.inner.as_raw_fd();
+            if self.is_disabled_ipv6() {
+                return Err(disabled_ipv6_error());
+            }
 
-            self.inner
+            let socket = self.socket()?;
+            let fd = socket.as_raw_fd();
+
+            socket
                 .async_io(Interest::READABLE, move || {
                     // TODO: the CMSG space cannot be reused, so we must allocate new headers each
                     // time [ControlMessageOwned::UdpGroSegments(i32)] contains
@@ -246,10 +265,14 @@ mod gro {
         }
 
         fn enable_udp_gro(&self) -> io::Result<()> {
+            if self.is_disabled_ipv6() {
+                return Ok(());
+            }
+
             // TODO: missing constants on Android
             use std::os::fd::AsFd;
             nix::sys::socket::setsockopt(
-                &self.inner.as_fd(),
+                &self.socket()?.as_fd(),
                 nix::sys::socket::sockopt::UdpGroSegment,
                 &true,
             )?;
@@ -361,7 +384,7 @@ mod android {
             pool: &mut PacketBufPool,
         ) -> io::Result<(Packet, SocketAddr)> {
             let mut buf = pool.get();
-            let (n, src) = self.inner.recv_from(&mut buf).await?;
+            let (n, src) = self.socket()?.recv_from(&mut buf).await?;
             buf.truncate(n);
             Ok((buf, src))
         }
