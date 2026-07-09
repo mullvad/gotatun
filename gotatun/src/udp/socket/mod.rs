@@ -57,29 +57,21 @@ impl UdpTransportFactory for UdpSocketFactory {
             send_buffer_size: self.send_buffer_size,
         };
 
-        let bind_result = bind_sockets(params.addr_v4, params.addr_v6, params.port, opts);
-        #[cfg(target_os = "linux")]
-        let (udp_v4, udp_v6) = match bind_result {
-            Ok(sockets) => sockets,
-            Err(err) if is_ipv6_unavailable(&err) => {
-                tracing::warn!(
-                    "IPv6 UDP sockets are unavailable; continuing with IPv4-only UDP transport"
-                );
-
-                let udp_v4 = bind_ipv4_socket(params.addr_v4, params.port, opts)?;
-                if let Err(err) = udp_v4.enable_udp_gro() {
-                    tracing::warn!("Failed to enable UDP GRO for IPv4 socket: {err}");
+        let (udp_v4, udp_v6) = cfg_select! {
+            target_os = "linux" => {
+                match bind_sockets(params.addr_v4, params.addr_v6, params.port, opts) {
+                    Err(err) if is_ipv6_unavailable(&err) => {
+                        tracing::warn!(
+                            "IPv6 UDP sockets are unavailable; continuing with IPv4-only UDP transport"
+                        );
+                        let udp_v4 = bind_ipv4_socket(params.addr_v4, params.port, opts)?;
+                        (udp_v4, UdpSocket::disabled_ipv6())
+                    }
+                    sockets => sockets?
                 }
-
-                return Ok((
-                    (udp_v4.clone(), udp_v4),
-                    (UdpSocket::disabled_ipv6(), UdpSocket::disabled_ipv6()),
-                ));
             }
-            Err(err) => return Err(err),
+            _ => { bind_sockets(params.addr_v4, params.addr_v6, params.port, opts)? }
         };
-        #[cfg(not(target_os = "linux"))]
-        let (udp_v4, udp_v6) = bind_result?;
 
         if let Err(err) = udp_v4.enable_udp_gro() {
             tracing::warn!("Failed to enable UDP GRO for IPv4 socket: {err}");
