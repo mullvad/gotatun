@@ -211,6 +211,11 @@ fn is_fatal_tun_error(err: &io::Error) -> bool {
         return true;
     }
 
+    #[cfg(windows)]
+    if err.raw_os_error() == Some(windows_sys::Win32::Foundation::ERROR_HANDLE_EOF as i32) {
+        return true;
+    }
+
     matches!(
         err.kind(),
         io::ErrorKind::NotFound
