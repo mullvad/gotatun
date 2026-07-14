@@ -176,8 +176,10 @@ impl UdpSocket {
         matches!(&self.inner, UdpSocketInner::DisabledIpv6)
     }
 
+    /// Get the inner [`tokio::net::UdpSocket`]. Returns an error if the socket
+    /// type is of IPv6 and that is disabled on the system.
     #[inline(always)]
-    pub(crate) fn socket(&self) -> io::Result<&tokio::net::UdpSocket> {
+    pub fn socket(&self) -> io::Result<&tokio::net::UdpSocket> {
         match &self.inner {
             UdpSocketInner::Socket(socket) => Ok(socket),
             #[cfg(target_os = "linux")]
