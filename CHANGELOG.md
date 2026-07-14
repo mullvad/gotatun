@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- Make the `UdpSocket::socket` method public.
+  Android depended on accessing the inner file descriptor, which
+  broke we we removed the `AsFd` impl. Exposing this method will
+  provide a method of accessing it again.
+
 ### Fixed
 #### Windows
 - Exit when TUN read fails due to `ERROR_HANDLE_EOF`.
