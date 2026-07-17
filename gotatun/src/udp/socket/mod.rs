@@ -11,6 +11,10 @@
 
 //! Implementations of [`super::UdpSend`] and [`super::UdpRecv`] traits for [`UdpSocket`].
 
+#[cfg(target_os = "linux")]
+use nix::sys::socket::{getsockopt, sockopt};
+#[cfg(target_os = "linux")]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -94,9 +98,17 @@ pub struct UdpSocket {
 
 #[derive(Clone)]
 enum UdpSocketInner {
-    Socket(Arc<tokio::net::UdpSocket>),
+    Socket(Arc<UdpSocketState>),
     #[cfg(target_os = "linux")]
     DisabledIpv6,
+}
+
+struct UdpSocketState {
+    socket: tokio::net::UdpSocket,
+    #[cfg(target_os = "linux")]
+    udp_gso_supported: bool,
+    #[cfg(target_os = "linux")]
+    udp_gso_disabled: AtomicBool,
 }
 
 /// Options set on the socket created by [`UdpSocket::bind`].
@@ -156,11 +168,19 @@ impl UdpSocket {
         }
 
         udp_sock.bind(&addr.into())?;
+        #[cfg(target_os = "linux")]
+        let udp_gso_supported = getsockopt(&udp_sock, sockopt::UdpGsoSegment).is_ok();
 
         let inner = tokio::net::UdpSocket::from_std(udp_sock.into())?;
 
         Ok(Self {
-            inner: UdpSocketInner::Socket(Arc::new(inner)),
+            inner: UdpSocketInner::Socket(Arc::new(UdpSocketState {
+                socket: inner,
+                #[cfg(target_os = "linux")]
+                udp_gso_supported,
+                #[cfg(target_os = "linux")]
+                udp_gso_disabled: AtomicBool::new(false),
+            })),
         })
     }
 
@@ -176,6 +196,29 @@ impl UdpSocket {
         matches!(&self.inner, UdpSocketInner::DisabledIpv6)
     }
 
+    #[cfg(target_os = "linux")]
+    pub(crate) fn udp_gso_disabled(&self) -> bool {
+        match &self.inner {
+            UdpSocketInner::Socket(state) => state.udp_gso_disabled.load(Ordering::Relaxed),
+            UdpSocketInner::DisabledIpv6 => true,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn udp_gso_supported(&self) -> bool {
+        match &self.inner {
+            UdpSocketInner::Socket(state) => state.udp_gso_supported,
+            UdpSocketInner::DisabledIpv6 => false,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn disable_udp_gso(&self) {
+        if let UdpSocketInner::Socket(state) = &self.inner {
+            state.udp_gso_disabled.store(true, Ordering::Relaxed);
+        }
+    }
+
     /// Get the inner [`tokio::net::UdpSocket`].
     ///
     /// # Linux
@@ -183,7 +226,7 @@ impl UdpSocket {
     #[inline(always)]
     pub fn socket(&self) -> io::Result<&tokio::net::UdpSocket> {
         match &self.inner {
-            UdpSocketInner::Socket(socket) => Ok(socket),
+            UdpSocketInner::Socket(state) => Ok(&state.socket),
             #[cfg(target_os = "linux")]
             UdpSocketInner::DisabledIpv6 => Err(disabled_ipv6_error()),
         }
@@ -348,6 +391,22 @@ mod tests {
             bind_ipv4_socket(Ipv4Addr::LOCALHOST, 0, SockOpt::default()).expect("bind IPv4");
 
         assert!(socket.local_addr().unwrap().is_ipv4());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn udp_gso_disabled_state_is_shared_by_clones() {
+        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0).into(), SockOpt::default()).unwrap();
+        let clone = socket.clone();
+
+        assert_eq!(socket.udp_gso_supported(), clone.udp_gso_supported());
+        assert!(!socket.udp_gso_disabled());
+        assert!(!clone.udp_gso_disabled());
+
+        clone.disable_udp_gso();
+
+        assert!(socket.udp_gso_disabled());
+        assert!(clone.udp_gso_disabled());
     }
 
     /// Test that `bind_sockets` retries when the IPv6 port is already in use.
