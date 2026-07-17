@@ -11,6 +11,10 @@
 
 //! Implementations of [`super::UdpSend`] and [`super::UdpRecv`] traits for [`UdpSocket`].
 
+#[cfg(target_os = "linux")]
+use nix::sys::socket::{getsockopt, sockopt};
+#[cfg(target_os = "linux")]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -84,8 +88,16 @@ impl UdpTransportFactory for UdpSocketFactory {
 /// Default UDP socket implementation
 #[derive(Clone)]
 pub struct UdpSocket {
-    inner: Arc<tokio::net::UdpSocket>,
+    inner: Arc<UdpSocketState>,
     map_ipv4_to_ipv6: bool,
+}
+
+struct UdpSocketState {
+    socket: tokio::net::UdpSocket,
+    #[cfg(target_os = "linux")]
+    udp_gso_supported: bool,
+    #[cfg(target_os = "linux")]
+    udp_gso_disabled: AtomicBool,
 }
 
 /// Options set on the socket created by [`UdpSocket::bind`].
@@ -152,24 +164,47 @@ impl UdpSocket {
         }
 
         udp_sock.bind(&addr.into())?;
+        #[cfg(target_os = "linux")]
+        let udp_gso_supported = getsockopt(&udp_sock, sockopt::UdpGsoSegment).is_ok();
 
         let inner = tokio::net::UdpSocket::from_std(udp_sock.into())?;
 
         Ok(Self {
-            inner: Arc::new(inner),
+            inner: Arc::new(UdpSocketState {
+                socket: inner,
+                #[cfg(target_os = "linux")]
+                udp_gso_supported,
+                #[cfg(target_os = "linux")]
+                udp_gso_disabled: AtomicBool::new(false),
+            }),
             map_ipv4_to_ipv6: addr.is_ipv6() && opts.only_v6 == Some(false),
         })
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn udp_gso_disabled(&self) -> bool {
+        self.inner.udp_gso_disabled.load(Ordering::Relaxed)
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn udp_gso_supported(&self) -> bool {
+        self.inner.udp_gso_supported
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn disable_udp_gso(&self) {
+        self.inner.udp_gso_disabled.store(true, Ordering::Relaxed);
     }
 
     /// Get the inner [`tokio::net::UdpSocket`].
     #[inline(always)]
     pub fn socket(&self) -> &tokio::net::UdpSocket {
-        &self.inner
+        &self.inner.socket
     }
 
     /// Returns the local address that this socket is bound to.
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.inner.local_addr()
+        self.socket().local_addr()
     }
 
     /// Map an IPv4 address to IPv6 if necessary.
@@ -193,7 +228,7 @@ impl UdpSocket {
 #[cfg(not(windows))]
 impl std::os::fd::AsFd for UdpSocket {
     fn as_fd(&self) -> std::os::unix::prelude::BorrowedFd<'_> {
-        self.inner.as_fd()
+        self.socket().as_fd()
     }
 }
 
@@ -453,5 +488,70 @@ mod tests {
             }
         }
         recv_none(&mut dual_sock).await;
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn udp_gso_disabled_state_is_shared_by_clones() {
+        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0).into(), SockOpt::default()).unwrap();
+        let clone = socket.clone();
+
+        assert_eq!(socket.udp_gso_supported(), clone.udp_gso_supported());
+        assert!(!socket.udp_gso_disabled());
+        assert!(!clone.udp_gso_disabled());
+
+        clone.disable_udp_gso();
+
+        assert!(socket.udp_gso_disabled());
+        assert!(clone.udp_gso_disabled());
+    }
+
+    /// Test that `bind_sockets` retries when the IPv6 port is already in use.
+    ///
+    /// We create an IPv6-only blocker (`IPV6_V6ONLY`, no `SO_REUSEADDR`) to exclusively
+    /// hold a port on IPv6 without claiming the IPv4 side. Then we pre-bind an IPv4
+    /// socket to the same port (which succeeds).
+    #[tokio::test]
+    async fn bind_retries_on_ipv6_conflict() {
+        let blocker = socket2::Socket::new(
+            socket2::Domain::IPV6,
+            socket2::Type::DGRAM,
+            Some(socket2::Protocol::UDP),
+        )
+        .expect("create blocker");
+        blocker.set_only_v6(true).expect("set IPV6_V6ONLY");
+        blocker
+            .bind(&SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0)).into())
+            .expect("bind blocker");
+        let blocked_port = blocker
+            .local_addr()
+            .expect("blocker local_addr")
+            .as_socket()
+            .expect("as_socket")
+            .port();
+
+        // Pre-bind IPv4 to the blocked port (succeeds because the blocker is IPv6-only).
+        let udp_v4 = UdpSocket::bind(
+            (Ipv4Addr::UNSPECIFIED, blocked_port).into(),
+            SockOpt::default(),
+        )
+        .expect("bind v4");
+
+        // This should fail to bind IPv6 to blocked_port,
+        // then rebind both sockets to a new random port.
+        let (udp_v4, udp_v6) = bind_v6_with_retry(
+            Ipv4Addr::UNSPECIFIED,
+            Ipv6Addr::UNSPECIFIED,
+            udp_v4,
+            SockOpt::default(),
+        )
+        .expect("bind_v6_with_retry");
+
+        let v4_port = udp_v4.local_addr().unwrap().port();
+        let v6_port = udp_v6.local_addr().unwrap().port();
+        assert_ne!(v4_port, blocked_port);
+        assert_eq!(v4_port, v6_port);
+
+        drop(blocker);
     }
 }
