@@ -118,6 +118,7 @@ pub struct Timers {
     /// First data packet sent without hearing back
     want_handshake: Option<Duration>,
     persistent_keepalive: Option<Duration>,
+    persistent_keepalive_due: bool,
     /// Timer deadline ranges that the sampled deadlines below are drawn from.
     pub(super) params: TimerParams,
     /// Current passive keepalive deadline.
@@ -136,6 +137,9 @@ pub struct Timers {
 
 impl Timers {
     pub(super) fn new(persistent_keepalive: Option<u16>) -> Timers {
+        let persistent_keepalive = persistent_keepalive
+            .filter(|&s| s > 0)
+            .map(|s| Duration::from_secs(s.into()));
         let mut timers = Timers {
             is_initiator: false,
             time_started: Instant::now(),
@@ -143,9 +147,8 @@ impl Timers {
             session_timers: Default::default(),
             want_keepalive: Default::default(),
             want_handshake: Default::default(),
-            persistent_keepalive: persistent_keepalive
-                .filter(|&s| s > 0)
-                .map(|s| Duration::from_secs(s.into())),
+            persistent_keepalive,
+            persistent_keepalive_due: persistent_keepalive.is_some(),
             params: TimerParams::default(),
             keepalive_timeout: Duration::ZERO,
             new_handshake_timeout: Duration::ZERO,
@@ -180,6 +183,7 @@ impl Timers {
         }
         self.want_handshake = None;
         self.want_keepalive = None;
+        self.persistent_keepalive_due = self.persistent_keepalive.is_some();
         self.dangerously_set_params(self.params.clone());
     }
 
@@ -214,6 +218,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
         match timer_name {
             TimeLastPacketReceived => {
                 self.timers.want_handshake = None;
+                self.timers.persistent_keepalive_due = false;
 
                 // Reset persistent keepalive timer for any authenticated packet
                 // Ref: https://github.com/torvalds/linux/blob/9716c086c8e8b141d35aa61f2e96a2e83de212a7/drivers/net/wireguard/timers.c#L215-L220
@@ -229,6 +234,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
             TimeLastDataPacketReceived => {}
             TimeLastPacketSent => {
                 self.timers.want_keepalive = None;
+                self.timers.persistent_keepalive_due = false;
 
                 // Reset persistent keepalive timer for any authenticated packet
                 // Ref: https://github.com/torvalds/linux/blob/9716c086c8e8b141d35aa61f2e96a2e83de212a7/drivers/net/wireguard/timers.c#L215-L220
@@ -421,10 +427,12 @@ impl<R: rand::RngCore + Send> Tunn<R> {
 
                     // Persistent KEEPALIVE
                     if let Some(persistent_keepalive) = persistent_keepalive
-                        && (now.saturating_sub(self.timers[TimePersistentKeepalive])
-                            >= persistent_keepalive)
+                        && (self.timers.persistent_keepalive_due
+                            || now.saturating_sub(self.timers[TimePersistentKeepalive])
+                                >= persistent_keepalive)
                     {
                         tracing::trace!("KEEPALIVE(PERSISTENT_KEEPALIVE)");
+                        self.timers.persistent_keepalive_due = false;
                         self.timer_tick(TimePersistentKeepalive);
                         keepalive_required = true;
                     }
@@ -485,9 +493,12 @@ impl<R: rand::RngCore + Send> Tunn<R> {
     ///
     /// Pass `None` or `Some(0)` to disable persistent keepalive.
     pub fn set_persistent_keepalive(&mut self, seconds: Option<u16>) {
+        let was_enabled = self.timers.persistent_keepalive.is_some();
         self.timers.persistent_keepalive = seconds
             .filter(|&s| s > 0)
             .map(|s| Duration::from_secs(s.into()));
+        self.timers.persistent_keepalive_due = self.timers.persistent_keepalive.is_some()
+            && (self.timers.persistent_keepalive_due || !was_enabled);
         if self.timers.persistent_keepalive.is_none() {
             self.timers[TimePersistentKeepalive] = Duration::ZERO;
         } else {
