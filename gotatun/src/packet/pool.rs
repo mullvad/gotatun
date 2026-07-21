@@ -41,6 +41,15 @@ impl<const N: usize> PacketBufPool<N> {
         }
     }
 
+    /// Create an empty [`PacketBufPool`] with space for at least `capacity` returned buffers.
+    #[cfg(feature = "device")]
+    pub(crate) fn new_lazy(capacity: usize) -> Self {
+        Self {
+            queue: Arc::new(Mutex::new(VecDeque::with_capacity(capacity))),
+            capacity,
+        }
+    }
+
     /// Get the configured capacity of this pool.
     pub fn capacity(&self) -> usize {
         self.capacity
@@ -131,6 +140,9 @@ impl Drop for ReturnToPool {
 mod tests {
     use std::{hint::black_box, thread};
 
+    #[cfg(feature = "device")]
+    use std::sync::{Arc, Barrier};
+
     use super::PacketBufPool;
 
     /// Growing a packet's buffer beyond the pool's `N` (e.g. via `extend_from_slice`)
@@ -189,6 +201,50 @@ mod tests {
             pool.re_use().is_none(),
             "pool is empty and a new packet must be allocated"
         );
+    }
+
+    /// Test demand-driven allocation and recycle semantics of [PacketBufPool].
+    #[cfg(feature = "device")]
+    #[test]
+    fn pool_lazy_allocation_and_recycle() {
+        const N: usize = 1024;
+        let pool = PacketBufPool::<N>::new_lazy(1);
+
+        assert!(pool.re_use().is_none(), "lazy pool must start empty");
+
+        let packet = pool.get();
+        let buffer_ptr = packet.as_ptr();
+        assert_eq!(packet.len(), N);
+        assert!(packet.iter().all(|byte| *byte == 0));
+        drop(packet);
+
+        let recycled = pool.re_use().expect("returned buffer must be retained");
+        assert_eq!(recycled.as_ptr(), buffer_ptr);
+    }
+
+    /// Test that concurrent allocations do not grow lazy pool retention beyond its capacity.
+    #[cfg(feature = "device")]
+    #[test]
+    fn lazy_pool_retention_is_bounded() {
+        const CAPACITY: usize = 4;
+        const CONCURRENT_PACKETS: usize = CAPACITY * 2;
+
+        let pool = PacketBufPool::<1024>::new_lazy(CAPACITY);
+        let barrier = Arc::new(Barrier::new(CONCURRENT_PACKETS));
+
+        thread::scope(|scope| {
+            for _ in 0..CONCURRENT_PACKETS {
+                let pool = pool.clone();
+                let barrier = Arc::clone(&barrier);
+                scope.spawn(move || {
+                    let packet = pool.get();
+                    barrier.wait();
+                    drop(packet);
+                });
+            }
+        });
+
+        assert_eq!(pool.queue.lock().unwrap().len(), CAPACITY);
     }
 
     /// Test buffer recycle semantics of [PacketBufPool].
