@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Keep IPv4 fragments for different protocols in separate reassembly buffers.
+
 
 ## [0.8.1] - 2026-07-14
 ### Added
