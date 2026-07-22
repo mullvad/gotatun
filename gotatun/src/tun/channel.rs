@@ -38,10 +38,7 @@ pub struct TunChannelTx {
     pub(crate) tun_tx_v4: mpsc::Sender<Packet<Ipv4<Udp>>>,
     pub(crate) tun_tx_v6: mpsc::Sender<Packet<Ipv6<Udp>>>,
 
-    /// A map of fragments, keyed by a tuple of (identification, source IP, destination IP).
-    /// The value is a `BTreeMap` of fragment offsets to the corresponding fragments.
-    /// The `BTreeMap` is used to ensure that fragments are kept in order, even if they arrive out
-    /// of order. This is used to efficiently check if all fragments have been received.
+    /// Fragmented IPv4 packets waiting to be reassembled.
     pub(crate) fragments_v4: Ipv4Fragments,
     // TODO: Ipv6 fragments?
 }
@@ -119,16 +116,17 @@ impl IpRecv for TunChannelRx {
 mod fragmentation {
     use zerocopy::{FromBytes, FromZeros};
 
-    use crate::packet::{Decoder, Ipv4Decoder, Ipv4Header};
+    use crate::packet::{Decoder, IpNextProtocol, Ipv4Decoder, Ipv4Header};
     use std::{collections::VecDeque, net::Ipv4Addr};
 
     use crate::packet::{Ipv4, Packet};
 
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     struct FragmentId {
         identification: u16,
         source_ip: Ipv4Addr,
         destination_ip: Ipv4Addr,
+        protocol: IpNextProtocol,
     }
 
     // TODO: Switch to a total memory limit
@@ -325,6 +323,7 @@ mod fragmentation {
             identification: ipv4_packet.header.identification.get(),
             source_ip: ipv4_packet.header.source(),
             destination_ip: ipv4_packet.header.destination(),
+            protocol: ipv4_packet.header.next_protocol(),
         }
     }
 
@@ -347,14 +346,34 @@ mod fragmentation {
             more_fragments: bool,
             payload: &[u8],
         ) -> Packet<Ipv4> {
-            // Build a minimal UDP payload
+            make_ip_fragment_with_protocol(
+                identification,
+                source_ip,
+                destination_ip,
+                IpNextProtocol::Udp,
+                offset,
+                more_fragments,
+                payload,
+            )
+        }
+
+        fn make_ip_fragment_with_protocol(
+            identification: u16,
+            source_ip: Ipv4Addr,
+            destination_ip: Ipv4Addr,
+            protocol: IpNextProtocol,
+            offset: u16,
+            more_fragments: bool,
+            payload: &[u8],
+        ) -> Packet<Ipv4> {
+            // Build a minimal IP fragment
             let total_len = Ipv4Header::LEN + payload.len();
             let mut buf = BytesMut::zeroed(total_len);
             let ipv4 = Ipv4::<[u8]>::mut_from_bytes(&mut buf).unwrap();
             ipv4.header = Ipv4Header::new_for_length(
                 source_ip,
                 destination_ip,
-                IpNextProtocol::Udp,
+                protocol,
                 payload.len() as u16,
             );
             ipv4.header.identification = identification.into();
@@ -368,6 +387,68 @@ mod fragmentation {
                 .try_into_ipvx()
                 .unwrap()
                 .unwrap_left()
+        }
+
+        #[test]
+        fn test_fragments_with_different_protocols_are_reassembled_separately() {
+            let mut fragments = Ipv4Fragments::default();
+            let src = Ipv4Addr::new(192, 0, 2, 1);
+            let dst = Ipv4Addr::new(192, 0, 2, 2);
+            let id = 42;
+
+            let udp_first = make_ip_fragment_with_protocol(
+                id,
+                src,
+                dst,
+                IpNextProtocol::Udp,
+                0,
+                true,
+                b"UDP_____",
+            );
+            let udp_last = make_ip_fragment_with_protocol(
+                id,
+                src,
+                dst,
+                IpNextProtocol::Udp,
+                1,
+                false,
+                b"payload",
+            );
+            let tcp_first = make_ip_fragment_with_protocol(
+                id,
+                src,
+                dst,
+                IpNextProtocol::Tcp,
+                0,
+                true,
+                b"TCP_____",
+            );
+            let tcp_last = make_ip_fragment_with_protocol(
+                id,
+                src,
+                dst,
+                IpNextProtocol::Tcp,
+                1,
+                false,
+                b"payload",
+            );
+
+            assert!(fragments.assemble_ipv4_fragment(udp_first).is_none());
+            assert!(fragments.assemble_ipv4_fragment(tcp_first).is_none());
+            assert_eq!(fragments.incomplete_packet_count(), 2);
+
+            let udp = fragments
+                .assemble_ipv4_fragment(udp_last)
+                .expect("UDP fragments should reassemble");
+            assert_eq!(udp.header.next_protocol(), IpNextProtocol::Udp);
+            assert_eq!(udp.payload, *b"UDP_____payload");
+
+            let tcp = fragments
+                .assemble_ipv4_fragment(tcp_last)
+                .expect("TCP fragments should reassemble");
+            assert_eq!(tcp.header.next_protocol(), IpNextProtocol::Tcp);
+            assert_eq!(tcp.payload, *b"TCP_____payload");
+            assert_eq!(fragments.incomplete_packet_count(), 0);
         }
 
         fn make_udp_bytes(payload: &[u8]) -> BytesMut {
