@@ -330,7 +330,7 @@ impl<T: DeviceTransports> DeviceWrite<'_, T> {
         }
 
         if let Update::Set(addr) = endpoint {
-            existing_peer.endpoint.addr = addr;
+            existing_peer.endpoint.set(addr);
         }
 
         if clear_allowed_ips {

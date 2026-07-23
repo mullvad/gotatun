@@ -32,6 +32,28 @@ pub struct Endpoint {
     pub addr: Option<SocketAddr>,
 }
 
+impl Endpoint {
+    fn new(addr: Option<SocketAddr>) -> Self {
+        Self {
+            addr: addr.map(normalize_endpoint),
+        }
+    }
+
+    pub(super) fn set(&mut self, addr: Option<SocketAddr>) {
+        self.addr = addr.map(normalize_endpoint);
+    }
+}
+
+fn normalize_endpoint(addr: SocketAddr) -> SocketAddr {
+    match addr {
+        SocketAddr::V6(addr) => match addr.ip().to_ipv4_mapped() {
+            Some(ipv4) => (ipv4, addr.port()).into(),
+            None => addr.into(),
+        },
+        addr => addr,
+    }
+}
+
 pub struct PeerState {
     /// The associated tunnel struct
     pub(crate) tunnel: Tunn,
@@ -53,7 +75,7 @@ impl PeerState {
     ) -> PeerState {
         Self {
             tunnel,
-            endpoint: Endpoint { addr: endpoint },
+            endpoint: Endpoint::new(endpoint),
             allowed_ips: allowed_ips.iter().map(|ip| (ip, ())).collect(),
             #[cfg(feature = "daita")]
             daita_settings,
@@ -112,7 +134,7 @@ impl PeerState {
     }
 
     pub fn set_endpoint(&mut self, addr: SocketAddr) {
-        self.endpoint.addr = Some(addr);
+        self.endpoint.set(Some(addr));
     }
 
     pub fn allowed_ips(&self) -> impl Iterator<Item = IpNetwork> + '_ {
@@ -129,5 +151,29 @@ impl PeerState {
 
     pub fn preshared_key(&self) -> Option<[u8; 32]> {
         self.tunnel.preshared_key()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
+
+    use super::normalize_endpoint;
+
+    #[test]
+    fn normalizes_only_ipv4_mapped_endpoints() {
+        let mapped = SocketAddr::V6(SocketAddrV6::new(
+            Ipv4Addr::new(192, 0, 2, 1).to_ipv6_mapped(),
+            51_820,
+            1,
+            2,
+        ));
+        let native = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 51_820, 1, 2));
+
+        assert_eq!(
+            normalize_endpoint(mapped),
+            SocketAddr::from((Ipv4Addr::new(192, 0, 2, 1), 51_820))
+        );
+        assert_eq!(normalize_endpoint(native), native);
     }
 }
