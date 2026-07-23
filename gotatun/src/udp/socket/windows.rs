@@ -26,6 +26,30 @@ use crate::{
     udp::{UdpRecv, UdpSend, check_send_max_number_of_packets, socket::UdpSocket},
 };
 
+pub(super) fn set_exclusive_address_use(socket: &Socket) -> io::Result<()> {
+    let enabled = 1_i32;
+
+    // SAFETY: The socket is live, `enabled` is a correctly sized Winsock BOOL,
+    // and `setsockopt` does not retain the pointer after returning.
+    let result = unsafe {
+        WinSock::setsockopt(
+            socket.as_raw_socket() as WinSock::SOCKET,
+            WinSock::SOL_SOCKET,
+            WinSock::SO_EXCLUSIVEADDRUSE,
+            std::ptr::from_ref(&enabled).cast(),
+            mem::size_of_val(&enabled) as i32,
+        )
+    };
+    if result != WinSock::SOCKET_ERROR {
+        return Ok(());
+    }
+
+    // SAFETY: `WSAGetLastError` has no preconditions and immediately follows
+    // the failed Winsock operation on this thread.
+    let error = unsafe { WinSock::WSAGetLastError() };
+    Err(io::Error::from_raw_os_error(error))
+}
+
 pub struct SendmmsgBuf {
     buffer: Vec<u8>,
     cmsg: Box<Cmsg>,

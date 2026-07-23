@@ -99,6 +99,13 @@ enum UdpSocketInner {
     DisabledIpv6,
 }
 
+#[derive(Copy, Clone)]
+enum BindMode {
+    ReuseAddress,
+    Exclusive,
+    ExclusiveIpv6,
+}
+
 /// Options set on the socket created by [`UdpSocket::bind`].
 #[derive(Copy, Clone, Debug, Default)]
 pub struct SockOpt {
@@ -119,16 +126,36 @@ impl UdpSocket {
     /// - `reuse_address`, to allow IPv6 and IPv4 sockets to be bound to the same port.
     /// - `{recv,send}_buffer_size`, for better performance. See [`SockOpt`].
     pub fn bind(addr: SocketAddr, opts: SockOpt) -> io::Result<Self> {
+        Self::bind_inner(addr, opts, BindMode::ReuseAddress)
+    }
+
+    fn bind_exclusive(addr: SocketAddr, opts: SockOpt) -> io::Result<Self> {
+        Self::bind_inner(addr, opts, BindMode::Exclusive)
+    }
+
+    fn bind_ipv6_only(addr: Ipv6Addr, port: u16, opts: SockOpt) -> io::Result<Self> {
+        Self::bind_inner((addr, port).into(), opts, BindMode::ExclusiveIpv6)
+    }
+
+    fn bind_inner(addr: SocketAddr, opts: SockOpt, mode: BindMode) -> io::Result<Self> {
         let domain = match addr {
             SocketAddr::V4(..) => socket2::Domain::IPV4,
             SocketAddr::V6(..) => socket2::Domain::IPV6,
         };
 
-        // Construct the socket using `socket2` because we need to set the reuse_address flag.
         let udp_sock =
             socket2::Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))?;
         udp_sock.set_nonblocking(true)?;
-        udp_sock.set_reuse_address(true)?;
+        if matches!(mode, BindMode::ReuseAddress) {
+            udp_sock.set_reuse_address(true)?;
+        }
+        #[cfg(target_os = "windows")]
+        if matches!(mode, BindMode::Exclusive | BindMode::ExclusiveIpv6) {
+            windows::set_exclusive_address_use(&udp_sock)?;
+        }
+        if matches!(mode, BindMode::ExclusiveIpv6) {
+            udp_sock.set_only_v6(true)?;
+        }
         #[cfg(target_os = "linux")]
         if let Some(mark) = opts.fwmark {
             udp_sock.set_mark(mark)?;
@@ -199,6 +226,9 @@ const BIND_MAX_RETRIES: u32 = 10;
 
 /// Bind both an IPv4 and IPv6 UDP socket to the given port.
 ///
+/// Both sockets use non-reuse bindings. The IPv6 socket is IPv6-only, allowing both address
+/// families to bind the same numeric port without enabling `SO_REUSEADDR`.
+///
 /// When `port` is 0 (random port), the IPv4 socket is bound first to get a port, then the IPv6
 /// socket is bound to the same port. If the IPv6 bind fails with `AddrInUse`, both sockets are
 /// rebound to a new random port, up to [`BIND_MAX_RETRIES`] times.
@@ -208,11 +238,11 @@ fn bind_sockets(
     port: u16,
     opts: SockOpt,
 ) -> io::Result<(UdpSocket, UdpSocket)> {
-    let udp_v4 = UdpSocket::bind((addr_v4, port).into(), opts)?;
+    let udp_v4 = UdpSocket::bind_exclusive((addr_v4, port).into(), opts)?;
     match port {
         0 => bind_v6_with_retry(addr_v4, addr_v6, udp_v4, opts),
         p => {
-            let udp_v6 = UdpSocket::bind((addr_v6, p).into(), opts)?;
+            let udp_v6 = UdpSocket::bind_ipv6_only(addr_v6, p, opts)?;
             Ok((udp_v4, udp_v6))
         }
     }
@@ -220,7 +250,7 @@ fn bind_sockets(
 
 #[cfg(target_os = "linux")]
 fn bind_ipv4_socket(addr_v4: Ipv4Addr, port: u16, opts: SockOpt) -> io::Result<UdpSocket> {
-    UdpSocket::bind((addr_v4, port).into(), opts)
+    UdpSocket::bind_exclusive((addr_v4, port).into(), opts)
 }
 
 /// When using a random port, the port chosen for IPv4 might already be in use on IPv6.
@@ -234,14 +264,14 @@ fn bind_v6_with_retry(
     let mut port = UdpSocket::local_addr(&udp_v4)?.port();
     let mut retries = 0u32;
     let udp_v6 = loop {
-        match UdpSocket::bind((addr_v6, port).into(), opts) {
+        match UdpSocket::bind_ipv6_only(addr_v6, port, opts) {
             Ok(sock) => break sock,
             Err(err) if is_bind_retry_error(&err) && retries < BIND_MAX_RETRIES => {
                 retries += 1;
                 tracing::debug!(
                     "IPv6 port {port} already in use, retrying ({retries}/{BIND_MAX_RETRIES})"
                 );
-                udp_v4 = UdpSocket::bind((addr_v4, 0).into(), opts)?;
+                udp_v4 = UdpSocket::bind_exclusive((addr_v4, 0).into(), opts)?;
                 port = UdpSocket::local_addr(&udp_v4)?.port();
             }
             Err(err) => return Err(err),
@@ -271,8 +301,7 @@ fn is_bind_retry_error(err: &io::Error) -> bool {
     {
         err.kind() == io::ErrorKind::AddrInUse
     }
-    // Windows returns PermissionDenied (WSAEACCES) when binding with SO_REUSEADDR to a port
-    // held by a socket without SO_REUSEADDR.
+    // Windows can report port ownership conflicts as WSAEACCES (PermissionDenied).
     #[cfg(target_os = "windows")]
     {
         err.kind() == io::ErrorKind::AddrInUse || err.kind() == io::ErrorKind::PermissionDenied
@@ -350,6 +379,75 @@ mod tests {
         assert!(socket.local_addr().unwrap().is_ipv4());
     }
 
+    #[tokio::test]
+    async fn bind_sockets_rejects_duplicate_port_and_releases_it() {
+        let sockets = bind_sockets(
+            Ipv4Addr::UNSPECIFIED,
+            Ipv6Addr::UNSPECIFIED,
+            0,
+            SockOpt::default(),
+        )
+        .expect("bind exclusive sockets");
+        let port = sockets.0.local_addr().expect("local address").port();
+
+        let error = match bind_sockets(
+            Ipv4Addr::UNSPECIFIED,
+            Ipv6Addr::UNSPECIFIED,
+            port,
+            SockOpt::default(),
+        ) {
+            Ok(_) => panic!("a second socket pair claimed an active UDP port"),
+            Err(error) => error,
+        };
+        assert!(
+            is_bind_retry_error(&error),
+            "unexpected bind error: {error}"
+        );
+
+        drop(sockets);
+        bind_sockets(
+            Ipv4Addr::UNSPECIFIED,
+            Ipv6Addr::UNSPECIFIED,
+            port,
+            SockOpt::default(),
+        )
+        .expect("released UDP port should be immediately reusable");
+    }
+
+    #[tokio::test]
+    async fn later_reuse_address_socket_cannot_claim_a_live_factory_port() {
+        let (udp_v4, udp_v6) = bind_sockets(
+            Ipv4Addr::UNSPECIFIED,
+            Ipv6Addr::UNSPECIFIED,
+            0,
+            SockOpt::default(),
+        )
+        .expect("bind exclusive sockets");
+        for address in [udp_v4.local_addr(), udp_v6.local_addr()] {
+            let address = address.expect("local address");
+            let domain = if address.is_ipv4() {
+                socket2::Domain::IPV4
+            } else {
+                socket2::Domain::IPV6
+            };
+            let contender =
+                socket2::Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))
+                    .expect("create contender");
+            if address.is_ipv6() {
+                contender.set_only_v6(true).expect("set IPV6_V6ONLY");
+            }
+            contender.set_reuse_address(true).expect("set SO_REUSEADDR");
+
+            let error = contender
+                .bind(&address.into())
+                .expect_err("live WireGuard port must remain exclusive");
+            assert!(
+                is_bind_retry_error(&error),
+                "unexpected bind error: {error}"
+            );
+        }
+    }
+
     /// Test that `bind_sockets` retries when the IPv6 port is already in use.
     ///
     /// We create an IPv6-only blocker (`IPV6_V6ONLY`, no `SO_REUSEADDR`) to exclusively
@@ -375,7 +473,7 @@ mod tests {
             .port();
 
         // Pre-bind IPv4 to the blocked port (succeeds because the blocker is IPv6-only).
-        let udp_v4 = UdpSocket::bind(
+        let udp_v4 = UdpSocket::bind_exclusive(
             (Ipv4Addr::UNSPECIFIED, blocked_port).into(),
             SockOpt::default(),
         )
