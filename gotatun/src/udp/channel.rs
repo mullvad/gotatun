@@ -236,7 +236,10 @@ impl UdpSend for UdpChannelTx {
                     dest.port(),
                     &udp_payload,
                 );
-                self.udp_tx_v4.send(ipv4).await.expect("receiver exists");
+                self.udp_tx_v4
+                    .send(ipv4)
+                    .await
+                    .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))?;
             }
             SocketAddr::V6(dest) => {
                 let ipv6 = create_ipv6_payload(
@@ -247,7 +250,10 @@ impl UdpSend for UdpChannelTx {
                     &udp_payload,
                     self.connection_id,
                 );
-                self.udp_tx_v6.send(ipv6).await.expect("receiver exists");
+                self.udp_tx_v6
+                    .send(ipv6)
+                    .await
+                    .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))?;
             }
         };
 
@@ -258,7 +264,11 @@ impl UdpRecv for UdpChannelV4Rx {
     type RecvManyBuf = ();
 
     async fn recv_from(&mut self, _pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
-        let ipv4 = self.udp_rx_v4.recv().await.expect("sender exists");
+        let ipv4 = self
+            .udp_rx_v4
+            .recv()
+            .await
+            .ok_or(io::Error::new(io::ErrorKind::BrokenPipe, "channel closed"))?;
 
         let source_addr = ipv4.header.source();
 
@@ -277,7 +287,11 @@ impl UdpRecv for UdpChannelV6Rx {
     type RecvManyBuf = ();
 
     async fn recv_from(&mut self, _pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
-        let ipv6 = self.udp_rx_v6.recv().await.expect("sender exists");
+        let ipv6 = self
+            .udp_rx_v6
+            .recv()
+            .await
+            .ok_or(io::Error::new(io::ErrorKind::BrokenPipe, "channel closed"))?;
 
         let source_addr = ipv6.header.source();
 

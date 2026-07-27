@@ -102,7 +102,7 @@ impl IpSend for BufferedIpSend {
         self.tx
             .send(packet)
             .await
-            .expect("receiver dropped after senders");
+            .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))?;
         Ok(())
     }
 }

@@ -72,7 +72,7 @@ impl IpSend for TunChannelTx {
                         self.tun_tx_v4
                             .send(udp_packet)
                             .await
-                            .expect("receiver exists");
+                            .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))?;
                     }
                     Err(e) => tracing::trace!("Invalid UDP packet: {e:?}"),
                 }
@@ -82,7 +82,7 @@ impl IpSend for TunChannelTx {
                     self.tun_tx_v6
                         .send(udp_packet)
                         .await
-                        .expect("receiver exists");
+                        .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))?;
                 }
                 Err(e) => tracing::trace!("Invalid UDP packet: {e:?}"),
             },
