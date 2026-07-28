@@ -178,21 +178,6 @@ pub trait UdpSend: Send + Sync + Clone {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn check_send_max_number_of_packets(
-    max_number_of_packets: usize,
-    packets: &[(Packet, SocketAddr)],
-) -> io::Result<()> {
-    debug_assert!(packets.len() <= max_number_of_packets);
-    if packets.len() > max_number_of_packets {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("send_many_to: Number of packets may not exceed {max_number_of_packets}"),
-        ));
-    }
-    Ok(())
-}
-
 async fn generic_send_many_to<U: UdpSend>(
     transport: &U,
     packets: &mut Vec<(Packet, SocketAddr)>,
