@@ -100,7 +100,7 @@ impl UdpSend for BufferedUdpSend {
         };
         tx.send((packet, destination))
             .await
-            .expect("receiver task is never stopped while Self exists");
+            .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))?;
         Ok(())
     }
 
