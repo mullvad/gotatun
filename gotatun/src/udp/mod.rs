@@ -11,8 +11,9 @@
 
 //! Trait abstractions for UDP sockets.
 //!
-//! [`socket`] contains implementation for actual UDP sockets.
-//! [`channel`] contains implementation for tokio-based channels.
+//! - [`socket`] contains implementation for actual UDP sockets.
+//! - [`channel`] contains implementation for tokio-based channels.
+#![cfg_attr(not(feature = "socket"), expect(rustdoc::broken_intra_doc_links))]
 
 use std::{
     future::Future,
@@ -25,6 +26,7 @@ use crate::packet::{Packet, PacketBufPool};
 #[cfg(feature = "device")]
 pub(crate) mod buffer;
 pub mod channel;
+#[cfg(feature = "socket")]
 pub mod socket;
 
 /// An abstraction of `UdpSocket::bind`.
@@ -164,6 +166,10 @@ pub trait UdpSend: Send + Sync + Clone {
     /// Get the port in use, if any.
     ///
     /// This is applicable to UDP sockets, i.e. [`tokio::net::UdpSocket`].
+    #[cfg_attr(
+        not(any(feature = "socket", feature = "tun")),
+        expect(rustdoc::broken_intra_doc_links)
+    )]
     fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
         Ok(None)
     }
@@ -172,24 +178,13 @@ pub trait UdpSend: Send + Sync + Clone {
     ///
     /// This is applicable to UDP sockets, i.e. [`tokio::net::UdpSocket`].
     #[cfg(target_os = "linux")]
+    #[cfg_attr(
+        not(any(feature = "socket", feature = "tun")),
+        expect(rustdoc::broken_intra_doc_links)
+    )]
     fn set_fwmark(&self, _mark: u32) -> io::Result<()> {
         Ok(())
     }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn check_send_max_number_of_packets(
-    max_number_of_packets: usize,
-    packets: &[(Packet, SocketAddr)],
-) -> io::Result<()> {
-    debug_assert!(packets.len() <= max_number_of_packets);
-    if packets.len() > max_number_of_packets {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("send_many_to: Number of packets may not exceed {max_number_of_packets}"),
-        ));
-    }
-    Ok(())
 }
 
 async fn generic_send_many_to<U: UdpSend>(

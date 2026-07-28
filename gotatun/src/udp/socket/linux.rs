@@ -21,7 +21,10 @@ use tokio::io::Interest;
 
 use crate::{
     packet::Packet,
-    udp::{UdpSend, check_send_max_number_of_packets, socket::UdpSocket},
+    udp::{
+        UdpSend,
+        socket::{UdpSocket, check_send_max_number_of_packets},
+    },
 };
 
 /// Max number of packets/messages for sendmmsg/recvmmsg

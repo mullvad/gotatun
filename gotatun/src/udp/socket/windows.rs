@@ -23,7 +23,10 @@ use cmsg::Cmsg;
 
 use crate::{
     packet::{Packet, PacketBufPool},
-    udp::{UdpRecv, UdpSend, check_send_max_number_of_packets, socket::UdpSocket},
+    udp::{
+        UdpRecv, UdpSend,
+        socket::{UdpSocket, check_send_max_number_of_packets},
+    },
 };
 
 pub struct SendmmsgBuf {

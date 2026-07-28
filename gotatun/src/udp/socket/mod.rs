@@ -279,6 +279,21 @@ fn is_bind_retry_error(err: &io::Error) -> bool {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
+fn check_send_max_number_of_packets(
+    max_number_of_packets: usize,
+    packets: &[(crate::packet::Packet, SocketAddr)],
+) -> io::Result<()> {
+    debug_assert!(packets.len() <= max_number_of_packets);
+    if packets.len() > max_number_of_packets {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("send_many_to: Number of packets may not exceed {max_number_of_packets}"),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
