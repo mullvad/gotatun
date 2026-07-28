@@ -580,8 +580,6 @@ impl<T: DeviceTransports> DeviceState<T> {
     #[instrument(level = Level::TRACE, skip_all)]
     async fn handle_timers(device: Weak<RwLock<Self>>, udp4: impl UdpSend, udp6: impl UdpSend) {
         loop {
-            tokio::time::sleep(Duration::from_millis(250)).await;
-
             let Some(device) = device.upgrade() else {
                 break;
             };
@@ -630,6 +628,9 @@ impl<T: DeviceTransports> DeviceState<T> {
                     Err(e) => tracing::error!("Timer error = {e:?}: {e:?}"),
                 }
             }
+
+            drop(device);
+            tokio::time::sleep(Duration::from_millis(250)).await;
         }
     }
 

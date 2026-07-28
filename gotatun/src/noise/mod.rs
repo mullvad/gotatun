@@ -546,6 +546,10 @@ mod tests {
     use mock_instant::thread_local::MockClock;
 
     fn create_two_tuns() -> (Tunn, Tunn) {
+        create_two_tuns_with_keepalive(None)
+    }
+
+    fn create_two_tuns_with_keepalive(persistent_keepalive: Option<u16>) -> (Tunn, Tunn) {
         let my_secret_key = x25519_dalek::StaticSecret::random_from_rng(rand_core::OsRng);
         let my_public_key = x25519_dalek::PublicKey::from(&my_secret_key);
 
@@ -557,7 +561,7 @@ mod tests {
             my_secret_key,
             their_public_key,
             None,
-            None,
+            persistent_keepalive,
             IndexTable::from_os_rng(),
             rate_limiter,
         );
@@ -639,7 +643,6 @@ mod tests {
         packet.try_into_ipvx().unwrap().unwrap_left()
     }
 
-    #[cfg(feature = "mock_instant")]
     fn update_timer_results_in_handshake(tun: &mut Tunn) {
         let packet = tun
             .update_timers()
@@ -657,6 +660,39 @@ mod tests {
     fn handshake_init() {
         let (mut my_tun, _their_tun) = create_two_tuns();
         let _init = create_handshake_init(&mut my_tun);
+    }
+
+    #[test]
+    fn configured_persistent_keepalive_remains_immediate_after_reset_and_update() {
+        let (mut my_tun, _their_tun) = create_two_tuns_with_keepalive(Some(25));
+
+        update_timer_results_in_handshake(&mut my_tun);
+        assert!(matches!(my_tun.update_timers(), Ok(None)));
+        my_tun.reset();
+        my_tun.set_persistent_keepalive(Some(30));
+        update_timer_results_in_handshake(&mut my_tun);
+    }
+
+    #[test]
+    #[cfg(feature = "mock_instant")]
+    fn persistent_keepalive_uses_configured_interval_after_initial_send() {
+        const INTERVAL: Duration = Duration::from_secs(25);
+
+        MockClock::set_time(Duration::ZERO);
+        let (mut my_tun, _their_tun) = create_two_tuns_and_handshake();
+        my_tun.set_persistent_keepalive(Some(25));
+        assert!(matches!(
+            my_tun.update_timers(),
+            Ok(Some(WgKind::Data(packet))) if packet.is_keepalive()
+        ));
+
+        MockClock::advance(INTERVAL - Duration::from_millis(1));
+        assert!(matches!(my_tun.update_timers(), Ok(None)));
+        MockClock::advance(Duration::from_millis(1));
+        assert!(matches!(
+            my_tun.update_timers(),
+            Ok(Some(WgKind::Data(packet))) if packet.is_keepalive()
+        ));
     }
 
     #[test]
