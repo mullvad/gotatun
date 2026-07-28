@@ -176,7 +176,7 @@ impl<T: DeviceTransports> Connection<T> {
             return Ok(());
         }
 
-        let pool = PacketBufPool::new(MAX_PACKET_BUFS);
+        let pool = PacketBufPool::new_lazy(MAX_PACKET_BUFS);
 
         // clean up existing connection
         if let Some(conn) = device.connection.take() {
