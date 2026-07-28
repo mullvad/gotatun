@@ -11,8 +11,9 @@
 
 //! Trait abstractions for UDP sockets.
 //!
-//! [`socket`] contains implementation for actual UDP sockets.
-//! [`channel`] contains implementation for tokio-based channels.
+//! - [`socket`] contains implementation for actual UDP sockets.
+//! - [`channel`] contains implementation for tokio-based channels.
+#![cfg_attr(not(feature = "socket"), expect(rustdoc::broken_intra_doc_links))]
 
 use std::{
     future::Future,
@@ -165,6 +166,10 @@ pub trait UdpSend: Send + Sync + Clone {
     /// Get the port in use, if any.
     ///
     /// This is applicable to UDP sockets, i.e. [`tokio::net::UdpSocket`].
+    #[cfg_attr(
+        not(any(feature = "socket", feature = "tun")),
+        expect(rustdoc::broken_intra_doc_links)
+    )]
     fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
         Ok(None)
     }
@@ -173,6 +178,10 @@ pub trait UdpSend: Send + Sync + Clone {
     ///
     /// This is applicable to UDP sockets, i.e. [`tokio::net::UdpSocket`].
     #[cfg(target_os = "linux")]
+    #[cfg_attr(
+        not(any(feature = "socket", feature = "tun")),
+        expect(rustdoc::broken_intra_doc_links)
+    )]
     fn set_fwmark(&self, _mark: u32) -> io::Result<()> {
         Ok(())
     }
