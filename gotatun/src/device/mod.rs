@@ -30,7 +30,7 @@ use builder::Nul;
 use futures::TryFutureExt;
 use std::collections::HashMap;
 use std::io::{self};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::ops::BitOrAssign;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -491,8 +491,7 @@ impl<T: DeviceTransports> DeviceState<T> {
         Error,
     > {
         let params = UdpTransportFactoryParams {
-            addr_v4: Ipv4Addr::UNSPECIFIED,
-            addr_v6: Ipv6Addr::UNSPECIFIED,
+            addr: None,
             port: self.port,
             #[cfg(target_os = "linux")]
             fwmark: self.fwmark,

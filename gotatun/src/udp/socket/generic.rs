@@ -22,8 +22,10 @@ use crate::{
 impl UdpSend for super::UdpSocket {
     type SendManyBuf = ();
 
-    async fn send_to(&self, packet: Packet, target: SocketAddr) -> io::Result<()> {
-        self.socket()?.send_to(&packet, target).await?;
+    async fn send_to(&self, packet: Packet, dest: SocketAddr) -> io::Result<()> {
+        #[cfg(target_vendor = "apple")]
+        let dest = self.map_dst(dest);
+        self.socket()?.send_to(&packet, dest).await?;
         Ok(())
     }
 
@@ -39,6 +41,8 @@ impl UdpRecv for super::UdpSocket {
         let mut buf = pool.get();
         let (n, src) = self.socket()?.recv_from(&mut buf).await?;
         buf.truncate(n);
+        #[cfg(target_vendor = "apple")]
+        let src = self.map_src(src);
         Ok((buf, src))
     }
 }
