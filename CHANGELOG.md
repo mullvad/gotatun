@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hide native UDP socket impls behind new `socket` feature.
 
 ### Fixed
+- Validate IPv4 checksums and total lengths against the full IHL-declared header.
 - Keep IPv4 fragments for different protocols in separate reassembly buffers.
 - Send persistent keepalive immediately on peer activation, instead of waiting for one full
   interval. This matches wireguard-go and Linux kernel wireguard.

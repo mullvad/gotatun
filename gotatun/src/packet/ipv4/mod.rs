@@ -134,20 +134,28 @@ impl Decoder<[u8], Ipv4<[u8]>> for Ipv4Decoder {
 
 fn validate_ipv4(d: &Ipv4Decoder, ipv4: &Ipv4) -> Result<usize, DecodeError> {
     let buf_len = ipv4.as_bytes().len();
+    let header_len = usize::from(ipv4.header.ihl()) * size_of::<u32>();
 
     if d.version && ipv4.header.version() != 4 {
         return Err(DecodeError::InvalidValue("version"));
     }
 
     if d.checksum {
-        let expected_csum = ipv4.header.compute_checksum();
+        let header = ipv4
+            .as_bytes()
+            .get(..header_len)
+            .filter(|header| header.len() >= Ipv4Header::LEN)
+            .ok_or(DecodeError::InvalidValue("IHL"))?;
+        let expected_csum = crate::packet::util::checksum_ipv4_with_skip(header);
         if ipv4.header.header_checksum.get() != expected_csum {
             return Err(DecodeError::InvalidValue("checksum"));
         }
     }
 
     let total_len = usize::from(ipv4.header.total_len.get());
-    if (d.length || d.truncate) && (total_len > buf_len || total_len < Ipv4Header::LEN) {
+    if (d.length || d.truncate)
+        && (total_len > buf_len || total_len < header_len.max(Ipv4Header::LEN))
+    {
         return Err(DecodeError::InvalidValue("total_len"));
     }
 
@@ -522,7 +530,7 @@ impl Debug for Ipv4Header {
 mod tests {
     use zerocopy::{FromBytes, IntoBytes, big_endian};
 
-    use super::{Ipv4, Ipv4Decoder, Ipv4Header, Ipv4PayloadDecoder};
+    use super::{Ipv4, Ipv4Decoder, Ipv4Header, Ipv4Options, Ipv4PayloadDecoder};
     use crate::packet::{DecodeError, Decoder, IpNextProtocol, Udp, UdpDecoder, UdpHeader};
     use std::net::Ipv4Addr;
 
@@ -556,6 +564,50 @@ mod tests {
         0xfe, 0xfd, 0xfc, 0x30, 0x39, 0xff, 0x8d, 0x0, 0x14, 0x6b, 0x0f, 0x48, 0x65, 0x6c, 0x6c,
         0x6f, 0x20, 0x74, 0x68, 0x65, 0x72, 0x65, 0x21,
     ];
+
+    const EXAMPLE_IPV4_OPTIONS: &[u8] = &[
+        0x46, 0x0, 0x0, 0x18, 0x0, 0x0, 0x0, 0x0, 0x40, 0x11, 0x8c, 0x9d, 0xc0, 0x0, 0x2, 0x1,
+        0xc6, 0x33, 0x64, 0x2, 0x1, 0x1, 0x0, 0x0,
+    ];
+
+    #[test]
+    fn ipv4_options_are_covered_by_header_checksum() {
+        let decoded: &Ipv4<Ipv4Options> = Ipv4Decoder::CHECK_ALL
+            .decode_ref(EXAMPLE_IPV4_OPTIONS)
+            .expect("IPv4 packet with valid options is valid");
+        assert_eq!(&decoded.payload.options_and_payload, &[1, 1, 0, 0]);
+
+        let mut corrupted = EXAMPLE_IPV4_OPTIONS.to_vec();
+        corrupted[Ipv4Header::LEN] ^= 1;
+        let result: Result<&Ipv4<Ipv4Options>, _> =
+            Ipv4Decoder::CHECK_ALL.decode_ref(&corrupted[..]);
+        assert!(matches!(result, Err(DecodeError::InvalidValue("checksum"))));
+    }
+
+    #[test]
+    fn ipv4_checksum_rejects_truncated_options() {
+        let mut bytes = EXAMPLE_IPV4_OPTIONS.to_vec();
+        bytes.truncate(Ipv4Header::LEN);
+
+        let result: Result<&Ipv4<Ipv4Options>, _> = Ipv4Decoder::CHECK_ALL.decode_ref(&bytes[..]);
+        assert!(matches!(result, Err(DecodeError::InvalidValue("IHL"))));
+    }
+
+    #[test]
+    fn ipv4_total_length_must_cover_options() {
+        let mut bytes = EXAMPLE_IPV4_OPTIONS.to_vec();
+        bytes[2..4].copy_from_slice(&(Ipv4Header::LEN as u16).to_be_bytes());
+
+        let decoder = Ipv4Decoder {
+            checksum: false,
+            ..Ipv4Decoder::CHECK_ALL
+        };
+        let result: Result<&Ipv4<Ipv4Options>, _> = decoder.decode_ref(&bytes[..]);
+        assert!(matches!(
+            result,
+            Err(DecodeError::InvalidValue("total_len"))
+        ));
+    }
 
     /// Test that [`decode_ref`] can decode a valid IPv4/UDP packet.
     #[test]
