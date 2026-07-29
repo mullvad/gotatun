@@ -127,6 +127,7 @@ mod gro {
     use super::super::disabled_ipv6_error;
     use super::MAX_PACKET_COUNT;
     use crate::packet::{Packet, PacketBufPool};
+    use crate::udp::socket::map_src_addr;
     use crate::udp::{UdpRecv, socket::UdpSocket};
     use bytes::BytesMut;
     use nix::cmsg_space;
@@ -165,6 +166,7 @@ mod gro {
             let mut buf = pool.get();
             let (n, src) = self.socket()?.recv_from(&mut buf).await?;
             buf.truncate(n);
+            let src = self.map_src(src);
             Ok((buf, src))
         }
 
@@ -180,6 +182,7 @@ mod gro {
 
             let socket = self.socket()?;
             let fd = socket.as_raw_fd();
+            let map_ipv4_to_ipv6 = self.map_ipv4_to_ipv6;
 
             socket
                 .async_io(Interest::READABLE, move || {
@@ -214,7 +217,7 @@ mod gro {
 
                         let Some(source_addr) = result.address.as_ref().and_then(|addr| {
                             addr.as_sockaddr_in()
-                                .map(|addr| (*addr).into())
+                                .map(|&addr| SocketAddr::from(addr))
                                 .or_else(|| addr.as_sockaddr_in6().map(|addr| (*addr).into()))
                         }) else {
                             if cfg!(debug_assertions) {
@@ -222,6 +225,8 @@ mod gro {
                             }
                             continue;
                         };
+
+                        let source_addr = map_src_addr(map_ipv4_to_ipv6, source_addr);
 
                         // TODO: is this true? Under what circumstance can the cmsg buffer overflow?
                         let mut cmsgs = result.cmsgs().expect("we have allocated enough memory");
@@ -389,6 +394,7 @@ mod android {
             let mut buf = pool.get();
             let (n, src) = self.socket()?.recv_from(&mut buf).await?;
             buf.truncate(n);
+            let src = self.map_src(src);
             Ok((buf, src))
         }
     }
