@@ -50,8 +50,9 @@ impl Default for SendmmsgBuf {
 impl UdpSend for super::UdpSocket {
     type SendManyBuf = SendmmsgBuf;
 
-    async fn send_to(&self, packet: Packet, target: SocketAddr) -> io::Result<()> {
-        tokio::net::UdpSocket::send_to(self.socket()?, &packet, target).await?;
+    async fn send_to(&self, packet: Packet, dest: SocketAddr) -> io::Result<()> {
+        let dest = self.map_dst(dest);
+        tokio::net::UdpSocket::send_to(self.socket()?, &packet, dest).await?;
         Ok(())
     }
 
@@ -127,6 +128,8 @@ impl UdpSend for super::UdpSocket {
                 continue;
             }
 
+            let dest = self.map_dst(dest);
+
             socket
                 .async_io(Interest::WRITABLE, || {
                     use std::io::IoSlice;
@@ -168,6 +171,7 @@ impl UdpRecv for super::UdpSocket {
         let mut buf = pool.get();
         let (n, src) = self.socket()?.recv_from(&mut buf).await?;
         buf.truncate(n);
+        let src = self.map_src(src);
         Ok((buf, src))
     }
 }
@@ -209,6 +213,7 @@ mod gro {
             let mut buf = pool.get();
             let (n, src) = self.socket()?.recv_from(&mut buf).await?;
             buf.truncate(n);
+            let src = self.map_src(src);
             Ok((buf, src))
         }
 
@@ -227,6 +232,8 @@ mod gro {
                 })
                 .await?;
 
+            let src = self.map_src(msg.source_addr);
+
             recv_buf
                 .gro_buf
                 .truncate(usize::try_from(msg.bytes_received).unwrap());
@@ -236,7 +243,7 @@ mod gro {
                 let mut buf = pool.get();
                 buf.buf_mut().clear();
                 buf.buf_mut().extend_from_slice(&recv_buf.gro_buf);
-                packets.push((buf, msg.source_addr));
+                packets.push((buf, src));
                 return Ok(());
             }
 
@@ -249,7 +256,7 @@ mod gro {
                 let mut buf = pool.get();
                 buf.buf_mut().clear();
                 buf.buf_mut().extend_from_slice(segment);
-                packets.push((buf, msg.source_addr));
+                packets.push((buf, src));
             }
 
             Ok(())
