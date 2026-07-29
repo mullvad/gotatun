@@ -18,7 +18,7 @@
 use std::{
     future::Future,
     io,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, SocketAddr},
 };
 
 use crate::packet::{Packet, PacketBufPool};
@@ -60,11 +60,9 @@ pub trait UdpTransportFactory: Send + Sync + 'static {
 /// Arguments to [`UdpTransportFactory::bind`].
 #[derive(Clone, Debug)]
 pub struct UdpTransportFactoryParams {
-    /// The [`Ipv4Addr`] to bind the UDP socket to.
-    pub addr_v4: Ipv4Addr,
-
-    /// The [`Ipv6Addr`] to bind the UDP socket to.
-    pub addr_v6: Ipv6Addr,
+    /// The [`IpAddr`] to bind the UDP socket to.
+    /// If `None`, attempt to bind a dual-stack IPv4/IPv6 socket to `::`.
+    pub addr: Option<IpAddr>,
 
     /// The port to bind the UDP socket to.
     pub port: u16,
