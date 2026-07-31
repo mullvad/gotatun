@@ -181,10 +181,10 @@ mod fragmentation {
             debug_assert!(more_fragments || fragment_offset != 0);
 
             // All fragments except the last must have a length that is a multiple of 8
-            // bytes, and the last fragment must not exceed the maximum IPv4 length.
+            // bytes, and the reassembled packet must not exceed the maximum IPv4 length.
             let fragment_len = ipv4_packet.payload.len();
             if (more_fragments && fragment_len % 8 != 0)
-                || fragment_len + fragment_offset as usize * 8 > Ipv4::MAX_LEN
+                || fragment_len + usize::from(fragment_offset) * 8 > Ipv4::MAX_LEN - Ipv4Header::LEN
             {
                 tracing::trace!(
                     "Invalid fragment size: {fragment_len} or fragment offset: {fragment_offset}, dropping"
@@ -589,6 +589,41 @@ mod fragmentation {
                 0,
                 "All fragments should be processed"
             );
+        }
+
+        #[test]
+        fn test_reassembled_ipv4_packet_length_limit() {
+            const FRAGMENT_PAYLOAD_LEN: usize = 1480;
+
+            let mut fragments = Ipv4Fragments::default();
+            let src = Ipv4Addr::new(192, 0, 2, 1);
+            let dst = Ipv4Addr::new(192, 0, 2, 2);
+            let max_payload_len = Ipv4::MAX_LEN - Ipv4Header::LEN;
+            let fragment_payload = vec![0; FRAGMENT_PAYLOAD_LEN];
+            let full_fragment_count = max_payload_len / FRAGMENT_PAYLOAD_LEN;
+            let last_offset =
+                u16::try_from(full_fragment_count * FRAGMENT_PAYLOAD_LEN / 8).unwrap();
+            let insert_full_fragments = |fragments: &mut Ipv4Fragments, id| {
+                for i in 0..full_fragment_count {
+                    let offset = u16::try_from(i * FRAGMENT_PAYLOAD_LEN / 8).unwrap();
+                    let fragment = make_ip_fragment(id, src, dst, offset, true, &fragment_payload);
+                    assert!(fragments.assemble_ipv4_fragment(fragment).is_none());
+                }
+            };
+
+            insert_full_fragments(&mut fragments, 42);
+            let last_payload = vec![0; max_payload_len % FRAGMENT_PAYLOAD_LEN];
+            let last = make_ip_fragment(42, src, dst, last_offset, false, &last_payload);
+            let packet = fragments
+                .assemble_ipv4_fragment(last)
+                .expect("Maximum-size IPv4 packet should be reassembled");
+            assert_eq!(packet.as_bytes().len(), Ipv4::MAX_LEN);
+
+            insert_full_fragments(&mut fragments, 43);
+            let oversized_last_payload = vec![0; last_payload.len() + 1];
+            let oversized_last =
+                make_ip_fragment(43, src, dst, last_offset, false, &oversized_last_payload);
+            assert!(fragments.assemble_ipv4_fragment(oversized_last).is_none());
         }
 
         #[test]
