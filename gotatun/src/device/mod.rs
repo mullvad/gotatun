@@ -30,7 +30,7 @@ use builder::Nul;
 use futures::TryFutureExt;
 use std::collections::HashMap;
 use std::io::{self};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::ops::BitOrAssign;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -699,12 +699,7 @@ impl<T: DeviceTransports> DeviceState<T> {
             let Some(peer_arc) = peer else { continue };
             let mut peer = peer_arc.lock().await;
 
-            #[cfg(feature = "daita")]
-            let PeerState { tunnel, daita, .. } = &mut *peer;
-            #[cfg(not(feature = "daita"))]
-            let PeerState { tunnel, .. } = &mut *peer;
-
-            match tunnel.handle_incoming_packet(parsed_packet) {
+            match peer.tunnel.handle_incoming_packet(parsed_packet) {
                 TunnResult::Done => {
                     // Don't update the peer endpoint on cookie replies, for consistency
                     // with both the Linux kernel and wireguard-go.
@@ -715,9 +710,12 @@ impl<T: DeviceTransports> DeviceState<T> {
                     // Register sender_idx from outgoing handshake packets
                     Self::register_handshake_idx(&device_guard.peers_by_idx, &packet, &peer_arc);
 
+                    // Update the peer endpoint if we received any authenticated packet
+                    peer.set_endpoint(addr);
+
                     // TODO: does this end up with the packets being out-of-order?
                     let packets =
-                        std::iter::once(packet).chain(tunnel.get_queued_packets(&mut tun_mtu));
+                        std::iter::once(packet).chain(peer.tunnel.get_queued_packets(&mut tun_mtu));
 
                     #[cfg(feature = "daita")]
                     let packets = packets.filter_map(|p| match daita {
@@ -731,9 +729,6 @@ impl<T: DeviceTransports> DeviceState<T> {
                             break;
                         }
                     }
-
-                    // Update the peer endpoint if we received any authenticated packet
-                    peer.set_endpoint(addr);
                 }
                 #[cfg_attr(not(feature = "daita"), expect(unused_mut))]
                 TunnResult::WriteToTunnel(mut packet) => {
@@ -747,6 +742,8 @@ impl<T: DeviceTransports> DeviceState<T> {
 
                     // Update the peer endpoint if we received any authenticated packet
                     peer.set_endpoint(addr);
+
+                    drop(peer); // Release peer lock
 
                     // keepalive
                     if packet.is_empty() {
@@ -769,10 +766,8 @@ impl<T: DeviceTransports> DeviceState<T> {
                         .is_some_and(|owner| Arc::ptr_eq(owner, &peer_arc));
                     if !routed_to_this_peer {
                         if cfg!(debug_assertions) {
-                            let unspecified = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0).into();
                             tracing::warn!(
-                                "peer at {} is not allowed to send us packets from: {source}",
-                                peer.endpoint().addr.unwrap_or(unspecified)
+                                "peer at {addr} is not allowed to send us packets from: {source}",
                             );
                         }
                         continue;
