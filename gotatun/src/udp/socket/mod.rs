@@ -238,9 +238,9 @@ mod tests {
     use zerocopy::IntoBytes;
 
     use super::*;
+    use crate::packet::Packet;
     #[cfg(target_os = "linux")]
     use crate::packet::PacketBufPool;
-    use crate::packet::Packet;
     #[cfg(target_os = "linux")]
     use crate::udp::UdpRecv;
     use crate::udp::UdpSend;
