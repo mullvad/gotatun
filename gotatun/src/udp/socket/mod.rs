@@ -245,6 +245,7 @@ mod tests {
     use crate::udp::UdpRecv;
     use crate::udp::UdpSend;
     use std::net::{Ipv4Addr, Ipv6Addr};
+    #[cfg(not(windows))]
     use std::os::fd::{AsRawFd, FromRawFd};
     use std::time::Duration;
 
@@ -309,13 +310,16 @@ mod tests {
         };
         let ((dual_sock, ..), ..) = factory.bind(&params).await.expect("bind");
         let addr = dual_sock.local_addr().expect("local_addr");
+        assert_eq!(addr.ip(), Ipv6Addr::UNSPECIFIED);
 
         // Assert that IPV6_V6ONLY is explicitly false.
-        assert_eq!(addr.ip(), Ipv6Addr::UNSPECIFIED);
-        let socket2 =
-            unsafe { socket2::Socket::from_raw_fd(dual_sock.socket().unwrap().as_raw_fd()) };
-        assert!(!socket2.only_v6().unwrap());
-        std::mem::forget(socket2);
+        #[cfg(not(windows))]
+        {
+            let socket2 =
+                unsafe { socket2::Socket::from_raw_fd(dual_sock.socket().unwrap().as_raw_fd()) };
+            assert!(!socket2.only_v6().unwrap());
+            std::mem::forget(socket2);
+        }
 
         // Bind two new sockets for receving packets from `socket`
         let bind = async |addr: IpAddr| tokio::net::UdpSocket::bind((addr, 0)).await.unwrap();
