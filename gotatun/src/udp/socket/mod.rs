@@ -88,6 +88,8 @@ impl UdpTransportFactory for UdpSocketFactory {
 #[derive(Clone)]
 pub struct UdpSocket {
     inner: UdpSocketInner,
+    #[cfg(target_os = "windows")]
+    map_ipv4_to_ipv6: bool,
 }
 
 #[derive(Clone)]
@@ -162,12 +164,16 @@ impl UdpSocket {
 
         Ok(Self {
             inner: UdpSocketInner::Socket(Arc::new(inner)),
+            #[cfg(target_os = "windows")]
+            map_ipv4_to_ipv6: addr.is_ipv6() && opts.only_v6 == Some(false),
         })
     }
 
     fn disabled_ipv6() -> Self {
         Self {
             inner: UdpSocketInner::DisabledIpv6,
+            #[cfg(target_os = "windows")]
+            map_ipv4_to_ipv6: false
         }
     }
 

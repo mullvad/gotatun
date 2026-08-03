@@ -50,8 +50,9 @@ impl Default for SendmmsgBuf {
 impl UdpSend for super::UdpSocket {
     type SendManyBuf = SendmmsgBuf;
 
-    async fn send_to(&self, packet: Packet, target: SocketAddr) -> io::Result<()> {
-        tokio::net::UdpSocket::send_to(self.socket()?, &packet, target).await?;
+    async fn send_to(&self, packet: Packet, dest: SocketAddr) -> io::Result<()> {
+        let dest = self.map_addr(dest);
+        tokio::net::UdpSocket::send_to(self.socket()?, &packet, dest).await?;
         Ok(())
     }
 
@@ -127,6 +128,8 @@ impl UdpSend for super::UdpSocket {
                 continue;
             }
 
+            let dest = self.map_addr(dest);
+
             socket
                 .async_io(Interest::WRITABLE, || {
                     use std::io::IoSlice;
@@ -169,6 +172,17 @@ impl UdpRecv for super::UdpSocket {
         let (n, src) = self.socket()?.recv_from(&mut buf).await?;
         buf.truncate(n);
         Ok((buf, src))
+    }
+}
+
+impl super::UdpSocket {
+    /// Map an IPv4 address to IPv6 if necessary.
+    #[inline(always)]
+    fn map_addr(&self, mut addr: SocketAddr) -> SocketAddr {
+        if self.map_ipv4_to_ipv6 && let std::net::IpAddr::V4(ip) = addr.ip() {
+            addr.set_ip(ip.to_ipv6_mapped());
+        }
+        addr
     }
 }
 
