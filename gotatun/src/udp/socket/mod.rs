@@ -196,7 +196,7 @@ impl UdpSocket {
 
 fn is_ipv6_unavailable(err: &io::Error) -> bool {
     cfg_select! {
-        target_os = "linux" | target_os = "android" => {
+        any(target_os = "linux", target_os = "android") => {
             matches!(
                 err.raw_os_error(),
                 Some(libc::EAFNOSUPPORT | libc::EADDRNOTAVAIL)
