@@ -171,7 +171,7 @@ impl UdpSocket {
         }
     }
 
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg(target_os = "linux")]
     pub(crate) fn is_disabled_ipv6(&self) -> bool {
         matches!(&self.inner, UdpSocketInner::DisabledIpv6)
     }
