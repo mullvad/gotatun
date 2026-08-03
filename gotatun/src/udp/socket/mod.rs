@@ -239,9 +239,11 @@ mod tests {
 
     use super::*;
     #[cfg(target_os = "linux")]
-    use crate::packet::{Packet, PacketBufPool};
+    use crate::packet::PacketBufPool;
+    use crate::packet::Packet;
     #[cfg(target_os = "linux")]
-    use crate::udp::{UdpRecv, UdpSend};
+    use crate::udp::UdpRecv;
+    use crate::udp::UdpSend;
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::os::fd::{AsRawFd, FromRawFd};
     use std::time::Duration;
