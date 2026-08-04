@@ -67,8 +67,7 @@ impl PeerState {
         peer: &std::sync::Arc<tokio::sync::Mutex<PeerState>>,
         pool: packet::PacketBufPool,
         tun_rx_mtu: MtuWatcher,
-        udp_tx_v4: US,
-        udp_tx_v6: US,
+        udp_tx: US,
     ) -> Result<(), super::Error> {
         let mut peer_g = peer.lock().await;
         let Some(daita_settings) = peer_g.daita_settings.clone() else {
@@ -80,8 +79,7 @@ impl PeerState {
             daita_settings,
             std::sync::Arc::downgrade(peer),
             tun_rx_mtu,
-            udp_tx_v4,
-            udp_tx_v6,
+            udp_tx,
             pool,
         )?);
 
