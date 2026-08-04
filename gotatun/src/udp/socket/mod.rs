@@ -185,6 +185,18 @@ impl UdpSocket {
     fn map_src(&self, addr: SocketAddr) -> SocketAddr {
         map_src_addr(self.map_ipv4_to_ipv6, addr)
     }
+
+    /// TODO write doc, doesn't require mut self
+    pub async fn recv_from_pool(
+        &self,
+        pool: &mut crate::packet::PacketBufPool,
+    ) -> io::Result<(crate::packet::Packet, SocketAddr)> {
+        let mut buf = pool.get();
+        let (n, src) = self.socket().recv_from(&mut buf).await?;
+        buf.truncate(n);
+        let src = self.map_src(src);
+        Ok((buf, src))
+    }
 }
 
 #[cfg(not(windows))]
