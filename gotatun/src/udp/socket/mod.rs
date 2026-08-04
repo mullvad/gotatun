@@ -173,7 +173,7 @@ impl UdpSocket {
         Self {
             inner: UdpSocketInner::DisabledIpv6,
             #[cfg(target_os = "windows")]
-            map_ipv4_to_ipv6: false
+            map_ipv4_to_ipv6: false,
         }
     }
 
@@ -251,8 +251,6 @@ mod tests {
     use crate::udp::UdpRecv;
     use crate::udp::UdpSend;
     use std::net::{Ipv4Addr, Ipv6Addr};
-    #[cfg(not(windows))]
-    use std::os::fd::{AsRawFd, FromRawFd};
     use std::time::Duration;
 
     #[cfg(target_os = "linux")]
@@ -318,13 +316,22 @@ mod tests {
         let addr = dual_sock.local_addr().expect("local_addr");
         assert_eq!(addr.ip(), Ipv6Addr::UNSPECIFIED);
 
-        // Assert that IPV6_V6ONLY is explicitly false.
+        // Assert that IPV6_V6ONLY is false.
         #[cfg(not(windows))]
         {
-            let socket2 =
-                unsafe { socket2::Socket::from_raw_fd(dual_sock.socket().unwrap().as_raw_fd()) };
+            use std::os::fd::{AsRawFd, FromRawFd};
+            let raw_fd = dual_sock.socket().unwrap().as_raw_fd();
+            let socket2 = unsafe { socket2::Socket::from_raw_fd(raw_fd) };
             assert!(!socket2.only_v6().unwrap());
-            std::mem::forget(socket2);
+            std::mem::forget(socket2); // Don't close the socket
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::{AsRawSocket, FromRawSocket};
+            let raw_socket = dual_sock.socket().unwrap().as_raw_socket();
+            let socket2 = unsafe { socket2::Socket::from_raw_socket(raw_socket) };
+            assert!(!socket2.only_v6().unwrap());
+            std::mem::forget(socket2); // Don't close the socket
         }
 
         // Bind two new sockets for receving packets from `socket`
