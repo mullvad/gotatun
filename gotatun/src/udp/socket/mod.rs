@@ -263,7 +263,7 @@ fn check_send_max_number_of_packets(
 }
 
 #[cfg(test)]
-#[cfg_attr(target_vendor = "apple", expect(clippy::let-unit-value)))]
+#[cfg_attr(target_vendor = "apple", expect(clippy::let-unit-value))]
 mod tests {
     use bytes::BytesMut;
     use tokio::time::timeout;
