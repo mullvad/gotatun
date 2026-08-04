@@ -79,8 +79,7 @@ impl DaitaHooks {
         daita_settings: DaitaSettings,
         peer: Weak<Mutex<PeerState>>,
         mtu: MtuWatcher,
-        udp_send_v4: US,
-        udp_send_v6: US,
+        udp_send: US,
         packet_pool: packet::PacketBufPool,
     ) -> Result<Self, crate::device::Error>
     where
@@ -118,8 +117,7 @@ impl DaitaHooks {
             .delay_watcher(delay_watcher.clone())
             .peer(peer)
             .packet_pool(packet_pool)
-            .udp_send_v4(udp_send_v4)
-            .udp_send_v6(udp_send_v6)
+            .udp_send(udp_send)
             .mtu(mtu.clone())
             .tx_decoy_packet_bytes(daita_overhead.tx_decoy_packet_bytes.clone())
             .event_tx(event_tx.downgrade())
