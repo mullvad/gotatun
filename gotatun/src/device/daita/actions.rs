@@ -22,7 +22,7 @@ use crate::{
 use futures::FutureExt;
 use maybenot::{MachineId, TriggerEvent};
 use std::{
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     sync::{
         Arc, Weak,
         atomic::{self, AtomicUsize},
@@ -49,8 +49,7 @@ where
     delay_watcher: DelayWatcher,
     peer: Weak<Mutex<PeerState>>,
     packet_pool: packet::PacketBufPool,
-    udp_send_v4: US,
-    udp_send_v6: US,
+    udp_send: US,
     mtu: MtuWatcher,
     tx_decoy_packet_bytes: Arc<AtomicUsize>,
     event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
@@ -183,14 +182,9 @@ where
             return Err(ErrorAction::Close);
         };
 
-        let udp_send = match addr.ip() {
-            IpAddr::V4(..) => &self.udp_send_v4,
-            IpAddr::V6(..) => &self.udp_send_v6,
-        };
-
         let mut send_many_bufs = US::SendManyBuf::default();
         let mut delay = true;
-        let limit = udp_send.max_number_of_packets_to_send();
+        let limit = self.udp_send.max_number_of_packets_to_send();
         loop {
             while packets.len() <= limit {
                 match self.delay_queue_rx.try_recv() {
@@ -214,7 +208,11 @@ where
                 }
             }
             let count = packets.len();
-            if let Ok(()) = udp_send.send_many_to(&mut send_many_bufs, packets).await {
+            if let Ok(()) = self
+                .udp_send
+                .send_many_to(&mut send_many_bufs, packets)
+                .await
+            {
                 // In case not all packets are drained from `packets`, we count remaining items
                 let sent = count - packets.len();
                 self.packet_count.dec(sent as u32);
@@ -273,14 +271,9 @@ where
             return Err(ErrorAction::Ignore(IgnoreReason::NoEndpoint));
         };
 
-        let udp_send = match addr.ip() {
-            IpAddr::V4(..) => &self.udp_send_v4,
-            IpAddr::V6(..) => &self.udp_send_v6,
-        };
-
         self.send_event(TriggerEvent::TunnelSent)?;
 
-        udp_send
+        self.udp_send
             .send_to(packet.into_bytes(), addr)
             .await
             .map_err(|_| ErrorAction::Close)?;

@@ -52,7 +52,7 @@ impl UdpSend for super::UdpSocket {
 
     async fn send_to(&self, packet: Packet, dest: SocketAddr) -> io::Result<()> {
         let dest = self.map_dst(dest);
-        tokio::net::UdpSocket::send_to(self.socket()?, &packet, dest).await?;
+        tokio::net::UdpSocket::send_to(self.socket(), &packet, dest).await?;
         Ok(())
     }
 
@@ -71,7 +71,7 @@ impl UdpSend for super::UdpSocket {
 
         check_send_max_number_of_packets(*MAX_GSO_SEGMENTS, packets)?;
 
-        let socket = self.socket()?;
+        let socket = self.socket();
         let client_socket_ref = socket2::SockRef::from(socket);
 
         let mut packets_iter = packets.drain(..);
@@ -169,7 +169,7 @@ impl UdpRecv for super::UdpSocket {
 
     async fn recv_from(&mut self, pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
         let mut buf = pool.get();
-        let (n, src) = self.socket()?.recv_from(&mut buf).await?;
+        let (n, src) = self.socket().recv_from(&mut buf).await?;
         buf.truncate(n);
         let src = self.map_src(src);
         Ok((buf, src))
@@ -211,7 +211,7 @@ mod gro {
             pool: &mut PacketBufPool,
         ) -> io::Result<(Packet, SocketAddr)> {
             let mut buf = pool.get();
-            let (n, src) = self.socket()?.recv_from(&mut buf).await?;
+            let (n, src) = self.socket().recv_from(&mut buf).await?;
             buf.truncate(n);
             let src = self.map_src(src);
             Ok((buf, src))
@@ -223,7 +223,7 @@ mod gro {
             pool: &mut PacketBufPool,
             packets: &mut Vec<(Packet, SocketAddr)>,
         ) -> io::Result<()> {
-            let socket = self.socket()?;
+            let socket = self.socket();
             recv_buf.gro_buf.resize(MAX_COALESCED_SIZE, 0);
 
             let msg = socket
@@ -264,7 +264,7 @@ mod gro {
 
         /// Enable receive offloading
         fn enable_udp_gro(&self) -> io::Result<()> {
-            let raw_sock = self.socket()?.as_raw_socket();
+            let raw_sock = self.socket().as_raw_socket();
             let val: u32 = u32::try_from(MAX_COALESCED_SIZE).unwrap();
 
             // SAFETY: We are passing valid pointers

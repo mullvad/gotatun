@@ -15,6 +15,7 @@
 
 use bytes::BytesMut;
 use duplicate::duplicate_item;
+use futures::{FutureExt as _, select};
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -54,16 +55,11 @@ pub struct UdpChannelTx {
 type Ipv4UdpReceiver = mpsc::Receiver<Packet<Ipv4<Udp>>>;
 type Ipv6UdpReceiver = mpsc::Receiver<Packet<Ipv6<Udp>>>;
 
-/// An implementation of [`UdpRecv`] for IPv4 UDP packets. Create using
+/// An implementation of [`UdpRecv`] for UDP packets. Create using
 /// [`new_udp_tun_channel`].
-pub struct UdpChannelV4Rx {
+pub struct UdpChannelRx {
     /// The receiver for IPv4 UDP packets. Source: [`UdpChannelFactory::udp_rx_v4`]
     udp_rx_v4: OwnedMutexGuard<Ipv4UdpReceiver>,
-}
-
-/// An implementation of [`UdpRecv`] for IPv6 UDP packets. Create using
-/// [`new_udp_tun_channel`].
-pub struct UdpChannelV6Rx {
     /// The receiver for IPv6 UDP packets. Source: [`UdpChannelFactory::udp_rx_v6`].
     udp_rx_v6: OwnedMutexGuard<Ipv6UdpReceiver>,
 }
@@ -72,8 +68,8 @@ pub struct UdpChannelV6Rx {
 /// [`UdpRecv`] implementations that use channels to send and receive packets.
 ///
 /// Calling [`UdpChannelFactory::bind`] will claim exclusive access to the inner channels for the
-/// lifetime of the [`UdpChannelTx`], [`UdpChannelV6Rx`] and [`UdpChannelV4Rx`]. Another call to
-/// `bind` will *block* until those have been dropped.
+/// lifetime of the [`UdpChannelTx`] and [`UdpChannelRx`]. Another call to `bind` will *block*
+/// until those have been dropped.
 pub struct UdpChannelFactory {
     source_ip_v4: Ipv4Addr,
     source_ip_v6: Ipv6Addr,
@@ -183,15 +179,13 @@ impl UdpChannelFactory {
 }
 
 impl UdpTransportFactory for UdpChannelFactory {
-    type SendV4 = UdpChannelTx;
-    type SendV6 = UdpChannelTx;
-    type RecvV4 = UdpChannelV4Rx;
-    type RecvV6 = UdpChannelV6Rx;
+    type Send = UdpChannelTx;
+    type Recv = UdpChannelRx;
 
     async fn bind(
         &mut self,
         params: &UdpTransportFactoryParams,
-    ) -> io::Result<((Self::SendV4, Self::RecvV4), (Self::SendV6, Self::RecvV6))> {
+    ) -> io::Result<(Self::Send, Self::Recv)> {
         let connection_id = rand::random_range(1..=u32::MAX);
         let source_port = match params.port {
             0 => rand::random_range(1..=u16::MAX),
@@ -207,16 +201,11 @@ impl UdpTransportFactory for UdpChannelFactory {
             udp_tx_v6: self.udp_tx_v6.clone(),
         };
 
-        let channel_rx_v4 = UdpChannelV4Rx {
+        let channel_rx = UdpChannelRx {
             udp_rx_v4: self.udp_rx_v4.clone().lock_owned().await,
-        };
-        let channel_rx_v6 = UdpChannelV6Rx {
             udp_rx_v6: self.udp_rx_v6.clone().lock_owned().await,
         };
-        Ok((
-            (channel_tx.clone(), channel_rx_v4),
-            (channel_tx, channel_rx_v6),
-        ))
+        Ok((channel_tx, channel_rx))
     }
 }
 
@@ -260,49 +249,24 @@ impl UdpSend for UdpChannelTx {
         Ok(())
     }
 }
-impl UdpRecv for UdpChannelV4Rx {
+
+impl UdpRecv for UdpChannelRx {
     type RecvManyBuf = ();
 
     async fn recv_from(&mut self, _pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
-        let ipv4 = self
-            .udp_rx_v4
-            .recv()
-            .await
-            .ok_or(io::Error::new(io::ErrorKind::BrokenPipe, "channel closed"))?;
+        let (src_addr, udp) = select! {
+            ipv4 = self.udp_rx_v4.recv().fuse() => {
+                let ipv4 = ipv4.ok_or(io::Error::new(io::ErrorKind::BrokenPipe, "channel closed"))?;
+                (ipv4.header.source().into(), ipv4.into_payload())
 
-        let source_addr = ipv4.header.source();
-
-        let udp = ipv4.into_payload();
-        let source_port = udp.header.source_port.get();
-
-        // Packet with IP and UDP headers shed.
-        let inner_packet = udp.into_payload();
-        let socket_addr = SocketAddr::from((source_addr, source_port));
-
-        Ok((inner_packet, socket_addr))
-    }
-}
-
-impl UdpRecv for UdpChannelV6Rx {
-    type RecvManyBuf = ();
-
-    async fn recv_from(&mut self, _pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
-        let ipv6 = self
-            .udp_rx_v6
-            .recv()
-            .await
-            .ok_or(io::Error::new(io::ErrorKind::BrokenPipe, "channel closed"))?;
-
-        let source_addr = ipv6.header.source();
-
-        let udp = ipv6.into_payload();
-        let source_port = udp.header.source_port.get();
-
-        // Packet with IP and UDP headers shed.
-        let inner_packet = udp.into_payload();
-        let socket_addr = SocketAddr::from((source_addr, source_port));
-
-        Ok((inner_packet, socket_addr))
+            }
+            ipv6 = self.udp_rx_v6.recv().fuse() => {
+                let ipv6 = ipv6.ok_or(io::Error::new(io::ErrorKind::BrokenPipe, "channel closed"))?;
+                (ipv6.header.source().into(), ipv6.into_payload())
+            }
+        };
+        let src = SocketAddr::new(src_addr, udp.header.source_port.get());
+        Ok((udp.into_payload(), src))
     }
 }
 
