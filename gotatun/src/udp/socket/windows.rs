@@ -175,19 +175,6 @@ impl UdpRecv for super::UdpSocket {
     }
 }
 
-impl super::UdpSocket {
-    /// Map an IPv4 address to IPv6 if necessary.
-    #[inline(always)]
-    fn map_addr(&self, mut addr: SocketAddr) -> SocketAddr {
-        if self.map_ipv4_to_ipv6
-            && let std::net::IpAddr::V4(ip) = addr.ip()
-        {
-            addr.set_ip(ip.to_ipv6_mapped().into());
-        }
-        addr
-    }
-}
-
 #[cfg(feature = "windows-gro")]
 mod gro {
     use super::*;

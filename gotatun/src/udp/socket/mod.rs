@@ -88,7 +88,7 @@ impl UdpTransportFactory for UdpSocketFactory {
 #[derive(Clone)]
 pub struct UdpSocket {
     inner: UdpSocketInner,
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_vendor = "apple"))]
     map_ipv4_to_ipv6: bool,
 }
 
@@ -164,7 +164,7 @@ impl UdpSocket {
 
         Ok(Self {
             inner: UdpSocketInner::Socket(Arc::new(inner)),
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_vendor = "apple"))]
             map_ipv4_to_ipv6: addr.is_ipv6() && opts.only_v6 == Some(false),
         })
     }
@@ -172,7 +172,7 @@ impl UdpSocket {
     fn disabled_ipv6() -> Self {
         Self {
             inner: UdpSocketInner::DisabledIpv6,
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_vendor = "apple"))]
             map_ipv4_to_ipv6: false,
         }
     }
@@ -197,6 +197,30 @@ impl UdpSocket {
     /// Returns the local address that this socket is bound to.
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.socket()?.local_addr()
+    }
+
+    /// Map an IPv4 address to IPv6 if necessary.
+    #[cfg(any(target_os = "windows", target_vendor = "apple"))]
+    #[inline(always)]
+    fn map_dst(&self, mut addr: SocketAddr) -> SocketAddr {
+        if self.map_ipv4_to_ipv6
+            && let std::net::IpAddr::V4(ip) = addr.ip()
+        {
+            addr.set_ip(ip.to_ipv6_mapped().into());
+        }
+        addr
+    }
+    /// Map an IPv6 address back to IPv4 if necessary.
+    #[cfg(any(target_os = "windows", target_vendor = "apple"))]
+    #[inline(always)]
+    fn map_src(&self, mut addr: SocketAddr) -> SocketAddr {
+        if self.map_ipv4_to_ipv6
+            && let std::net::IpAddr::V6(ip) = addr.ip()
+            && let Some(ipv4) = ip.to_ipv4_mapped()
+        {
+            addr.set_ip(ipv4.into());
+        }
+        addr
     }
 }
 
@@ -244,12 +268,13 @@ mod tests {
     use zerocopy::IntoBytes;
 
     use super::*;
-    use crate::packet::Packet;
     #[cfg(target_os = "linux")]
     use crate::packet::PacketBufPool;
+    use crate::packet::{Packet, PacketBufPool};
     #[cfg(target_os = "linux")]
     use crate::udp::UdpRecv;
     use crate::udp::UdpSend;
+    use std::iter;
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::time::Duration;
 
@@ -301,10 +326,12 @@ mod tests {
         assert!(socket.local_addr().unwrap().is_ipv4());
     }
 
-    /// Test that we can bind and use a dual-stack ipv4+ipv6 socket.
-    #[tokio::test]
-    async fn dual_stack_socket() {
-        // Bind dual-stacks socket
+    async fn set_up_dual_stack_test() -> (
+        (UdpSocket, u16),
+        tokio::net::UdpSocket,
+        tokio::net::UdpSocket,
+    ) {
+        // Bind dual-stack socket
         let mut factory = UdpSocketFactory::default();
         let params = UdpTransportFactoryParams {
             addr: None,
@@ -334,13 +361,21 @@ mod tests {
             std::mem::forget(socket2); // Don't close the socket
         }
 
-        // Bind two new sockets for receving packets from `socket`
+        // Bind two new sockets for receving packets from `dual_sock`
         let bind = async |addr: IpAddr| tokio::net::UdpSocket::bind((addr, 0)).await.unwrap();
         let v4 = bind(Ipv4Addr::LOCALHOST.into()).await;
         let v6 = bind(Ipv6Addr::LOCALHOST.into()).await;
 
-        let v4_addr = v4.local_addr().unwrap();
-        let v6_addr = v6.local_addr().unwrap();
+        ((dual_sock, addr.port()), v4, v6)
+    }
+
+    /// Test that we can bind and send from a dual-stack ipv4+ipv6 socket.
+    #[tokio::test]
+    async fn dual_stack_socket_send() {
+        let ((dual_sock, ..), v4_sock, v6_sock) = set_up_dual_stack_test().await;
+
+        let v4_addr = v4_sock.local_addr().unwrap();
+        let v6_addr = v6_sock.local_addr().unwrap();
 
         let mut recv_v4 = BytesMut::new();
         let mut recv_v6 = BytesMut::new();
@@ -357,14 +392,131 @@ mod tests {
 
         // Send & receive a packet over IPv4
         dual_sock.send_to(packet("v4"), v4_addr).await.unwrap();
-        recv_some(&v4, &mut recv_v4).await;
-        recv_none(&v6, &mut recv_v6).await;
+        recv_some(&v4_sock, &mut recv_v4).await;
+        recv_none(&v6_sock, &mut recv_v6).await;
         assert_eq!(recv_v4, packet("v4").as_bytes());
 
         // Send & receive a packet over IPv6
         dual_sock.send_to(packet("v6"), v6_addr).await.unwrap();
-        recv_some(&v6, &mut recv_v6).await;
-        recv_none(&v4, &mut recv_v4).await;
+        recv_some(&v6_sock, &mut recv_v6).await;
+        recv_none(&v4_sock, &mut recv_v4).await;
         assert_eq!(recv_v6, packet("v6").as_bytes());
+
+        // Send & receive many packet over IPv4
+        let n = dual_sock.max_number_of_packets_to_send();
+        let packets = iter::repeat(packet("v4")).map(|p| (p, v4_addr)).take(n);
+        let mut buf = Default::default();
+        dual_sock
+            .send_many_to(&mut buf, &mut packets.collect())
+            .await
+            .unwrap();
+        recv_none(&v6_sock, &mut recv_v4).await;
+        for _ in 0..n {
+            recv_some(&v4_sock, &mut recv_v6).await;
+        }
+        recv_none(&v4_sock, &mut recv_v6).await;
+
+        // Send & receive many packet over IPv6
+        let packets = iter::repeat(packet("v6")).map(|p| (p, v6_addr)).take(n);
+        let mut buf = Default::default();
+        dual_sock
+            .send_many_to(&mut buf, &mut packets.collect())
+            .await
+            .unwrap();
+        recv_none(&v4_sock, &mut recv_v4).await;
+        for _ in 0..n {
+            recv_some(&v6_sock, &mut recv_v6).await;
+        }
+        recv_none(&v6_sock, &mut recv_v6).await;
+    }
+
+    /// Test that we can bind and recv from a dual-stack ipv4+ipv6 socket.
+    #[tokio::test]
+    async fn dual_stack_socket_recv() {
+        let mut pool1 = PacketBufPool::new(10);
+        let mut pool2 = PacketBufPool::new(10);
+
+        let ((mut dual_sock, port), v4_sock, v6_sock) = set_up_dual_stack_test().await;
+
+        let v4_addr = v4_sock.local_addr().unwrap();
+        let v6_addr = v6_sock.local_addr().unwrap();
+
+        let dual_sock_v4_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port);
+        let dual_sock_v6_addr = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), port);
+
+        // Test helpers
+        let t = Duration::from_millis(100);
+        let mut recv_some =
+            async |s: &mut UdpSocket| timeout(t, s.recv_from(&mut pool1)).await.unwrap().unwrap();
+        let mut recv_none = async |s: &mut UdpSocket| {
+            timeout(t, s.recv_from(&mut pool2))
+                .await
+                .expect_err("no packets");
+        };
+        let packet = |s: &str| Packet::from_bytes(s.as_bytes().into());
+
+        v4_sock
+            .send_to(&packet("v4"), dual_sock_v4_addr)
+            .await
+            .unwrap();
+        let (p, src) = recv_some(&mut dual_sock).await;
+        assert_eq!(src, v4_addr);
+        assert_eq!(&p[..], &packet("v4")[..]);
+        recv_none(&mut dual_sock).await;
+
+        v6_sock
+            .send_to(&packet("v6"), dual_sock_v6_addr)
+            .await
+            .unwrap();
+        let (p, src) = recv_some(&mut dual_sock).await;
+        assert_eq!(src, v6_addr);
+        assert_eq!(&p[..], &packet("v6")[..]);
+        recv_none(&mut dual_sock).await;
+
+        let mut n = 32;
+        for _ in 0..n {
+            v6_sock
+                .send_to(&packet("v6"), dual_sock_v6_addr)
+                .await
+                .unwrap();
+        }
+        let mut buf = Default::default();
+        while n > 0 {
+            let mut out = vec![];
+            dual_sock
+                .recv_many_from(&mut buf, &mut pool1, &mut out)
+                .await
+                .unwrap();
+            assert!((1..=n).contains(&out.len()));
+            n -= out.len();
+            for (p, src) in out {
+                assert_eq!(src, v6_addr);
+                assert_eq!(&p[..], &packet("v6")[..]);
+            }
+        }
+        recv_none(&mut dual_sock).await;
+
+        let mut n = 32;
+        for _ in 0..n {
+            v4_sock
+                .send_to(&packet("v4"), dual_sock_v4_addr)
+                .await
+                .unwrap();
+        }
+        let mut buf = Default::default();
+        while n > 0 {
+            let mut out = vec![];
+            dual_sock
+                .recv_many_from(&mut buf, &mut pool1, &mut out)
+                .await
+                .unwrap();
+            assert!((1..=n).contains(&out.len()));
+            n -= out.len();
+            for (p, src) in out {
+                assert_eq!(src, v4_addr);
+                assert_eq!(&p[..], &packet("v4")[..]);
+            }
+        }
+        recv_none(&mut dual_sock).await;
     }
 }
