@@ -22,7 +22,7 @@ use crate::{
 use futures::FutureExt;
 use maybenot::{MachineId, TriggerEvent};
 use std::{
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     sync::{
         Arc, Weak,
         atomic::{self, AtomicUsize},
@@ -49,8 +49,7 @@ where
     delay_watcher: DelayWatcher,
     peer: Weak<Mutex<PeerState>>,
     packet_pool: packet::PacketBufPool,
-    udp_send_v4: US,
-    udp_send_v6: US,
+    udp_send: US,
     mtu: MtuWatcher,
     tx_decoy_packet_bytes: Arc<AtomicUsize>,
     event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
@@ -183,10 +182,7 @@ where
             return Err(ErrorAction::Close);
         };
 
-        let udp_send = match addr.ip() {
-            IpAddr::V4(..) => &self.udp_send_v4,
-            IpAddr::V6(..) => &self.udp_send_v6,
-        };
+        let udp_send = &self.udp_send;
 
         let mut send_many_bufs = US::SendManyBuf::default();
         let mut delay = true;
@@ -273,10 +269,7 @@ where
             return Err(ErrorAction::Ignore(IgnoreReason::NoEndpoint));
         };
 
-        let udp_send = match addr.ip() {
-            IpAddr::V4(..) => &self.udp_send_v4,
-            IpAddr::V6(..) => &self.udp_send_v6,
-        };
+        let udp_send = &self.udp_send;
 
         self.send_event(TriggerEvent::TunnelSent)?;
 

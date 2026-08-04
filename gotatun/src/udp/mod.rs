@@ -33,17 +33,11 @@ pub mod socket;
 ///
 /// See [`UdpSend`] and [`UdpRecv`].
 pub trait UdpTransportFactory: Send + Sync + 'static {
-    /// The [`UdpSend`] for IPv4 returned by [`UdpTransportFactory::bind`].
-    type SendV4: UdpSend + 'static;
+    /// The [`UdpSend`] returned by [`UdpTransportFactory::bind`].
+    type Send: UdpSend + 'static;
 
-    /// The [`UdpSend`] for IPv6 returned by [`UdpTransportFactory::bind`].
-    type SendV6: UdpSend + 'static;
-
-    /// The [`UdpRecv`] for IPv4 returned by [`UdpTransportFactory::bind`].
-    type RecvV4: UdpRecv + 'static;
-
-    /// The [`UdpRecv`] for IPv6 returned by [`UdpTransportFactory::bind`].
-    type RecvV6: UdpRecv + 'static;
+    /// The [`UdpRecv`] returned by [`UdpTransportFactory::bind`].
+    type Recv: UdpRecv + 'static;
 
     /// Bind sockets for sending and receiving UDP.
     ///
@@ -52,9 +46,7 @@ pub trait UdpTransportFactory: Send + Sync + 'static {
     fn bind(
         &mut self,
         params: &UdpTransportFactoryParams,
-    ) -> impl Future<
-        Output = io::Result<((Self::SendV4, Self::RecvV4), (Self::SendV6, Self::RecvV6))>,
-    > + Send;
+    ) -> impl Future<Output = io::Result<(Self::Send, Self::Recv)>> + Send;
 }
 
 /// Arguments to [`UdpTransportFactory::bind`].
