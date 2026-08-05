@@ -269,6 +269,125 @@ async fn update_peer_preshared_key_reaches_tunnel() {
     .await;
 }
 
+/// A device built without peers must be reachable once a peer is added to it.
+/// The peer initiates here, so the device has to be listening without having
+/// sent anything itself.
+#[tokio::test]
+#[test_log::test]
+async fn peerless_device_receives_from_peer_added_later() {
+    let (mut alice, bob, _eve, bob_as_peer) = mock::device_pair_peerless_alice().await;
+
+    let added = alice
+        .device
+        .add_peer(bob_as_peer)
+        .await
+        .expect("add_peer should succeed");
+    assert!(added, "peer should have been newly added");
+
+    let packet = mock::packet(b"Hello!");
+    bob.app_tx.send(packet.clone()).await;
+    let received = timeout(Duration::from_secs(5), alice.app_rx.recv())
+        .await
+        .expect("a dynamically configured device must receive the peer's packet");
+    assert_eq!(received.as_bytes(), packet.as_bytes());
+}
+
+/// A device built without peers must tunnel traffic once a peer is added to it,
+/// just like one that was built with the peer.
+#[tokio::test]
+#[test_log::test]
+async fn peerless_device_sends_to_peer_added_later() {
+    let (alice, mut bob, _eve, bob_as_peer) = mock::device_pair_peerless_alice().await;
+
+    let added = alice
+        .device
+        .add_peer(bob_as_peer)
+        .await
+        .expect("add_peer should succeed");
+    assert!(added, "peer should have been newly added");
+
+    let packet = mock::packet(b"Hello!");
+    alice.app_tx.send(packet.clone()).await;
+    let received = timeout(Duration::from_secs(5), bob.app_rx.recv())
+        .await
+        .expect("packet must be delivered by a dynamically configured device");
+    assert_eq!(received.as_bytes(), packet.as_bytes());
+}
+
+/// Adding a peer to a suspended device must not resume it. The device stays down
+/// until it is explicitly resumed, and then picks up the peer added meanwhile.
+#[tokio::test]
+#[test_log::test]
+async fn adding_peer_does_not_resume_suspended_device() {
+    let (alice, mut bob, _eve, bob_as_peer) = mock::device_pair_peerless_alice().await;
+
+    alice.device.suspend().await;
+
+    let added = alice
+        .device
+        .add_peer(bob_as_peer)
+        .await
+        .expect("add_peer should succeed");
+    assert!(added, "peer should have been newly added");
+
+    let packet = mock::packet(b"Hello!");
+    alice.app_tx.send(packet.clone()).await;
+    assert!(
+        timeout(Duration::from_millis(300), bob.app_rx.recv())
+            .await
+            .is_err(),
+        "a suspended device must stay down when a peer is added"
+    );
+
+    alice.device.resume().await.expect("resume should succeed");
+    let received = timeout(Duration::from_secs(5), bob.app_rx.recv())
+        .await
+        .expect("resume should bring up a device whose peer was added while suspended");
+    assert_eq!(received.as_bytes(), packet.as_bytes());
+}
+
+/// A device built without peers must come up when a peer is added over UAPI,
+/// using a `set` that adds only peers.
+#[tokio::test]
+#[test_log::test]
+async fn uapi_peer_add_brings_up_peerless_device() {
+    use crate::device::uapi::{
+        UapiServer,
+        command::{Response, Set, SetPeer, SetResponse},
+    };
+    use crate::serialization::KeyBytes;
+    use x25519_dalek::{PublicKey, StaticSecret};
+
+    let (uapi_client, uapi_server) = UapiServer::new();
+    let device = mock::keyed_peerless_device_with_uapi(uapi_server).await;
+
+    // This device has no counterpart to exchange traffic with, so unlike the
+    // tests above it checks the network layer directly.
+    assert!(
+        device.device.inner.read().await.connection.is_none(),
+        "precondition: a peerless build leaves the device down"
+    );
+
+    // This `set` must add peers and nothing else. A private key, listen port,
+    // fwmark or DAITA setting in the same block would request a reconfigure on
+    // its own and bring the device up regardless of the peer.
+    let peer_public_key = PublicKey::from(&StaticSecret::random());
+    let set = Set::default().peer(SetPeer::new(KeyBytes(peer_public_key.to_bytes())));
+    let response = uapi_client
+        .send(set)
+        .await
+        .expect("uapi set should succeed");
+    assert!(
+        matches!(response, Response::Set(SetResponse { errno: 0 })),
+        "uapi set should succeed, got {response:?}"
+    );
+
+    assert!(
+        device.device.inner.read().await.connection.is_some(),
+        "a peers-only UAPI set must bring up a peerless device"
+    );
+}
+
 /// The number of packets we send through the tunnel
 fn packet_count() -> usize {
     mock::packets_of_every_size().len()

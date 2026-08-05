@@ -29,7 +29,7 @@ use x25519_dalek::{PublicKey, StaticSecret};
 use zerocopy::IntoBytes;
 
 use crate::{
-    device::{Device, DeviceBuilder, Peer},
+    device::{Device, DeviceBuilder, Peer, uapi::UapiServer},
     noise::index_table::IndexTable,
     packet::{
         Ip, IpNextProtocol, Ipv4, Ipv4Header, Ipv6, Packet, PacketBufPool, Udp, WgData,
@@ -47,7 +47,22 @@ pub const BOB_INDEX_SEED: u64 = 2;
 
 pub const TUN_MTU: u16 = 1360;
 
+/// Build a pair of mock devices that are configured to talk to each other.
 pub async fn device_pair() -> (MockDevice, MockDevice, MockEavesdropper) {
+    let (alice, bob, eve, _) = build_device_pair(true).await;
+    (alice, bob, eve)
+}
+
+/// Like [`device_pair`], but Alice is built with no peers.
+///
+/// The extra returned [`Peer`] is Bob, for the caller to add to Alice.
+pub async fn device_pair_peerless_alice() -> (MockDevice, MockDevice, MockEavesdropper, Peer) {
+    build_device_pair(false).await
+}
+
+async fn build_device_pair(
+    alice_starts_with_peer: bool,
+) -> (MockDevice, MockDevice, MockEavesdropper, Peer) {
     let (mock_tun_a, mock_app_tx_a, mock_app_rx_a) = mock_tun();
     let (mock_tun_b, mock_app_tx_b, mock_app_rx_b) = mock_tun();
 
@@ -138,18 +153,18 @@ pub async fn device_pair() -> (MockDevice, MockDevice, MockEavesdropper) {
         .with_endpoint((endpoint_b, port).into())
         .with_allowed_ip(Ipv4Network::new(Ipv4Addr::UNSPECIFIED, 0).unwrap().into());
 
-    let device_a = DeviceBuilder::new()
+    let mut builder_a = DeviceBuilder::new()
         .with_private_key(privkey_a)
         .with_ip(mock_tun_a.clone())
         .with_udp(udp_alice)
         .with_listen_port(port) // TODO: is this necessary?
-        .with_peer(peer_b)
         .with_index_table(IndexTable::from_rng(StdRng::seed_from_u64(
             ALICE_INDEX_SEED,
-        )))
-        .build()
-        .await
-        .expect("create mock device");
+        )));
+    if alice_starts_with_peer {
+        builder_a = builder_a.with_peer(peer_b.clone());
+    }
+    let device_a = builder_a.build().await.expect("create mock device");
 
     let device_b = DeviceBuilder::new()
         .with_private_key(privkey_b)
@@ -176,7 +191,46 @@ pub async fn device_pair() -> (MockDevice, MockDevice, MockEavesdropper) {
         source_ipv4_override: bob_source_ip,
     };
 
-    (alice, bob, eve)
+    (alice, bob, eve, peer_b)
+}
+
+/// Build a single device with a private key and listen port, but no peers,
+/// configurable over the given UAPI server.
+pub async fn keyed_peerless_device_with_uapi(uapi: UapiServer) -> MockDevice {
+    let (mock_tun, app_tx, app_rx) = mock_tun();
+
+    let port: u16 = 51820;
+    let endpoint = Ipv4Addr::new(10, 0, 0, 1);
+
+    let channel_capacity = 10;
+    let (v4, eve_v4) = UdpChannelV4::new_pair(channel_capacity);
+    let (v6, eve_v6) = UdpChannelV6::new_pair(channel_capacity);
+
+    // Hold the far ends of the UDP channels open. Dropping them closes the
+    // device's sockets, which tears down the tasks that were just brought up.
+    // There is no counterpart device here, so nothing reads from them.
+    tokio::spawn(async move {
+        let _channel_ends = (eve_v4, eve_v6);
+        std::future::pending::<()>().await;
+    });
+    let udp = UdpChannelFactory::new(endpoint, v4, Ipv6Addr::UNSPECIFIED, v6);
+
+    let device = DeviceBuilder::new()
+        .with_private_key(StaticSecret::random())
+        .with_ip(mock_tun)
+        .with_udp(udp)
+        .with_listen_port(port)
+        .with_uapi(uapi)
+        .build()
+        .await
+        .expect("create peerless mock device");
+
+    MockDevice {
+        device,
+        app_tx,
+        app_rx,
+        source_ipv4_override: Arc::default(),
+    }
 }
 
 pub fn mock_tun() -> (MockTun, MockAppTx, MockAppRx) {
