@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Hide native UDP socket impls behind new `socket` feature.
+- Merge `UdpTransportFactory::SendV4` and `SendV6` into `UdpTransportFactory::Send`
+- Merge `UdpTransportFactory::RecvV4` and `RecvV6` into `UdpTransportFactory::Recv`
+- Merge `UdpChannelV6Rx` and `UdpChannelV4Rx` into `UdpChannelRx`..
+- Bind only a single dual-stack socket in UdpSocketFactory, instead of a pair of sockets.
 
 ### Fixed
 - Validate IPv4 checksums and total lengths against the full IHL-declared header.
