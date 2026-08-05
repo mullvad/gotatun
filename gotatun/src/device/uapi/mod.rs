@@ -695,6 +695,9 @@ async fn on_api_set(
         device.add_peer(new_peer);
     }
 
+    // Adding the first peer does not request a reconfigure on its own.
+    reconfigure |= device.needs_connection();
+
     // If there is no key pair, we cannot reconfigure the connection
     if device.key_pair.is_none() {
         reconfigure = Reconfigure::No;

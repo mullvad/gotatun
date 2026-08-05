@@ -472,7 +472,10 @@ impl<T: DeviceTransports> Device<T> {
             configurator.reconfigure |= configurator.device.set_key(private_key).await;
         }
 
-        if let Reconfigure::Yes = configurator.reconfigure {
+        // Adding the first peer does not request a reconfigure on its own.
+        configurator.reconfigure |= configurator.device.needs_connection();
+
+        if configurator.reconfigure == Reconfigure::Yes {
             // TODO: don't do this elsewhere for ApiServer?
             // FIXME: set_up acquires lock but we should reuse it
             drop(state);

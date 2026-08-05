@@ -402,6 +402,24 @@ impl BitOrAssign for Reconfigure {
 }
 
 impl<T: DeviceTransports> DeviceState<T> {
+    /// Whether the device is configured to run, but has no live network layer.
+    ///
+    /// [`DeviceBuilder::build`] only calls [`Connection::set_up`] when it is
+    /// given peers, so a device built empty has no bound sockets and no worker
+    /// tasks. Configuring it afterwards must bring it up, or the tunnel stays
+    /// silently inert.
+    fn needs_connection(&self) -> Reconfigure {
+        if self.connection.is_none()
+            && !self.suspended
+            && self.key_pair.is_some()
+            && !self.peers.is_empty()
+        {
+            Reconfigure::Yes
+        } else {
+            Reconfigure::No
+        }
+    }
+
     async fn remove_peer(&mut self, pub_key: &x25519::PublicKey) -> Option<Arc<Mutex<PeerState>>> {
         if let Some(peer) = self.peers.remove(pub_key) {
             // Remove all session index entries that point to this peer
