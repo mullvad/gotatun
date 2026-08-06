@@ -422,7 +422,7 @@ mod tests {
                 .recv_many_from(&mut buf, &mut pool1, &mut out)
                 .await
                 .unwrap();
-            assert!((1..=n).contains(&out.len()));
+            assert!(!out.is_empty() && out.len() < n);
             n -= out.len();
             for (p, src) in out {
                 assert_eq!(src, v6_addr);

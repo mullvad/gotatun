@@ -39,7 +39,7 @@ impl UdpSend for super::UdpSocket {
     type SendManyBuf = SendmmsgBuf;
 
     async fn send_to(&self, packet: Packet, target: SocketAddr) -> io::Result<()> {
-        tokio::net::UdpSocket::send_to(self.socket(), &packet, target).await?;
+        self.socket().send_to(&packet, target).await?;
         Ok(())
     }
 
