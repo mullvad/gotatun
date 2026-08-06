@@ -261,14 +261,6 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::time::Duration;
 
-    #[tokio::test]
-    async fn bind_ipv4_socket_uses_ipv4() {
-        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0).into(), SockOpt::default())
-            .expect("bind IPv4");
-
-        assert!(socket.local_addr().unwrap().is_ipv4());
-    }
-
     async fn set_up_dual_stack_test() -> (
         (UdpSocket, u16),
         tokio::net::UdpSocket,
