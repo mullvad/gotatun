@@ -68,6 +68,10 @@ impl UdpTransportFactory for UdpSocketFactory {
             Ok(udp) => udp,
             Err(e) if dual_stack && is_ipv6_unavailable(&e) => {
                 tracing::warn!("IPv6 UDP sockets are unavailable; continuing with IPv4-only");
+                let opts = SockOpt {
+                    only_v6: None,
+                    ..opts
+                };
                 UdpSocket::bind((Ipv4Addr::UNSPECIFIED, params.port).into(), opts)?
             }
             Err(e) => return Err(e),
@@ -107,7 +111,8 @@ impl UdpSocket {
     ///
     /// This also configures the following socket options:
     /// - `nonblocking`, to work with [`tokio`].
-    /// - `reuse_address`, to allow IPv6 and IPv4 sockets to be bound to the same port.
+    /// - `only_v6`, to bind dual-stack sockets.
+    /// - `mark`, only on linux.
     /// - `{recv,send}_buffer_size`, for better performance. See [`SockOpt`].
     pub fn bind(addr: SocketAddr, opts: SockOpt) -> io::Result<Self> {
         let domain = match addr {
@@ -115,7 +120,7 @@ impl UdpSocket {
             SocketAddr::V6(..) => socket2::Domain::IPV6,
         };
 
-        // Construct the socket using `socket2` because we need to set the reuse_address flag.
+        // Construct the socket using `socket2` because we need to set the only_v6 flag.
         let udp_sock =
             socket2::Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))?;
         udp_sock.set_nonblocking(true)?;

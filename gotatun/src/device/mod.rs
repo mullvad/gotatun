@@ -30,7 +30,7 @@ use builder::Nul;
 use futures::TryFutureExt;
 use std::collections::HashMap;
 use std::io::{self};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use std::ops::BitOrAssign;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -231,7 +231,7 @@ impl<T: DeviceTransports> Connection<T> {
             DeviceState::handle_timers(Arc::downgrade(&device_arc), buffered_udp_tx.clone()),
         );
         let incoming = Task::spawn(
-            "handle_incoming ipv4",
+            "handle_incoming",
             DeviceState::handle_incoming(
                 Arc::downgrade(&device_arc),
                 buffered_ip_tx.clone(),
@@ -844,12 +844,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                 drop(peer); // release lock
                 drop(device_guard);
 
-                let result = match peer_addr {
-                    SocketAddr::V4(..) => udp.send_to(packet, peer_addr).await,
-                    SocketAddr::V6(..) => udp.send_to(packet, peer_addr).await,
-                };
-
-                if result.is_err() {
+                if udp.send_to(packet, peer_addr).await.is_err() {
                     break;
                 }
             }
