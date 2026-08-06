@@ -68,10 +68,6 @@ impl UdpTransportFactory for UdpSocketFactory {
             Ok(udp) => udp,
             Err(e) if dual_stack && is_ipv6_unavailable(&e) => {
                 tracing::warn!("IPv6 UDP sockets are unavailable; continuing with IPv4-only");
-                let opts = SockOpt {
-                    only_v6: None,
-                    ..opts
-                };
                 UdpSocket::bind((Ipv4Addr::UNSPECIFIED, params.port).into(), opts)?
             }
             Err(e) => return Err(e),
@@ -124,7 +120,9 @@ impl UdpSocket {
         let udp_sock =
             socket2::Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))?;
         udp_sock.set_nonblocking(true)?;
-        if let Some(only_v6) = opts.only_v6 {
+        if let Some(only_v6) = opts.only_v6
+            && addr.is_ipv6()
+        {
             udp_sock.set_only_v6(only_v6)?;
         }
         #[cfg(target_os = "linux")]
