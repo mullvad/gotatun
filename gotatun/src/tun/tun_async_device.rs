@@ -13,6 +13,7 @@
 
 use tokio::{sync::watch, time::sleep};
 use tun::AbstractDevice;
+use zerocopy::IntoBytes;
 
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
@@ -152,6 +153,8 @@ impl TunDevice {
 
 impl IpSend for TunDevice {
     async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
+        eprintln!("TunDevice::send, {}", packet.as_bytes().len());
+
         self.tun.send(&packet.into_bytes()).await?;
         Ok(())
     }
@@ -162,6 +165,8 @@ impl IpRecv for TunDevice {
         &'a mut self,
         pool: &mut PacketBufPool,
     ) -> io::Result<impl Iterator<Item = Packet<Ip>> + 'a> {
+        eprintln!("TunDevice::recv");
+
         let mut packet = pool.get();
         let n = self.tun.recv(&mut packet).await?;
         packet.truncate(n);

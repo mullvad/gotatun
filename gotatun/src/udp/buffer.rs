@@ -98,6 +98,7 @@ impl UdpSend for BufferedUdpSend {
             SocketAddr::V4(..) => &self.send_tx_v4,
             SocketAddr::V6(..) => &self.send_tx_v6,
         };
+
         tx.send((packet, destination))
             .await
             .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))?;

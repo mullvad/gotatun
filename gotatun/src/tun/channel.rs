@@ -45,6 +45,8 @@ pub struct TunChannelTx {
 
 impl IpSend for TunChannelTx {
     async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
+        eprintln!("!!!!!!!!!!!! TunChannelTx::send");
+
         let ip_packet = match packet.try_into_ipvx() {
             Ok(p) => p,
             Err(e) => {
@@ -99,7 +101,10 @@ impl IpRecv for TunChannelRx {
             packet = self.tun_rx_v6.recv().fuse() => packet.map(Packet::<Ip>::from),
         };
 
+        eprintln!("!!!!!!!!!!!! TunChannelRx::recv");
+
         let Some(packet) = packet else {
+            eprintln!("!!!!!!!!!!!! afds");
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "channel closed",
