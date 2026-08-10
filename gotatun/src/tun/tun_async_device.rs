@@ -155,7 +155,9 @@ impl IpSend for TunDevice {
     async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
         let ipv4 = crate::packet::Ipv4::<[u8]>::ref_from_bytes(&packet.as_bytes()).ok();
         if let Some(ipv4) = ipv4 {
-            tracing::debug!("TunDevice::send v4. {} > {} ({} bytes)", ipv4.header.source(), ipv4.header.destination(), ipv4.payload.len());
+            if ipv4.header.version() == 4 {
+                tracing::debug!("TunDevice::send v4. {} > {} ({} bytes)", ipv4.header.source(), ipv4.header.destination(), ipv4.payload.len());
+            }
         }
         self.tun.send(&packet.into_bytes()).await?;
         Ok(())
@@ -174,7 +176,9 @@ impl IpRecv for TunDevice {
             Ok(packet) => {
                 let ipv4 = crate::packet::Ipv4::<[u8]>::ref_from_bytes(&packet.as_bytes()).ok();
         if let Some(ipv4) = ipv4 {
-            tracing::debug!("TunDevice::recv v4. {} < {} ({} bytes)", ipv4.header.destination(), ipv4.header.source(), ipv4.payload.len());
+            if ipv4.header.version() == 4 {
+                tracing::debug!("TunDevice::recv v4. {} < {} ({} bytes)", ipv4.header.destination(), ipv4.header.source(), ipv4.payload.len());
+            }
         }
 
                 Ok(iter::once(packet))
