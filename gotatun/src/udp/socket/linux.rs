@@ -387,7 +387,7 @@ mod android {
     use std::io;
     use std::net::SocketAddr;
 
-    use zerocopy::FromBytes;
+    use zerocopy::{FromBytes, IntoBytes};
 
     impl UdpRecv for super::UdpSocket {
         type RecvManyBuf = ();
@@ -400,12 +400,7 @@ mod android {
             let (n, src) = self.socket()?.recv_from(&mut buf).await?;
             buf.truncate(n);
 
-            let ipv4 = crate::packet::Ipv4::<[u8]>::ref_from_bytes(&buf).ok();
-        if let Some(ipv4) = ipv4 {
-            if ipv4.header.version() == 4 {
-                tracing::debug!("UdpRecv::recv_from {} < {}", ipv4.header.destination(), ipv4.header.source());
-            }
-        }
+            tracing::debug!("UdpRecv::recv_from < {src} ({n} bytes)");
 
             Ok((buf, src))
         }
