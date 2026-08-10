@@ -771,11 +771,11 @@ impl<T: DeviceTransports> DeviceState<T> {
                         if cfg!(debug_assertions) {
                             let unspecified = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0).into();
                             tracing::warn!(
-                                "peer at {} is not allowed to send us packets from: {source}",
+                                "ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ peer at {} is not allowed to send us packets from: {source}",
                                 peer.endpoint().addr.unwrap_or(unspecified)
                             );
                         }
-                        continue;
+                        //continue;
                     }
 
                     if let Err(e) = tun_tx.send(packet).await {
