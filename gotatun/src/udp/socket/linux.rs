@@ -387,6 +387,8 @@ mod android {
     use std::io;
     use std::net::SocketAddr;
 
+    use zerocopy::FromBytes;
+
     impl UdpRecv for super::UdpSocket {
         type RecvManyBuf = ();
 
