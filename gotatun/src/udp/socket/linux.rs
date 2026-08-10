@@ -39,7 +39,7 @@ impl UdpSend for super::UdpSocket {
     type SendManyBuf = SendmmsgBuf;
 
     async fn send_to(&self, packet: Packet, target: SocketAddr) -> io::Result<()> {
-                    eprintln!("!!!! send_to to {:?}", target);
+                    tracing::debug!("!!!! send_to to {:?}", target);
 
         tokio::net::UdpSocket::send_to(self.socket()?, &packet, target).await?;
         Ok(())
@@ -83,7 +83,7 @@ impl UdpSend for super::UdpSocket {
                     )?;
                     let n = multiresult.count();
 
-                    eprintln!("!!!! sendmmsg to {:?}", buf.targets);
+                    tracing::debug!("!!!! sendmmsg to {:?}", buf.targets);
 
                     Ok(n)
                 })
@@ -169,7 +169,7 @@ mod gro {
 
             let mut buf = pool.get();
             let (n, src) = self.socket()?.recv_from(&mut buf).await?;
-            eprintln!("RECV FROM: {src}");
+            tracing::debug!("RECV FROM: {src}");
             buf.truncate(n);
             Ok((buf, src))
         }
@@ -229,7 +229,7 @@ mod gro {
                             continue;
                         };
 
-                        eprintln!("RECV MANY FROM: {source_addr}");
+                        tracing::debug!("UdpRecv::recv_many_from from {source_addr}");
 
                         // TODO: is this true? Under what circumstance can the cmsg buffer overflow?
                         let mut cmsgs = result.cmsgs().expect("we have allocated enough memory");

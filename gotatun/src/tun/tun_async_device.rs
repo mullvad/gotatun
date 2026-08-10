@@ -13,7 +13,7 @@
 
 use tokio::{sync::watch, time::sleep};
 use tun::AbstractDevice;
-use zerocopy::IntoBytes;
+use zerocopy::{FromBytes, IntoBytes};
 
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
@@ -153,8 +153,10 @@ impl TunDevice {
 
 impl IpSend for TunDevice {
     async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
-        eprintln!("TunDevice::send, {}", packet.as_bytes().len());
-
+        let ipv4 = crate::packet::Ipv4::<[u8]>::ref_from_bytes(&packet.as_bytes()).ok();
+        if let Some(ipv4) = ipv4 {
+            tracing::debug!("TunDevice::send v4. {} > {} ({} bytes)", ipv4.header.source(), ipv4.header.destination(), ipv4.payload.len());
+        }
         self.tun.send(&packet.into_bytes()).await?;
         Ok(())
     }
@@ -165,13 +167,18 @@ impl IpRecv for TunDevice {
         &'a mut self,
         pool: &mut PacketBufPool,
     ) -> io::Result<impl Iterator<Item = Packet<Ip>> + 'a> {
-        eprintln!("TunDevice::recv");
-
         let mut packet = pool.get();
         let n = self.tun.recv(&mut packet).await?;
         packet.truncate(n);
         match packet.try_into_ip() {
-            Ok(packet) => Ok(iter::once(packet)),
+            Ok(packet) => {
+                let ipv4 = crate::packet::Ipv4::<[u8]>::ref_from_bytes(&packet.as_bytes()).ok();
+        if let Some(ipv4) = ipv4 {
+            tracing::debug!("TunDevice::recv v4. {} < {} ({} bytes)", ipv4.header.destination(), ipv4.header.source(), ipv4.payload.len());
+        }
+
+                Ok(iter::once(packet))
+            }
             Err(e) => Err(io::Error::other(e.to_string())),
         }
     }

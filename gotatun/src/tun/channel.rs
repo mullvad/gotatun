@@ -45,8 +45,6 @@ pub struct TunChannelTx {
 
 impl IpSend for TunChannelTx {
     async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
-        eprintln!("!!!!!!!!!!!! TunChannelTx::send");
-
         let ip_packet = match packet.try_into_ipvx() {
             Ok(p) => p,
             Err(e) => {
@@ -66,6 +64,9 @@ impl IpSend for TunChannelTx {
                     return Ok(());
                 };
 
+
+                tracing::debug!("!!!!!!!!!!!! TunChannelTx::send {} > {} (payload len {})", ipv4.header.source(), ipv4.header.destination(), ipv4.payload.len());
+
                 match ipv4.try_into_udp() {
                     Ok(udp_packet) => {
                         self.tun_tx_v4
@@ -78,6 +79,8 @@ impl IpSend for TunChannelTx {
             }
             Either::Right(ipv6) => match ipv6.try_into_udp() {
                 Ok(udp_packet) => {
+                    tracing::debug!("!!!!!!!!!!!! TunChannelTx::send ipv6");
+
                     self.tun_tx_v6
                         .send(udp_packet)
                         .await
@@ -97,14 +100,16 @@ impl IpRecv for TunChannelRx {
         _pool: &mut PacketBufPool,
     ) -> io::Result<impl Iterator<Item = Packet<Ip>> + Send + 'a> {
         let packet = select! {
-            packet = self.tun_rx_v4.recv().fuse() => packet.map(Packet::<Ip>::from),
+            packet = self.tun_rx_v4.recv().fuse() => {
+                if let Some(pkt) = &packet {
+                    tracing::debug!("!!!!!!!!!!!! TunChannelRx::recv. {} < {}", pkt.header.destination(), pkt.header.source());
+                }
+                packet.map(Packet::<Ip>::from)
+            }
             packet = self.tun_rx_v6.recv().fuse() => packet.map(Packet::<Ip>::from),
         };
 
-        eprintln!("!!!!!!!!!!!! TunChannelRx::recv");
-
         let Some(packet) = packet else {
-            eprintln!("!!!!!!!!!!!! afds");
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "channel closed",
