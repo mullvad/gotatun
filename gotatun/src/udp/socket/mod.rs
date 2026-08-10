@@ -20,12 +20,12 @@ use std::{
 use super::{UdpRecv, UdpTransportFactory, UdpTransportFactoryParams};
 
 /// Implementations of [`super::UdpSend`]/[`super::UdpRecv`] for all targets
-#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "windows")))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 mod generic;
 
 /// Implementations of [`super::UdpSend`]/[`super::UdpRecv`] for linux
-#[cfg(any(target_os = "linux", target_os = "android"))]
-mod linux;
+//#[cfg(any(target_os = "linux", target_os = "android"))]
+//mod linux;
 
 /// Implementations of [`super::UdpSend`]/[`super::UdpRecv`] for windows
 #[cfg(target_os = "windows")]
