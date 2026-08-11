@@ -30,7 +30,7 @@ use builder::Nul;
 use futures::TryFutureExt;
 use std::collections::HashMap;
 use std::io::{self};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use std::ops::BitOrAssign;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -144,16 +144,12 @@ pub(crate) struct DeviceState<T: DeviceTransports> {
 }
 
 pub(crate) struct Connection<T: DeviceTransports> {
-    udp4: <T::UdpTransportFactory as UdpTransportFactory>::SendV4,
-    udp6: <T::UdpTransportFactory as UdpTransportFactory>::SendV6,
+    udp: <T::UdpTransportFactory as UdpTransportFactory>::Send,
 
     listen_port: Option<u16>,
 
     /// The task that reads IPv4 traffic from the UDP socket.
-    incoming_ipv4: Task,
-
-    /// The task that reads IPv6 traffic from the UDP socket.
-    incoming_ipv6: Task,
+    incoming: Task,
 
     /// The task that handles keepalives/heartbeats/etc.
     timers: Task,
@@ -183,7 +179,7 @@ impl<T: DeviceTransports> Connection<T> {
             conn.stop().await;
         }
 
-        let (udp4_tx, udp4_rx, udp6_tx, udp6_rx) = device.open_listen_socket().await?;
+        let (udp_tx, udp_rx) = device.open_listen_socket().await?;
         let (buffered_ip_tx, buffered_ip_rx) = crate::tun::buffer::channel(
             MAX_PACKET_BUFS,
             pool.clone(),
@@ -192,11 +188,9 @@ impl<T: DeviceTransports> Connection<T> {
         )
         .await;
 
-        let buffered_udp_tx_v4 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp4_tx.clone());
-        let buffered_udp_tx_v6 = BufferedUdpSend::new(MAX_PACKET_BUFS, udp6_tx.clone());
+        let buffered_udp_tx = BufferedUdpSend::new(MAX_PACKET_BUFS, udp_tx.clone());
 
-        let buffered_udp_rx_v4 = BufferedUdpReceive::new(MAX_PACKET_BUFS, udp4_rx, pool.clone());
-        let buffered_udp_rx_v6 = BufferedUdpReceive::new(MAX_PACKET_BUFS, udp6_rx, pool.clone());
+        let buffered_udp_rx = BufferedUdpReceive::new(MAX_PACKET_BUFS, udp_rx, pool.clone());
 
         // Start DAITA/hooks tasks
         #[cfg(feature = "daita")]
@@ -205,8 +199,7 @@ impl<T: DeviceTransports> Connection<T> {
                 peer_arc,
                 pool.clone(),
                 device.tun_rx_mtu.clone(),
-                buffered_udp_tx_v4.clone(),
-                buffered_udp_tx_v6.clone(),
+                buffered_udp_tx.clone(),
             )
             .await?;
         }
@@ -228,38 +221,22 @@ impl<T: DeviceTransports> Connection<T> {
             DeviceState::handle_outgoing(
                 Arc::downgrade(&device_arc),
                 buffered_ip_rx,
-                buffered_udp_tx_v4.clone(),
-                buffered_udp_tx_v6.clone(),
+                buffered_udp_tx.clone(),
                 pool.clone(),
             )
             .map_err(register_fatal_error.clone()),
         );
         let timers = Task::spawn(
             "handle_timers",
-            DeviceState::handle_timers(
-                Arc::downgrade(&device_arc),
-                buffered_udp_tx_v4.clone(),
-                buffered_udp_tx_v6.clone(),
-            ),
+            DeviceState::handle_timers(Arc::downgrade(&device_arc), buffered_udp_tx.clone()),
         );
-        let incoming_ipv4 = Task::spawn(
-            "handle_incoming ipv4",
+        let incoming = Task::spawn(
+            "handle_incoming",
             DeviceState::handle_incoming(
                 Arc::downgrade(&device_arc),
                 buffered_ip_tx.clone(),
-                buffered_udp_tx_v4,
-                buffered_udp_rx_v4,
-                pool.clone(),
-            )
-            .map_err(register_fatal_error.clone()),
-        );
-        let incoming_ipv6 = Task::spawn(
-            "handle_incoming ipv6",
-            DeviceState::handle_incoming(
-                Arc::downgrade(&device_arc),
-                buffered_ip_tx,
-                buffered_udp_tx_v6,
-                buffered_udp_rx_v6,
+                buffered_udp_tx,
+                buffered_udp_rx,
                 pool.clone(),
             )
             .map_err(register_fatal_error.clone()),
@@ -267,11 +244,9 @@ impl<T: DeviceTransports> Connection<T> {
 
         debug_assert!(device.connection.is_none());
         device.connection = Some(Connection {
-            listen_port: udp4_tx.local_addr()?.map(|sa| sa.port()),
-            udp4: udp4_tx,
-            udp6: udp6_tx,
-            incoming_ipv4,
-            incoming_ipv6,
+            listen_port: udp_tx.local_addr()?.map(|sa| sa.port()),
+            udp: udp_tx,
+            incoming,
             timers,
             outgoing,
         });
@@ -483,26 +458,23 @@ impl<T: DeviceTransports> DeviceState<T> {
         &mut self,
     ) -> Result<
         (
-            <T::UdpTransportFactory as UdpTransportFactory>::SendV4,
-            <T::UdpTransportFactory as UdpTransportFactory>::RecvV4,
-            <T::UdpTransportFactory as UdpTransportFactory>::SendV6,
-            <T::UdpTransportFactory as UdpTransportFactory>::RecvV6,
+            <T::UdpTransportFactory as UdpTransportFactory>::Send,
+            <T::UdpTransportFactory as UdpTransportFactory>::Recv,
         ),
         Error,
     > {
         let params = UdpTransportFactoryParams {
-            addr_v4: Ipv4Addr::UNSPECIFIED,
-            addr_v6: Ipv6Addr::UNSPECIFIED,
+            addr: None,
             port: self.port,
             #[cfg(target_os = "linux")]
             fwmark: self.fwmark,
         };
-        let ((udp4_tx, udp4_rx), (udp6_tx, udp6_rx)) = self
+        let (udp_tx, udp_rx) = self
             .udp_factory
             .bind(&params)
             .await
             .map_err(|e| Error::Bind(e, params))?;
-        Ok((udp4_tx, udp4_rx, udp6_tx, udp6_rx))
+        Ok((udp_tx, udp_rx))
     }
 
     async fn set_key(&mut self, private_key: x25519::StaticSecret) -> Reconfigure {
@@ -536,8 +508,7 @@ impl<T: DeviceTransports> DeviceState<T> {
         self.fwmark = Some(mark);
 
         if let Some(conn) = &mut self.connection {
-            conn.udp4.set_fwmark(mark)?;
-            conn.udp6.set_fwmark(mark)?;
+            conn.udp.set_fwmark(mark)?;
         }
 
         // // Then on all currently connected sockets
@@ -578,7 +549,7 @@ impl<T: DeviceTransports> DeviceState<T> {
     }
 
     #[instrument(level = Level::TRACE, skip_all)]
-    async fn handle_timers(device: Weak<RwLock<Self>>, udp4: impl UdpSend, udp6: impl UdpSend) {
+    async fn handle_timers(device: Weak<RwLock<Self>>, udp: impl UdpSend) {
         loop {
             let Some(device) = device.upgrade() else {
                 break;
@@ -614,14 +585,7 @@ impl<T: DeviceTransports> DeviceState<T> {
 
                         // NOTE: we don't bother with triggering TunnelRecv DAITA events here.
 
-                        match endpoint_addr {
-                            SocketAddr::V4(_) => {
-                                udp4.send_to(packet.into(), endpoint_addr).await.ok()
-                            }
-                            SocketAddr::V6(_) => {
-                                udp6.send_to(packet.into(), endpoint_addr).await.ok()
-                            }
-                        };
+                        let _ = udp.send_to(packet.into(), endpoint_addr).await;
                     }
                     Ok(None) => {}
                     Err(WireGuardError::ConnectionExpired) => {}
@@ -794,8 +758,7 @@ impl<T: DeviceTransports> DeviceState<T> {
     async fn handle_outgoing(
         device: Weak<RwLock<Self>>,
         mut tun_rx: impl IpRecv,
-        udp4: impl UdpSend,
-        udp6: impl UdpSend,
+        udp: impl UdpSend,
         mut packet_pool: PacketBufPool,
     ) -> Result<(), Error> {
         let mut tun_mtu = {
@@ -881,12 +844,7 @@ impl<T: DeviceTransports> DeviceState<T> {
                 drop(peer); // release lock
                 drop(device_guard);
 
-                let result = match peer_addr {
-                    SocketAddr::V4(..) => udp4.send_to(packet, peer_addr).await,
-                    SocketAddr::V6(..) => udp6.send_to(packet, peer_addr).await,
-                };
-
-                if result.is_err() {
+                if udp.send_to(packet, peer_addr).await.is_err() {
                     break;
                 }
             }
@@ -897,21 +855,14 @@ impl<T: DeviceTransports> DeviceState<T> {
 impl<T: DeviceTransports> Connection<T> {
     async fn stop(self) {
         let Self {
-            udp4,
-            udp6,
+            udp,
             listen_port: _,
-            incoming_ipv4,
-            incoming_ipv6,
+            incoming,
             timers,
             outgoing,
         } = self;
-        drop((udp4, udp6));
+        drop(udp);
 
-        join!(
-            incoming_ipv4.stop(),
-            incoming_ipv6.stop(),
-            timers.stop(),
-            outgoing.stop(),
-        );
+        join!(incoming.stop(), timers.stop(), outgoing.stop(),);
     }
 }

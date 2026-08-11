@@ -39,7 +39,7 @@ impl UdpSend for super::UdpSocket {
     type SendManyBuf = SendmmsgBuf;
 
     async fn send_to(&self, packet: Packet, target: SocketAddr) -> io::Result<()> {
-        tokio::net::UdpSocket::send_to(self.socket()?, &packet, target).await?;
+        self.socket().send_to(&packet, target).await?;
         Ok(())
     }
 
@@ -50,7 +50,7 @@ impl UdpSend for super::UdpSocket {
     ) -> io::Result<()> {
         check_send_max_number_of_packets(MAX_PACKET_COUNT, packets)?;
 
-        let socket = self.socket()?;
+        let socket = self.socket();
         let fd = socket.as_raw_fd();
 
         buf.targets.clear();
@@ -97,21 +97,12 @@ impl UdpSend for super::UdpSocket {
     }
 
     fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
-        #[cfg(target_os = "linux")]
-        if self.is_disabled_ipv6() {
-            return Ok(None);
-        }
-
         UdpSocket::local_addr(self).map(Some)
     }
 
     #[cfg(target_os = "linux")]
     fn set_fwmark(&self, mark: u32) -> io::Result<()> {
-        if self.is_disabled_ipv6() {
-            return Ok(());
-        }
-
-        setsockopt(self.socket()?, sockopt::Mark, &mark)?;
+        setsockopt(self.socket(), sockopt::Mark, &mark)?;
         Ok(())
     }
 }
@@ -124,9 +115,9 @@ mod gro {
     // TODO: Fix constant
     const MAX_GRO_SIZE: usize = MAX_SEGMENTS * 4096;
 
-    use super::super::disabled_ipv6_error;
     use super::MAX_PACKET_COUNT;
     use crate::packet::{Packet, PacketBufPool};
+    use crate::udp::socket::map_src_addr;
     use crate::udp::{UdpRecv, socket::UdpSocket};
     use bytes::BytesMut;
     use nix::cmsg_space;
@@ -158,13 +149,10 @@ mod gro {
             &mut self,
             pool: &mut PacketBufPool,
         ) -> io::Result<(Packet, SocketAddr)> {
-            if self.is_disabled_ipv6() {
-                return Err(disabled_ipv6_error());
-            }
-
             let mut buf = pool.get();
-            let (n, src) = self.socket()?.recv_from(&mut buf).await?;
+            let (n, src) = self.socket().recv_from(&mut buf).await?;
             buf.truncate(n);
+            let src = self.map_src(src);
             Ok((buf, src))
         }
 
@@ -174,12 +162,9 @@ mod gro {
             pool: &mut PacketBufPool,
             packets: &mut Vec<(Packet, SocketAddr)>,
         ) -> io::Result<()> {
-            if self.is_disabled_ipv6() {
-                return Err(disabled_ipv6_error());
-            }
-
-            let socket = self.socket()?;
+            let socket = self.socket();
             let fd = socket.as_raw_fd();
+            let map_ipv4_to_ipv6 = self.map_ipv4_to_ipv6;
 
             socket
                 .async_io(Interest::READABLE, move || {
@@ -214,7 +199,7 @@ mod gro {
 
                         let Some(source_addr) = result.address.as_ref().and_then(|addr| {
                             addr.as_sockaddr_in()
-                                .map(|addr| (*addr).into())
+                                .map(|&addr| SocketAddr::from(addr))
                                 .or_else(|| addr.as_sockaddr_in6().map(|addr| (*addr).into()))
                         }) else {
                             if cfg!(debug_assertions) {
@@ -222,6 +207,8 @@ mod gro {
                             }
                             continue;
                         };
+
+                        let source_addr = map_src_addr(map_ipv4_to_ipv6, source_addr);
 
                         // TODO: is this true? Under what circumstance can the cmsg buffer overflow?
                         let mut cmsgs = result.cmsgs().expect("we have allocated enough memory");
@@ -268,14 +255,10 @@ mod gro {
         }
 
         fn enable_udp_gro(&self) -> io::Result<()> {
-            if self.is_disabled_ipv6() {
-                return Ok(());
-            }
-
             // TODO: missing constants on Android
             use std::os::fd::AsFd;
             nix::sys::socket::setsockopt(
-                &self.socket()?.as_fd(),
+                &self.as_fd(),
                 nix::sys::socket::sockopt::UdpGroSegment,
                 &true,
             )?;
@@ -387,8 +370,9 @@ mod android {
             pool: &mut PacketBufPool,
         ) -> io::Result<(Packet, SocketAddr)> {
             let mut buf = pool.get();
-            let (n, src) = self.socket()?.recv_from(&mut buf).await?;
+            let (n, src) = self.socket().recv_from(&mut buf).await?;
             buf.truncate(n);
+            let src = self.map_src(src);
             Ok((buf, src))
         }
     }

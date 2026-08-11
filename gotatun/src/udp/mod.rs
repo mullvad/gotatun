@@ -18,7 +18,7 @@
 use std::{
     future::Future,
     io,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, SocketAddr},
 };
 
 use crate::packet::{Packet, PacketBufPool};
@@ -33,38 +33,25 @@ pub mod socket;
 ///
 /// See [`UdpSend`] and [`UdpRecv`].
 pub trait UdpTransportFactory: Send + Sync + 'static {
-    /// The [`UdpSend`] for IPv4 returned by [`UdpTransportFactory::bind`].
-    type SendV4: UdpSend + 'static;
+    /// The [`UdpSend`] returned by [`UdpTransportFactory::bind`].
+    type Send: UdpSend + 'static;
 
-    /// The [`UdpSend`] for IPv6 returned by [`UdpTransportFactory::bind`].
-    type SendV6: UdpSend + 'static;
+    /// The [`UdpRecv`] returned by [`UdpTransportFactory::bind`].
+    type Recv: UdpRecv + 'static;
 
-    /// The [`UdpRecv`] for IPv4 returned by [`UdpTransportFactory::bind`].
-    type RecvV4: UdpRecv + 'static;
-
-    /// The [`UdpRecv`] for IPv6 returned by [`UdpTransportFactory::bind`].
-    type RecvV6: UdpRecv + 'static;
-
-    /// Bind sockets for sending and receiving UDP.
-    ///
-    /// Returns two pairs of UdpSend/Recvs, one for IPv4 and one for IPv6.
-    #[allow(clippy::type_complexity)]
+    /// Bind a socket for sending and receiving UDP.
     fn bind(
         &mut self,
         params: &UdpTransportFactoryParams,
-    ) -> impl Future<
-        Output = io::Result<((Self::SendV4, Self::RecvV4), (Self::SendV6, Self::RecvV6))>,
-    > + Send;
+    ) -> impl Future<Output = io::Result<(Self::Send, Self::Recv)>> + Send;
 }
 
 /// Arguments to [`UdpTransportFactory::bind`].
 #[derive(Clone, Debug)]
 pub struct UdpTransportFactoryParams {
-    /// The [`Ipv4Addr`] to bind the UDP socket to.
-    pub addr_v4: Ipv4Addr,
-
-    /// The [`Ipv6Addr`] to bind the UDP socket to.
-    pub addr_v6: Ipv6Addr,
+    /// The [`IpAddr`] to bind the UDP socket to.
+    /// If `None`, attempt to bind a dual-stack IPv4/IPv6 socket to `::`.
+    pub addr: Option<IpAddr>,
 
     /// The port to bind the UDP socket to.
     pub port: u16,
@@ -118,7 +105,6 @@ pub trait UdpRecv: Send + Sync {
 /// An abstraction of `send_to` for a UDP socket.
 ///
 /// This allows us to, for example, swap out UDP sockets with a channel.
-// TODO: consider splitting into UdpSendV4 and UdpSendV6
 pub trait UdpSend: Send + Sync + Clone {
     /// The implementations of [`UdpSend::send_many_to`] typically require a buffer of some kind.
     /// This buffer should be created by the caller (using `::default()`), and reused between calls.
@@ -153,7 +139,6 @@ pub trait UdpSend: Send + Sync + Clone {
     /// # Cancel safety
     /// This method is not cancel safe, but cancellations must never result in a panic,
     /// or an error on a subsequent call.
-    // TODO: consider splitting into send_many_to_ipv4 and send_many_to_ipv6
     fn send_many_to(
         &self,
         send_buf: &mut Self::SendManyBuf,
