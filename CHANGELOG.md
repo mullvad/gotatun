@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bind only a single dual-stack socket in UdpSocketFactory, instead of a pair of sockets.
 
 ### Fixed
+- Reject malformed base64 keys instead of accepting them as all-zero keys.
 - Validate IPv4 checksums and total lengths against the full IHL-declared header.
 - Keep IPv4 fragments for different protocols in separate reassembly buffers.
 - Reject fragmented IPv4 packets that exceed the maximum packet length after reassembly.

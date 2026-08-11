@@ -10,7 +10,10 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use base64::{Engine as _, prelude::BASE64_STANDARD};
+use base64::{
+    Engine as _,
+    engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
+};
 
 pub struct KeyBytes(pub [u8; 32]);
 
@@ -31,13 +34,17 @@ impl std::str::FromStr for KeyBytes {
             }
             43 | 44 => {
                 // Try to parse as base64
-                if let Ok(decoded_key) = BASE64_STANDARD.decode(s) {
-                    if decoded_key.len() == internal.len() {
-                        internal[..].copy_from_slice(&decoded_key);
-                    } else {
-                        return Err("Illegal character in key");
-                    }
+                let decoded_key = if s.len() == 43 {
+                    STANDARD_NO_PAD.decode(s)
+                } else {
+                    STANDARD.decode(s)
                 }
+                .map_err(|_| "Illegal character in key")?;
+
+                if decoded_key.len() != internal.len() {
+                    return Err("Illegal character in key");
+                }
+                internal.copy_from_slice(&decoded_key);
             }
             _ => return Err("Illegal key size"),
         }
@@ -55,5 +62,32 @@ impl std::fmt::Debug for KeyBytes {
 impl From<[u8; 32]> for KeyBytes {
     fn from(bytes: [u8; 32]) -> Self {
         KeyBytes(bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::KeyBytes;
+
+    const KEY: [u8; 32] = [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26, 27, 28, 29, 30, 31,
+    ];
+
+    #[test]
+    fn parse_padded_and_unpadded_base64_keys() {
+        for encoded in [
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        ] {
+            assert_eq!(encoded.parse::<KeyBytes>().unwrap().0, KEY);
+        }
+    }
+
+    #[test]
+    fn reject_invalid_base64_keys() {
+        for invalid in ["!".repeat(43), "!".repeat(44), "A".repeat(44)] {
+            assert!(invalid.parse::<KeyBytes>().is_err());
+        }
     }
 }
