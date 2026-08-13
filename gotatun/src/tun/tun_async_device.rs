@@ -13,7 +13,7 @@
 
 use tokio::{sync::watch, time::sleep};
 use tun::AbstractDevice;
-use zerocopy::{FromBytes, IntoBytes};
+use zerocopy::IntoBytes;
 
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
@@ -151,14 +151,23 @@ impl TunDevice {
     }
 }
 
+/// Log the version, addresses and size of a packet passing through the TUN device.
+///
+/// Does nothing if the packet is neither IPv4 nor IPv6.
+fn log_packet(operation: &str, packet: &Packet<Ip>) {
+    let (Some(source), Some(destination)) = (packet.source(), packet.destination()) else {
+        return;
+    };
+    tracing::debug!(
+        "TunDevice::{operation} v{}. from {source} to {destination} ({} bytes)",
+        packet.header.version(),
+        packet.as_bytes().len(),
+    );
+}
+
 impl IpSend for TunDevice {
     async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
-        let ipv4 = crate::packet::Ipv4::<[u8]>::ref_from_bytes(&packet.as_bytes()).ok();
-        if let Some(ipv4) = ipv4 {
-            if ipv4.header.version() == 4 {
-                tracing::debug!("TunDevice::send v4. {} > {} ({} bytes)", ipv4.header.source(), ipv4.header.destination(), ipv4.payload.len());
-            }
-        }
+        log_packet("write", &packet);
         self.tun.send(&packet.into_bytes()).await?;
         Ok(())
     }
@@ -174,13 +183,7 @@ impl IpRecv for TunDevice {
         packet.truncate(n);
         match packet.try_into_ip() {
             Ok(packet) => {
-                let ipv4 = crate::packet::Ipv4::<[u8]>::ref_from_bytes(&packet.as_bytes()).ok();
-        if let Some(ipv4) = ipv4 {
-            if ipv4.header.version() == 4 {
-                tracing::debug!("TunDevice::recv v4. {} < {} ({} bytes)", ipv4.header.destination(), ipv4.header.source(), ipv4.payload.len());
-            }
-        }
-
+                log_packet("read", &packet);
                 Ok(iter::once(packet))
             }
             Err(e) => Err(io::Error::other(e.to_string())),

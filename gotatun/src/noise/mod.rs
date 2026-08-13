@@ -191,6 +191,11 @@ impl<R: RngCore + Send> Tunn<R> {
         self.handshake.preshared_key()
     }
 
+    /// Get the static public key of the peer on the other end of this tunnel.
+    pub fn peer_static_public(&self) -> x25519::PublicKey {
+        self.handshake.peer_static_public()
+    }
+
     /// Encapsulate a single packet.
     ///
     /// If there's an active session, return the encapsulated packet. Otherwise, if needed, return

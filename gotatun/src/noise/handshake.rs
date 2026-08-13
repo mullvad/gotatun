@@ -524,6 +524,11 @@ impl Handshake {
         self.params.preshared_key
     }
 
+    /// Get the static public key of the peer
+    pub(crate) fn peer_static_public(&self) -> x25519::PublicKey {
+        self.params.peer_static_public
+    }
+
     pub(super) fn receive_handshake_initialization(
         &mut self,
         packet: crate::packet::Packet<WgHandshakeInit>,

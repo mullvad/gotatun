@@ -26,6 +26,7 @@ mod transports;
 pub mod uapi;
 
 use crate::noise::index_table::IndexTable;
+use base64::{Engine as _, prelude::BASE64_STANDARD};
 use builder::Nul;
 use futures::TryFutureExt;
 use std::collections::HashMap;
@@ -38,6 +39,7 @@ use tokio::join;
 use tokio::sync::RwLock;
 use tokio::sync::{Mutex, watch};
 use tracing::{Level, instrument};
+use zerocopy::IntoBytes;
 
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::parse_handshake_anon;
@@ -838,6 +840,16 @@ impl<T: DeviceTransports> DeviceState<T> {
                 };
 
                 let mut peer = peer_arc.lock().await;
+
+                if let Some(src_addr) = packet.source() {
+                    tracing::debug!(
+                        "handle_outgoing v{}. from {src_addr} to {dst_addr} ({} bytes) peer {}",
+                        packet.header.version(),
+                        packet.as_bytes().len(),
+                        BASE64_STANDARD.encode(peer.tunnel.peer_static_public().as_bytes()),
+                    );
+                }
+
                 let Some(peer_addr) = peer.endpoint().addr else {
                     // TODO: Implement the following error handling from section 3 of the
                     // whitepaper: If [peer_addr] matches no peer, it is dropped, and the sender is
