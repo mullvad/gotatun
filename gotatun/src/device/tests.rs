@@ -183,6 +183,47 @@ async fn test_endpoint_roaming() {
     ping_pong("1.2.3.4".parse().unwrap()).await;
 }
 
+/// Adding peers is atomic, including when a public key is duplicated within the batch.
+#[tokio::test]
+#[test_log::test]
+async fn add_peers_rejects_duplicate_public_keys() {
+    use crate::device::Peer;
+    use ipnetwork::Ipv4Network;
+    use std::{net::Ipv4Addr, sync::Arc};
+    use x25519_dalek::{PublicKey, StaticSecret};
+
+    let (_alice, bob, _eve) = mock::device_pair().await;
+    let initial_peers = bob.device.peers().await.len();
+    let public_key = PublicKey::from(&StaticSecret::random());
+    let peer_a = Peer::new(public_key).with_allowed_ip(
+        Ipv4Network::new(Ipv4Addr::new(10, 0, 0, 1), 32)
+            .unwrap()
+            .into(),
+    );
+    let peer_b = Peer::new(public_key).with_allowed_ip(
+        Ipv4Network::new(Ipv4Addr::new(10, 0, 0, 2), 32)
+            .unwrap()
+            .into(),
+    );
+
+    let added = bob
+        .device
+        .add_peers([peer_a, peer_b])
+        .await
+        .expect("device reconfiguration should not fail");
+
+    assert!(!added, "duplicate public keys must reject the entire batch");
+    assert_eq!(bob.device.peers().await.len(), initial_peers);
+
+    let state = bob.device.inner.read().await;
+    assert!(state.peers_by_ip.iter().all(|(routed_peer, _)| {
+        state
+            .peers
+            .values()
+            .any(|peer| Arc::ptr_eq(peer, routed_peer))
+    }));
+}
+
 /// A peer must not inject a packet whose inner source IP belongs
 /// (by longest-prefix match) to a *different* peer, even when the
 /// sending peer's own allowed-ips would cover it. The most specific
