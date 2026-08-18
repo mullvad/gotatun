@@ -68,6 +68,10 @@ const MAX_PACKET_BUFS: usize = 4000;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
+    /// Multiple peers have the same public key
+    #[error("Multiple peers have the same public key")]
+    DuplicatePeer,
+
     /// I/O error
     #[error("i/o error: {0}")]
     IoError(#[from] io::Error),
