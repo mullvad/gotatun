@@ -145,7 +145,8 @@ mod fragmentation {
         // The `VecDeque` is holds the fragments for each unique packet being assembled.
         // It is also a FIFO queue, so that the oldest fragments are dropped when the maximum
         // number of fragments is reached. The inner `Vec` is used to store the fragments.
-        // INVARIANT: The inner `Vec` must always be sorted by fragment_offset
+        // INVARIANT: The inner `Vec` must always be sorted by fragment_offset, and only its
+        // last fragment may have the more-fragments flag unset.
         fragments: VecDeque<(FragmentId, Vec<Packet<Ipv4>>)>,
     }
 
@@ -221,6 +222,21 @@ mod fragmentation {
                 );
                 return None;
             };
+
+            if let Some(prev_i) = i.checked_sub(1)
+                && !fragments[prev_i].header.more_fragments()
+            {
+                tracing::trace!(
+                    "Fragment with offset {fragment_offset} follows a terminal fragment for ID {id:?}, dropping",
+                );
+                return None;
+            }
+            if !more_fragments && fragments.get(i).is_some() {
+                tracing::trace!(
+                    "Terminal fragment with offset {fragment_offset} precedes another fragment for ID {id:?}, dropping",
+                );
+                return None;
+            }
 
             // Check if the new fragment overlaps with existing fragments.
             // Note that the fragments are sorted by fragment_offset, so we only need to check
@@ -720,6 +736,46 @@ mod fragmentation {
                     "First fragment should be dropped because it overlaps with the second"
                 );
             }
+        }
+
+        #[test]
+        fn test_fragment_after_terminal_fragment_is_dropped() {
+            let mut fragments = Ipv4Fragments::default();
+            let src = Ipv4Addr::new(192, 0, 2, 1);
+            let dst = Ipv4Addr::new(192, 0, 2, 2);
+            let id = 42;
+
+            let terminal = make_ip_fragment(id, src, dst, 1, false, b"terminal");
+            let conflicting = make_ip_fragment(id, src, dst, 2, false, b"conflict");
+            let first = make_ip_fragment(id, src, dst, 0, true, b"first___");
+
+            assert!(fragments.assemble_ipv4_fragment(terminal).is_none());
+            assert!(fragments.assemble_ipv4_fragment(conflicting).is_none());
+
+            let packet = fragments
+                .assemble_ipv4_fragment(first)
+                .expect("fragments up to the first terminal fragment should reassemble");
+            assert_eq!(packet.payload, *b"first___terminal");
+        }
+
+        #[test]
+        fn test_terminal_fragment_before_buffered_fragment_is_dropped() {
+            let mut fragments = Ipv4Fragments::default();
+            let src = Ipv4Addr::new(192, 0, 2, 1);
+            let dst = Ipv4Addr::new(192, 0, 2, 2);
+            let id = 42;
+
+            let later = make_ip_fragment(id, src, dst, 2, false, b"later___");
+            let conflicting_terminal = make_ip_fragment(id, src, dst, 1, false, b"terminal");
+            let first = make_ip_fragment(id, src, dst, 0, true, b"first___");
+
+            assert!(fragments.assemble_ipv4_fragment(later).is_none());
+            assert!(
+                fragments
+                    .assemble_ipv4_fragment(conflicting_terminal)
+                    .is_none()
+            );
+            assert!(fragments.assemble_ipv4_fragment(first).is_none());
         }
     }
 }
