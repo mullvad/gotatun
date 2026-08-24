@@ -73,7 +73,6 @@
             };
             cargoLock.lockFile = ./Cargo.lock;
             strictDeps = true;
-            buildNoDefaultFeatures = true;
             meta = {
               mainProgram = "gotatun";
               description = "Userspace WireGuard";
