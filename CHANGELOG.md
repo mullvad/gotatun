@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Reject IPv4 fragment sets containing data beyond a terminal fragment.
 
+#### Windows
+- Identify fatal `wintun-bindings` errors for TUN read/write.
+
 
 ## [0.9.0] - 2026-08-18
 ### Added
