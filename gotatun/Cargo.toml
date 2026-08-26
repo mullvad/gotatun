@@ -80,6 +80,7 @@ tokio-stream = { workspace = true, features = ["sync"] }
 x25519-dalek = { workspace = true, features = ["getrandom"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+wintun-bindings = { workspace = true, default-features = false, optional = true }
 windows-sys = { workspace = true, features = [
   "Win32",
   "Win32_Foundation",
@@ -118,7 +119,7 @@ daita-uapi = ["daita"]
 device = ["tokio/net", "socket"]
 socket = ["dep:socket2", "tokio/net"]
 pcap = ["dep:pcap-file"]
-tun = ["dep:tun"]
+tun = ["dep:tun", "dep:wintun-bindings"]
 # UDP GRO appears to be broken on Windows.
 # In some cases it fails to return UDP_COALESCED_INFO
 windows-gro = []

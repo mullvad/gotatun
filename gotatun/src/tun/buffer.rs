@@ -212,8 +212,24 @@ fn is_fatal_tun_error(err: &io::Error) -> bool {
     }
 
     #[cfg(windows)]
-    if err.raw_os_error() == Some(windows_sys::Win32::Foundation::ERROR_HANDLE_EOF as i32) {
-        return true;
+    {
+        const ERROR_HANDLE_EOF: i32 = windows_sys::Win32::Foundation::ERROR_HANDLE_EOF as i32;
+
+        if err.raw_os_error() == Some(ERROR_HANDLE_EOF) {
+            return true;
+        }
+
+        // TODO: Propagate the underlying error from tun/wintun-bindings and remove this
+        if let Some(ERROR_HANDLE_EOF) = err
+            .get_ref()
+            .and_then(|e| e.downcast_ref::<wintun_bindings::Error>())
+            .and_then(|e| match e {
+                wintun_bindings::Error::Io(io_err) => io_err.raw_os_error(),
+                _ => None,
+            })
+        {
+            return true;
+        }
     }
 
     matches!(
