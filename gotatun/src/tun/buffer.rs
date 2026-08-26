@@ -24,6 +24,8 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+const MAX_NUM_TUN_ERRORS: usize = 50;
+
 /// Create a pair of [`BufferedIpSend`] and [`BufferedIpRecv`] with `capacity`.
 ///
 /// This takes an `Arc<Mutex<S>>` and `Arc<Mutex<R>>` because the inner `S` and `R` will be re-used
@@ -73,6 +75,7 @@ impl BufferedIpSend {
                 .await
                 .expect("Deadlock on IpSend. There must be no more than one IpSend active at any given time.");
 
+            let mut counter = 0;
             while let Some(packet) = rx.recv().await {
                 if let Err(e) = inner.send(packet).await {
                     if is_fatal_tun_error(&e) {
@@ -80,6 +83,14 @@ impl BufferedIpSend {
                         break;
                     }
                     tracing::error!("Error sending IP packet: {e}");
+
+                    counter += 1;
+                    if counter >= MAX_NUM_TUN_ERRORS {
+                        tracing::trace!("Closing tunnel due to {counter} consecutive errors");
+                        break;
+                    }
+                } else {
+                    counter = 0;
                 }
             }
 
@@ -145,9 +156,12 @@ impl<I: IpRecv> BufferedIpRecv<I> {
         let drop_guard = token.clone().drop_guard();
 
         let task = async move {
+            let mut counter = 0;
+
             loop {
                 match inner.recv(&mut pool).await {
                     Ok(packets) => {
+                        counter = 0;
                         for packet in packets {
                             if tx.send(packet).await.is_err() {
                                 return;
@@ -160,6 +174,12 @@ impl<I: IpRecv> BufferedIpRecv<I> {
                             break;
                         }
                         tracing::error!("Error receiving IP packet: {e}");
+
+                        counter += 1;
+                        if counter >= MAX_NUM_TUN_ERRORS {
+                            tracing::trace!("Closing tunnel due to {counter} consecutive errors");
+                            break;
+                        }
                     }
                 }
             }
@@ -212,8 +232,24 @@ fn is_fatal_tun_error(err: &io::Error) -> bool {
     }
 
     #[cfg(windows)]
-    if err.raw_os_error() == Some(windows_sys::Win32::Foundation::ERROR_HANDLE_EOF as i32) {
-        return true;
+    {
+        const ERROR_HANDLE_EOF: i32 = windows_sys::Win32::Foundation::ERROR_HANDLE_EOF as i32;
+
+        if err.raw_os_error() == Some(ERROR_HANDLE_EOF) {
+            return true;
+        }
+
+        // TODO: Propagate the underlying error from tun/wintun-bindings and remove this
+        if let Some(ERROR_HANDLE_EOF) = err
+            .get_ref()
+            .and_then(|e| e.downcast_ref::<wintun_bindings::Error>())
+            .and_then(|e| match e {
+                wintun_bindings::Error::Io(io_err) => io_err.raw_os_error(),
+                _ => None,
+            })
+        {
+            return true;
+        }
     }
 
     matches!(
