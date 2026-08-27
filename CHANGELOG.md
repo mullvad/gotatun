@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Fixed
 - Reject IPv4 fragment sets containing data beyond a terminal fragment.
+- Reject duplicate peer public keys in device builders, batch additions, and UAPI requests.
 
 
 ## [0.8.2] - 2026-08-26

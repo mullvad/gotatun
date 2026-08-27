@@ -10,7 +10,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 //! Configuration and inspection interface for WireGuard devices.
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 
 use ipnetwork::IpNetwork;
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -226,15 +226,16 @@ impl<T: DeviceTransports> DeviceWrite<'_, T> {
 
     /// Add multiple new peers to this [`Device`].
     ///
-    /// If _any_ new peer has the same public key as an existing peer, no new peers are added
-    /// and this function returns `false`. See also [`Self::add_or_update_peers`].
+    /// If _any_ new peer has the same public key as an existing peer or another peer in the batch,
+    /// no new peers are added and this function returns `false`. See also
+    /// [`Self::add_or_update_peers`].
     pub fn add_peers(&mut self, peers: impl IntoIterator<Item = Peer>) -> bool {
         let peers: Vec<_> = peers.into_iter().collect();
+        let mut public_keys = HashSet::with_capacity(peers.len());
 
-        if peers
-            .iter()
-            .any(|peer| self.device.peers.contains_key(&peer.public_key))
-        {
+        if peers.iter().any(|peer| {
+            !public_keys.insert(peer.public_key) || self.device.peers.contains_key(&peer.public_key)
+        }) {
             return false;
         }
 
@@ -510,8 +511,9 @@ impl<T: DeviceTransports> Device<T> {
 
     /// Add multiple new peers to this [`Device`].
     ///
-    /// If _any_ new peer has the same public key as an existing peer, no new peers are added
-    /// and this function returns `false`. See also [`Self::add_or_update_peers`].
+    /// If _any_ new peer has the same public key as an existing peer or another peer in the batch,
+    /// no new peers are added and this function returns `false`. See also
+    /// [`Self::add_or_update_peers`].
     pub async fn add_peers(&self, peers: impl IntoIterator<Item = Peer>) -> Result<bool, Error> {
         self.write(async |device| device.add_peers(peers)).await
     }

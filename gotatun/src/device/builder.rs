@@ -9,7 +9,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use tokio::sync::{Mutex, RwLock, watch};
 use x25519_dalek::StaticSecret;
@@ -264,9 +264,12 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
     ///
     /// # Errors
     ///
+    /// Errors if multiple peers have the same public key.
     /// Errors if the UDP socket cannot be bound.
     #[cfg_attr(feature = "daita", doc = "Errors if DAITA initialization fails.")]
     pub async fn build(self) -> Result<Device<(Udp, TunTx, TunRx)>, Error> {
+        validate_peers(&self.peers)?;
+
         #[cfg(target_os = "linux")]
         let fwmark = self.fwmark;
         #[cfg(not(target_os = "linux"))]
@@ -316,5 +319,33 @@ impl<Udp: UdpTransportFactory, TunTx: IpSend, TunRx: IpRecv> DeviceBuilder<Udp, 
         }
 
         Ok(Device { inner, fatal_error })
+    }
+}
+
+fn validate_peers(peers: &[Peer]) -> Result<(), Error> {
+    let mut public_keys = HashSet::with_capacity(peers.len());
+    let has_duplicate = peers
+        .iter()
+        .any(|peer| !public_keys.insert(peer.public_key));
+
+    if has_duplicate {
+        Err(Error::DuplicatePeer)
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_peers;
+    use crate::device::{Error, Peer};
+    use x25519_dalek::{PublicKey, StaticSecret};
+
+    #[test]
+    fn detects_duplicate_peer_public_keys() {
+        let public_key = PublicKey::from(&StaticSecret::random());
+        let peers = [Peer::new(public_key), Peer::new(public_key)];
+
+        assert!(matches!(validate_peers(&peers), Err(Error::DuplicatePeer)));
     }
 }
