@@ -12,7 +12,7 @@
 //! Implementations of [`IpSend`] and [`IpRecv`] for the [`tun`] crate.
 
 use tokio::{sync::watch, time::sleep};
-use tun::AbstractDevice;
+use tun_rs::AsyncDevice;
 
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
@@ -28,11 +28,11 @@ use std::{convert::Infallible, io, iter, sync::Arc, time::Duration};
 pub enum Error {
     /// Failed to open TUN device
     #[error("Failed to open TUN device: {0}")]
-    OpenTun(#[source] tun::Error),
+    OpenTun(#[source] io::Error),
 
     /// Failed to get TUN device name
     #[error("Failed to get TUN device name: {0}")]
-    GetTunName(#[source] tun::Error),
+    GetTunName(#[source] io::Error),
 
     /// Unsupported TUN feature
     #[error("Unsupported TUN feature: {0}")]
@@ -40,7 +40,7 @@ pub enum Error {
 
     /// Failed to get TUN device MTU
     #[error("Failed to get TUN device MTU: {0}")]
-    GetMtu(#[source] tun::Error),
+    GetMtu(#[source] io::Error),
 }
 
 /// A kernel virtual network device; a TUN device.
@@ -48,7 +48,7 @@ pub enum Error {
 /// Implements [`IpSend`] and [`IpRecv`].
 #[derive(Clone)]
 pub struct TunDevice {
-    tun: Arc<tun::AsyncDevice>,
+    tun: Arc<AsyncDevice>,
     state: Arc<TunDeviceState>,
 }
 
@@ -70,18 +70,20 @@ impl TunDevice {
     ///
     /// [default search order]: <https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order>
     pub fn from_name(name: &str) -> Result<Self, Error> {
-        let mut tun_config = tun::Configuration::default();
-        if cfg!(not(target_os = "macos")) || name != "utun" {
+        let tun_config = tun_rs::DeviceBuilder::new();
+
+        let tun_config = if cfg!(not(target_os = "macos")) || name != "utun" {
             // If the name is 'utun', automatically assign a name
-            tun_config.tun_name(name);
-        }
+            tun_config.name(name)
+        } else {
+            tun_config
+        };
         #[cfg(target_os = "macos")]
-        tun_config.platform_config(|p| {
-            p.enable_routing(false);
-        });
+        let tun_config = tun_config.associate_route(false);
+
         // TODO: for wintun, must set path or enable signature check
         // we should upstream to `tun`
-        let tun = tun::create_as_async(&tun_config).map_err(Error::OpenTun)?;
+        let tun = tun_config.build_async().map_err(Error::OpenTun)?;
         let tun = TunDevice::from_tun_device(tun)?;
         Ok(tun)
     }
@@ -103,13 +105,8 @@ impl TunDevice {
         TunDevice::from_tun_device(tun)
     }
 
-    /// Construct from a [`tun::AsyncDevice`].
-    pub fn from_tun_device(tun: tun::AsyncDevice) -> Result<Self, Error> {
-        #[cfg(target_os = "linux")]
-        if tun.packet_information() {
-            return Err(Error::UnsupportedFeature("packet_information".to_string()));
-        }
-
+    /// Construct from a [`AsyncDevice`].
+    pub fn from_tun_device(tun: AsyncDevice) -> Result<Self, Error> {
         let mtu = tun.mtu().map_err(Error::GetMtu)?;
         let (tx, rx) = watch::channel(mtu);
 
@@ -146,7 +143,7 @@ impl TunDevice {
 
     /// Get the name of the TUN device.
     pub fn name(&self) -> Result<String, Error> {
-        self.tun.tun_name().map_err(Error::GetTunName)
+        self.tun.name().map_err(Error::GetTunName)
     }
 }
 

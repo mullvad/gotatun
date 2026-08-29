@@ -26,9 +26,9 @@ pub mod channel;
 #[cfg(feature = "pcap")]
 pub mod pcap;
 
-/// Re-export [`tun`] crate.
+/// Re-export [`tun_rs`] crate.
 #[cfg(feature = "tun")]
-pub use tun;
+pub use tun_rs;
 
 #[cfg(feature = "tun")]
 pub mod tun_async_device;
