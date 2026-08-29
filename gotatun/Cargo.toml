@@ -1,15 +1,15 @@
 [package]
 name = "gotatun"
-description = "an implementation of the WireGuard® protocol designed for portability and speed"
 version = "0.9.1"
 authors.workspace = true
-rust-version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+description = "an implementation of the WireGuard® protocol designed for portability and speed"
+readme.workspace = true
 repository.workspace = true
 license.workspace = true
-categories = ["asynchronous", "network-programming"]
 keywords = ["vpn", "wireguard"]
-readme.workspace = true
+categories = ["asynchronous", "network-programming"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -29,8 +29,8 @@ harness = false
 name = "crypto_benches"
 
 [[bench]]
-name = "throughput_benches"
 harness = false
+name = "throughput_benches"
 
 [dependencies]
 aead = { workspace = true }
@@ -61,10 +61,16 @@ rand_core = { workspace = true, features = ["getrandom"] }
 ring = { workspace = true, optional = true }
 socket2 = { workspace = true, features = ["all"], optional = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["sync", "rt", "time", "macros", "io-util"] }
+tokio = { workspace = true, features = [
+  "io-util",
+  "macros",
+  "rt",
+  "sync",
+  "time"
+] }
 tokio-util = { version = "0.7.18", default-features = false }
 tracing = { workspace = true }
-tun = { workspace = true, default-features = false, features = ["async"], optional = true }
+tun-rs = { workspace = true, features = ["async"], optional = true }
 typed-builder = { workspace = true }
 x25519-dalek = { workspace = true, features = [
   "reusable_secrets",
@@ -80,7 +86,6 @@ tokio-stream = { workspace = true, features = ["sync"] }
 x25519-dalek = { workspace = true, features = ["getrandom"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-wintun-bindings = { workspace = true, default-features = false, optional = true }
 windows-sys = { workspace = true, features = [
   "Win32",
   "Win32_Foundation",
@@ -91,6 +96,7 @@ windows-sys = { workspace = true, features = [
   "Win32_System_IO",
   "Win32_System_Threading",
 ] }
+wintun-bindings = { workspace = true, default-features = false, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, default-features = false, features = [
@@ -104,22 +110,22 @@ nix = { workspace = true, default-features = false, features = [
 
 [features]
 default = ["aws-lc-rs"]
-daita = ["device", "dep:maybenot"]
-# Use the `ring` crate as the AEAD backend. Combine with
-# `default-features = false` to avoid also pulling in `aws-lc-rs`,
-# which would otherwise be compiled and linked unused.
-ring = ["dep:ring"]
 # Use the `aws-lc-rs` crate as the AEAD backend. Default. At least
 # one of `ring` and `aws-lc-rs` must be enabled; `aws-lc-rs` wins
 # if both are.
 aws-lc-rs = ["dep:aws-lc-rs"]
+daita = ["dep:maybenot", "device"]
 # Add non-compliant UAPI support for DAITA.
 # See `UAPI.md` for details.
 daita-uapi = ["daita"]
-device = ["tokio/net", "socket"]
-socket = ["dep:socket2", "tokio/net"]
+device = ["socket", "tokio/net"]
 pcap = ["dep:pcap-file"]
-tun = ["dep:tun", "dep:wintun-bindings"]
+# Use the `ring` crate as the AEAD backend. Combine with
+# `default-features = false` to avoid also pulling in `aws-lc-rs`,
+# which would otherwise be compiled and linked unused.
+ring = ["dep:ring"]
+socket = ["dep:socket2", "tokio/net"]
+tun = ["dep:tun-rs", "dep:wintun-bindings"]
 # UDP GRO appears to be broken on Windows.
 # In some cases it fails to return UDP_COALESCED_INFO
 windows-gro = []
