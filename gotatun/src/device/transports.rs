@@ -10,7 +10,10 @@
 // SPDX-License-Identifier: MPL-2.0
 
 #[cfg(feature = "tun")]
-use crate::{tun::tun_async_device::TunDevice, udp::socket::UdpSocketFactory};
+use crate::{
+    tun::tun_async_device::{TunDeviceRx, TunDeviceTx},
+    udp::socket::UdpSocketFactory,
+};
 use crate::{
     tun::{IpRecv, IpSend},
     udp::UdpTransportFactory,
@@ -18,7 +21,7 @@ use crate::{
 
 /// By default, use a UDP socket for sending datagrams and a TUN device for IP packets.
 #[cfg(feature = "tun")]
-pub type DefaultDeviceTransports = (UdpSocketFactory, TunDevice, TunDevice);
+pub type DefaultDeviceTransports = (UdpSocketFactory, TunDeviceTx, TunDeviceRx);
 
 /// Trait that defines the transport components for a WireGuard device.
 ///

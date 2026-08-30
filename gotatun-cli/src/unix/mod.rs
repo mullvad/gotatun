@@ -200,6 +200,8 @@ async fn setup_device(args: Args) -> eyre::Result<Device<DefaultDeviceTransports
     let tun_name = tun.name()?; // get the actual tun name
     info!("Tunnel interface: {tun_name}");
 
+    let (tun_tx, tun_rx) = tun.split();
+
     // wg-quick uses this to find the interface
     #[cfg(target_os = "macos")]
     if let Some(tun_name_file) = args.tun_name_file {
@@ -218,7 +220,7 @@ async fn setup_device(args: Args) -> eyre::Result<Device<DefaultDeviceTransports
         // socket buffer sizes.
         .udp_recv_buffer_size(7 * 1024 * 1024)
         .udp_send_buffer_size(7 * 1024 * 1024)
-        .with_ip(tun)
+        .with_ip_pair(tun_tx, tun_rx)
         .build()
         .await
         .context("Failed to start WireGuard device")?;
