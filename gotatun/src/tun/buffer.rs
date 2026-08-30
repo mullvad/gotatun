@@ -77,7 +77,6 @@ impl BufferedIpSend {
                 if let Err(e) = inner.send(packet).await {
                     if is_fatal_tun_error(&e) {
                         tracing::error!("TUN device was deleted: {e}");
-                        tracing::error!("TUN device was deleted: {:#?}", e.source());
                         break;
                     }
                     tracing::error!("Error sending IP packet: {e}");
