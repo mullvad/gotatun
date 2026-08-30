@@ -241,30 +241,32 @@ impl IpRecv for TunDevice {
 }
 
 impl IpSend for TunDeviceTx {
-    #[cfg(target_os = "linux")]
     async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
+        self.tun.send(&packet.into_bytes()).await?;
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn send_many(&mut self, packets: Vec<Packet<Ip>>) -> io::Result<()> {
         use zerocopy::IntoBytes;
         let offset = tun_rs::VIRTIO_NET_HDR_LEN;
         let TxState {
             gro_table, bufs, ..
         } = &mut self.tx_state;
 
-        {
-            let buf = &mut bufs[0];
+        let n = packets.len();
+        for (i, packet) in packets.into_iter().enumerate() {
+            let buf = &mut bufs[i];
             let bytes = packet.as_bytes();
+            // TODO: Get rid of resize
             buf.resize(offset + bytes.len(), 0);
             buf[offset..offset + bytes.len()].copy_from_slice(bytes);
         }
 
         let _bytes_sent = self
             .tun
-            .send_multiple(gro_table, &mut bufs[..1], offset)
+            .send_multiple(gro_table, &mut bufs[..n], offset)
             .await?;
-        Ok(())
-    }
-    #[cfg(not(target_os = "linux"))]
-    async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
-        self.tun.send(&packet.into_bytes()).await?;
         Ok(())
     }
 }
