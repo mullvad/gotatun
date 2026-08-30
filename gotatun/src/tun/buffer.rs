@@ -220,6 +220,7 @@ fn is_fatal_tun_error(err: &io::Error) -> bool {
         }
 
         // TODO: Propagate the underlying error from tun/wintun-bindings and remove this
+        #[cfg(feature = "tun")]
         if let Some(ERROR_HANDLE_EOF) = err
             .get_ref()
             .and_then(|e| e.downcast_ref::<wintun_bindings::Error>())
