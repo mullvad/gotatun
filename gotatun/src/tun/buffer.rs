@@ -11,7 +11,7 @@
 
 //! Generic buffered IP send and receive implementations.
 
-use std::{io, sync::Arc, time::Duration};
+use std::{error::Error, io, sync::Arc, time::Duration};
 
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
@@ -77,6 +77,7 @@ impl BufferedIpSend {
                 if let Err(e) = inner.send(packet).await {
                     if is_fatal_tun_error(&e) {
                         tracing::error!("TUN device was deleted: {e}");
+                        tracing::error!("TUN device was deleted: {:#?}", e.source());
                         break;
                     }
                     tracing::error!("Error sending IP packet: {e}");
