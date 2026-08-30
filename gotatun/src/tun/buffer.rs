@@ -11,7 +11,7 @@
 
 //! Generic buffered IP send and receive implementations.
 
-use std::{error::Error, io, sync::Arc, time::Duration};
+use std::{io, sync::Arc, time::Duration};
 
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
@@ -73,13 +73,21 @@ impl BufferedIpSend {
                 .await
                 .expect("Deadlock on IpSend. There must be no more than one IpSend active at any given time.");
 
-            while let Some(packet) = rx.recv().await {
-                if let Err(e) = inner.send(packet).await {
-                    if is_fatal_tun_error(&e) {
-                        tracing::error!("TUN device was deleted: {e}");
-                        break;
+            let mut pkts = vec![];
+            loop {
+                let n = rx.recv_many(&mut pkts, 12).await;
+                if n == 0 {
+                    break; // no more packets on channel.
+                }
+                // TODO: Check correctness. If correct, go ahead and implement send_many for IpSend.
+                for packet in pkts.drain(0..n) {
+                    if let Err(e) = inner.send(packet).await {
+                        if is_fatal_tun_error(&e) {
+                            tracing::error!("TUN device was deleted: {e}");
+                            break;
+                        }
+                        tracing::error!("Error sending IP packet: {e}");
                     }
-                    tracing::error!("Error sending IP packet: {e}");
                 }
             }
 
