@@ -51,11 +51,24 @@ pub struct TunDevice {
     tun: Arc<AsyncDevice>,
     state: Arc<TunDeviceState>,
     #[cfg(target_os = "linux")]
+    rx_state: Arc<tokio::sync::Mutex<RxState>>,
+    #[cfg(target_os = "linux")]
+    tx_state: Arc<tokio::sync::Mutex<TxState>>,
+}
+
+#[cfg(target_os = "linux")]
+struct RxState {
     original_buffer: Vec<u8>,
-    #[cfg(target_os = "linux")]
     bufs: Vec<Vec<u8>>,
-    #[cfg(target_os = "linux")]
     sizes: Vec<usize>,
+}
+
+#[cfg(target_os = "linux")]
+struct TxState {
+    gro_table: tun_rs::GROTable,
+    // each buffer reserves the first TX_OFFSET bytes for the virtio header
+    // and has room for one MTU-sized packet after it
+    bufs: Vec<Vec<u8>>, // BATCH buffers, each len TX_OFFSET + MTU
 }
 
 struct TunDeviceState {
@@ -143,11 +156,19 @@ impl TunDevice {
         });
 
         #[cfg(target_os = "linux")]
-        let original_buffer = vec![0u8; tun_rs::VIRTIO_NET_HDR_LEN + 65535];
+        let rx_state = RxState {
+            original_buffer: vec![0u8; tun_rs::VIRTIO_NET_HDR_LEN + 65535],
+            bufs: vec![vec![0u8; 1500]; tun_rs::IDEAL_BATCH_SIZE],
+            sizes: vec![0; tun_rs::IDEAL_BATCH_SIZE],
+        };
+
         #[cfg(target_os = "linux")]
-        let bufs = vec![vec![0u8; 1500]; tun_rs::IDEAL_BATCH_SIZE];
-        #[cfg(target_os = "linux")]
-        let sizes = vec![0; tun_rs::IDEAL_BATCH_SIZE];
+        let tx_state = TxState {
+            gro_table: tun_rs::GROTable::default(),
+            // BATCH buffers, each sized to hold the virtio header + one MTU packet,
+            // pre-zeroed (ZEROED_BUFFER pattern) so uninitialized regions are clean.
+            bufs: vec![vec![0u8; tun_rs::VIRTIO_NET_HDR_LEN + 1500]; tun_rs::IDEAL_BATCH_SIZE],
+        };
 
         Ok(Self {
             tun,
@@ -156,11 +177,9 @@ impl TunDevice {
                 _mtu_monitor: mtu_monitor,
             }),
             #[cfg(target_os = "linux")]
-            original_buffer,
+            rx_state: Arc::new(tokio::sync::Mutex::new(rx_state)),
             #[cfg(target_os = "linux")]
-            bufs,
-            #[cfg(target_os = "linux")]
-            sizes,
+            tx_state: Arc::new(tokio::sync::Mutex::new(tx_state)),
         })
     }
 
@@ -171,6 +190,29 @@ impl TunDevice {
 }
 
 impl IpSend for TunDevice {
+    #[cfg(target_os = "linux")]
+    async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
+        use zerocopy::IntoBytes;
+        let offset = tun_rs::VIRTIO_NET_HDR_LEN;
+        let mut state = self.tx_state.lock().await;
+        let TxState {
+            gro_table, bufs, ..
+        } = &mut *state;
+
+        {
+            let buf = &mut bufs[0];
+            let bytes = packet.as_bytes();
+            buf.resize(offset + bytes.len(), 0);
+            buf[offset..offset + bytes.len()].copy_from_slice(bytes);
+        }
+
+        let _bytes_sent = self
+            .tun
+            .send_multiple(gro_table, &mut bufs[..1], offset)
+            .await?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
     async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
         self.tun.send(&packet.into_bytes()).await?;
         Ok(())
@@ -186,21 +228,23 @@ impl IpRecv for TunDevice {
     ) -> io::Result<impl Iterator<Item = Packet<Ip>> + 'a> {
         let offset = 0;
 
+        let mut state = self.rx_state.lock().await;
+        let RxState {
+            original_buffer,
+            bufs,
+            sizes,
+        } = &mut *state;
+
         let num = self
             .tun
-            .recv_multiple(
-                &mut self.original_buffer,
-                &mut self.bufs,
-                &mut self.sizes,
-                offset,
-            )
+            .recv_multiple(original_buffer, bufs, sizes, offset)
             .await?;
 
         // Collect ALL segmented packets into a Vec, then return its iterator.
         let mut out = Vec::with_capacity(num);
         for i in 0..num {
-            let packet_size = self.sizes[i];
-            let raw_packet = &self.bufs[i][offset..offset + packet_size];
+            let packet_size = sizes[i];
+            let raw_packet = &bufs[i][offset..offset + packet_size];
             let mut packet = pool.get();
             packet.truncate(packet_size);
             // copy the segmented packet data in

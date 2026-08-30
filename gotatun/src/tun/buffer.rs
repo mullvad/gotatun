@@ -11,7 +11,7 @@
 
 //! Generic buffered IP send and receive implementations.
 
-use std::{io, sync::Arc, time::Duration};
+use std::{error::Error, io, sync::Arc, time::Duration};
 
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
