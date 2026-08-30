@@ -144,8 +144,8 @@ impl TunDevice {
 
         #[cfg(target_os = "linux")]
         let tun_config = tun_config.offload(true);
-        //#[cfg(target_os = "linux")]
-        //let tun_config = tun_config.multi_queue(true);
+        #[cfg(target_os = "linux")]
+        let tun_config = tun_config.multi_queue(true);
 
         // TODO: for wintun, must set path or enable signature check
         // we should upstream to `tun`
