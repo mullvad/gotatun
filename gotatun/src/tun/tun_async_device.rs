@@ -46,13 +46,10 @@ pub enum Error {
 /// A kernel virtual network device; a TUN device.
 ///
 /// Implements [`IpSend`] and [`IpRecv`].
+#[derive(Clone)]
 pub struct TunDevice {
     tun: Arc<AsyncDevice>,
     state: Arc<TunDeviceState>,
-    #[cfg(target_os = "linux")]
-    rx_state: RxState,
-    #[cfg(target_os = "linux")]
-    tx_state: TxState,
 }
 
 #[cfg(target_os = "linux")]
@@ -77,7 +74,53 @@ struct TunDeviceState {
     _mtu_monitor: Task,
 }
 
+pub struct TunDeviceTx {
+    tun: Arc<AsyncDevice>,
+    state: Arc<TunDeviceState>,
+    #[cfg(target_os = "linux")]
+    tx_state: TxState,
+}
+
+pub struct TunDeviceRx {
+    tun: Arc<AsyncDevice>,
+    state: Arc<TunDeviceState>,
+    #[cfg(target_os = "linux")]
+    rx_state: RxState,
+}
+
 impl TunDevice {
+    // Split TunDevice into a read and a write half.
+    pub fn split(self) -> (TunDeviceTx, TunDeviceRx) {
+        #[cfg(target_os = "linux")]
+        let tx_state = TxState {
+            gro_table: tun_rs::GROTable::default(),
+            // BATCH buffers, each sized to hold the virtio header + one MTU packet,
+            // pre-zeroed (ZEROED_BUFFER pattern) so uninitialized regions are clean.
+            bufs: vec![vec![0u8; tun_rs::VIRTIO_NET_HDR_LEN + 1500]; tun_rs::IDEAL_BATCH_SIZE],
+        };
+
+        #[cfg(target_os = "linux")]
+        let rx_state = RxState {
+            original_buffer: vec![0u8; tun_rs::VIRTIO_NET_HDR_LEN + 65535],
+            bufs: vec![vec![0u8; 1500]; tun_rs::IDEAL_BATCH_SIZE],
+            sizes: vec![0; tun_rs::IDEAL_BATCH_SIZE],
+        };
+
+        (
+            TunDeviceTx {
+                tun: Arc::clone(&self.tun),
+                state: Arc::clone(&self.state),
+                #[cfg(target_os = "linux")]
+                tx_state,
+            },
+            TunDeviceRx {
+                tun: Arc::clone(&self.tun),
+                state: Arc::clone(&self.state),
+                #[cfg(target_os = "linux")]
+                rx_state,
+            },
+        )
+    }
     /// Construct from a name.
     ///
     /// # Warning
@@ -101,7 +144,8 @@ impl TunDevice {
 
         #[cfg(target_os = "linux")]
         let tun_config = tun_config.offload(true);
-        //let tun_config = tun_config.offload(false); // TODO: Enable.
+        #[cfg(target_os = "linux")]
+        let tun_config = tun_config.multi_queue(true);
 
         // TODO: for wintun, must set path or enable signature check
         // we should upstream to `tun`
@@ -154,31 +198,12 @@ impl TunDevice {
             watch_task().await;
         });
 
-        #[cfg(target_os = "linux")]
-        let rx_state = RxState {
-            original_buffer: vec![0u8; tun_rs::VIRTIO_NET_HDR_LEN + 65535],
-            bufs: vec![vec![0u8; 1500]; tun_rs::IDEAL_BATCH_SIZE],
-            sizes: vec![0; tun_rs::IDEAL_BATCH_SIZE],
-        };
-
-        #[cfg(target_os = "linux")]
-        let tx_state = TxState {
-            gro_table: tun_rs::GROTable::default(),
-            // BATCH buffers, each sized to hold the virtio header + one MTU packet,
-            // pre-zeroed (ZEROED_BUFFER pattern) so uninitialized regions are clean.
-            bufs: vec![vec![0u8; tun_rs::VIRTIO_NET_HDR_LEN + 1500]; tun_rs::IDEAL_BATCH_SIZE],
-        };
-
         Ok(Self {
             tun,
             state: Arc::new(TunDeviceState {
                 mtu: rx.into(),
                 _mtu_monitor: mtu_monitor,
             }),
-            #[cfg(target_os = "linux")]
-            rx_state,
-            #[cfg(target_os = "linux")]
-            tx_state,
         })
     }
 
@@ -189,6 +214,33 @@ impl TunDevice {
 }
 
 impl IpSend for TunDevice {
+    async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
+        self.tun.send(&packet.into_bytes()).await?;
+        Ok(())
+    }
+}
+
+impl IpRecv for TunDevice {
+    async fn recv<'a>(
+        &'a mut self,
+        pool: &mut PacketBufPool,
+    ) -> io::Result<impl Iterator<Item = Packet<Ip>> + 'a> {
+        use std::iter::once;
+        let mut packet = pool.get();
+        let n = self.tun.recv(&mut packet).await?;
+        packet.truncate(n);
+        match packet.try_into_ip() {
+            Ok(packet) => Ok(once(packet)),
+            Err(e) => Err(io::Error::other(e.to_string())),
+        }
+    }
+
+    fn mtu(&self) -> MtuWatcher {
+        self.state.mtu.clone()
+    }
+}
+
+impl IpSend for TunDeviceTx {
     #[cfg(target_os = "linux")]
     async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
         use zerocopy::IntoBytes;
@@ -217,7 +269,7 @@ impl IpSend for TunDevice {
     }
 }
 
-impl IpRecv for TunDevice {
+impl IpRecv for TunDeviceRx {
     #[cfg(target_os = "linux")]
     // TODO: For now, it is assumed that the tun device has offloading enabled.
     async fn recv<'a>(
