@@ -20,7 +20,7 @@ use crate::{
     tun::{IpRecv, IpSend, MtuWatcher},
 };
 
-use std::{convert::Infallible, io, iter, sync::Arc, time::Duration};
+use std::{convert::Infallible, io, sync::Arc, time::Duration};
 
 /// Error from [`TunDevice`].
 #[derive(Debug, thiserror::Error)]
@@ -50,6 +50,12 @@ pub enum Error {
 pub struct TunDevice {
     tun: Arc<AsyncDevice>,
     state: Arc<TunDeviceState>,
+    #[cfg(target_os = "linux")]
+    original_buffer: Vec<u8>,
+    #[cfg(target_os = "linux")]
+    bufs: Vec<Vec<u8>>,
+    #[cfg(target_os = "linux")]
+    sizes: Vec<usize>,
 }
 
 struct TunDeviceState {
@@ -80,6 +86,10 @@ impl TunDevice {
         };
         #[cfg(target_os = "macos")]
         let tun_config = tun_config.associate_route(false);
+
+        #[cfg(target_os = "linux")]
+        let tun_config = tun_config.offload(true);
+        //let tun_config = tun_config.offload(false); // TODO: Enable.
 
         // TODO: for wintun, must set path or enable signature check
         // we should upstream to `tun`
@@ -132,12 +142,25 @@ impl TunDevice {
             watch_task().await;
         });
 
+        #[cfg(target_os = "linux")]
+        let original_buffer = vec![0u8; tun_rs::VIRTIO_NET_HDR_LEN + 65535];
+        #[cfg(target_os = "linux")]
+        let bufs = vec![vec![0u8; 1500]; tun_rs::IDEAL_BATCH_SIZE];
+        #[cfg(target_os = "linux")]
+        let sizes = vec![0; tun_rs::IDEAL_BATCH_SIZE];
+
         Ok(Self {
             tun,
             state: Arc::new(TunDeviceState {
                 mtu: rx.into(),
                 _mtu_monitor: mtu_monitor,
             }),
+            #[cfg(target_os = "linux")]
+            original_buffer,
+            #[cfg(target_os = "linux")]
+            bufs,
+            #[cfg(target_os = "linux")]
+            sizes,
         })
     }
 
@@ -155,15 +178,54 @@ impl IpSend for TunDevice {
 }
 
 impl IpRecv for TunDevice {
+    #[cfg(target_os = "linux")]
+    // TODO: For now, it is assumed that the tun device has offloading enabled.
     async fn recv<'a>(
         &'a mut self,
         pool: &mut PacketBufPool,
     ) -> io::Result<impl Iterator<Item = Packet<Ip>> + 'a> {
+        let offset = 0;
+
+        let num = self
+            .tun
+            .recv_multiple(
+                &mut self.original_buffer,
+                &mut self.bufs,
+                &mut self.sizes,
+                offset,
+            )
+            .await?;
+
+        // Collect ALL segmented packets into a Vec, then return its iterator.
+        let mut out = Vec::with_capacity(num);
+        for i in 0..num {
+            let packet_size = self.sizes[i];
+            let raw_packet = &self.bufs[i][offset..offset + packet_size];
+            let mut packet = pool.get();
+            packet.truncate(packet_size);
+            // copy the segmented packet data in
+            packet.copy_from_slice(raw_packet);
+
+            match packet.try_into_ip() {
+                Ok(packet) => out.push(packet),
+                Err(e) => return Err(io::Error::other(e.to_string())),
+            }
+        }
+
+        Ok(out.into_iter())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    async fn recv<'a>(
+        &'a mut self,
+        pool: &mut PacketBufPool,
+    ) -> io::Result<impl Iterator<Item = Packet<Ip>> + 'a> {
+        use std::iter::once;
         let mut packet = pool.get();
         let n = self.tun.recv(&mut packet).await?;
         packet.truncate(n);
         match packet.try_into_ip() {
-            Ok(packet) => Ok(iter::once(packet)),
+            Ok(packet) => Ok(once(packet)),
             Err(e) => Err(io::Error::other(e.to_string())),
         }
     }
