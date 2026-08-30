@@ -46,14 +46,13 @@ pub enum Error {
 /// A kernel virtual network device; a TUN device.
 ///
 /// Implements [`IpSend`] and [`IpRecv`].
-#[derive(Clone)]
 pub struct TunDevice {
     tun: Arc<AsyncDevice>,
     state: Arc<TunDeviceState>,
     #[cfg(target_os = "linux")]
-    rx_state: Arc<tokio::sync::Mutex<RxState>>,
+    rx_state: RxState,
     #[cfg(target_os = "linux")]
-    tx_state: Arc<tokio::sync::Mutex<TxState>>,
+    tx_state: TxState,
 }
 
 #[cfg(target_os = "linux")]
@@ -177,9 +176,9 @@ impl TunDevice {
                 _mtu_monitor: mtu_monitor,
             }),
             #[cfg(target_os = "linux")]
-            rx_state: Arc::new(tokio::sync::Mutex::new(rx_state)),
+            rx_state,
             #[cfg(target_os = "linux")]
-            tx_state: Arc::new(tokio::sync::Mutex::new(tx_state)),
+            tx_state,
         })
     }
 
@@ -194,10 +193,9 @@ impl IpSend for TunDevice {
     async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
         use zerocopy::IntoBytes;
         let offset = tun_rs::VIRTIO_NET_HDR_LEN;
-        let mut state = self.tx_state.lock().await;
         let TxState {
             gro_table, bufs, ..
-        } = &mut *state;
+        } = &mut self.tx_state;
 
         {
             let buf = &mut bufs[0];
@@ -228,12 +226,11 @@ impl IpRecv for TunDevice {
     ) -> io::Result<impl Iterator<Item = Packet<Ip>> + 'a> {
         let offset = 0;
 
-        let mut state = self.rx_state.lock().await;
         let RxState {
             original_buffer,
             bufs,
             sizes,
-        } = &mut *state;
+        } = &mut self.rx_state;
 
         let num = self
             .tun
