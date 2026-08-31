@@ -173,7 +173,7 @@ impl UdpSocket {
     }
 
     /// Map an IPv4 address to IPv6 if necessary.
-    #[cfg(any(target_os = "windows", target_vendor = "apple"))]
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     #[inline(always)]
     fn map_dst(&self, mut addr: SocketAddr) -> SocketAddr {
         if self.map_ipv4_to_ipv6
@@ -230,7 +230,7 @@ fn is_ipv6_unavailable(err: &io::Error) -> bool {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "windows"))]
 fn check_send_max_number_of_packets(
     max_number_of_packets: usize,
     packets: &[(crate::packet::Packet, SocketAddr)],
