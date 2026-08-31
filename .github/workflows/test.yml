@@ -112,6 +112,10 @@ jobs:
       - name: Check with features "${{ matrix.features }}"
         run: cargo check --locked --workspace ${{ matrix.features }}
 
+      - name: Check device without tun (Windows)
+        if: matrix.os == 'windows-latest' && matrix.features == ''
+        run: cargo check --locked -p gotatun --no-default-features --features device,ring
+
   fmt:
     name: Format
     runs-on: ubuntu-latest
