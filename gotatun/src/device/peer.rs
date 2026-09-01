@@ -14,11 +14,14 @@ use std::net::SocketAddr;
 use ipnetwork::IpNetwork;
 use x25519_dalek::PublicKey;
 
+use crate::PresharedKey;
 #[cfg(feature = "daita")]
 use crate::device::daita::DaitaSettings;
 use crate::noise::TimerParams;
 
 /// Peer data. Used to construct and update peers in a [`Device`](crate::device::Device).
+///
+/// Cloning a peer also clones its PSK into an independent zeroizing allocation.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct Peer {
@@ -32,9 +35,8 @@ pub struct Peer {
     pub endpoint: Option<SocketAddr>,
     /// List of IP networks that are allowed to be routed through this peer.
     pub allowed_ips: Vec<IpNetwork>,
-    // TODO: zeroize
     /// Optional preshared key for additional security.
-    pub preshared_key: Option<[u8; 32]>,
+    pub preshared_key: Option<PresharedKey>,
     /// Persistent keepalive interval in seconds. Disabled if `None`.
     pub keepalive: Option<u16>,
 
@@ -83,9 +85,14 @@ impl Peer {
         self
     }
 
-    /// Set the preshared key for this peer.
-    pub const fn with_preshared_key(mut self, preshared_key: [u8; 32]) -> Self {
-        self.preshared_key = Some(preshared_key);
+    /// Copy a preshared key into zeroizing storage for this peer.
+    ///
+    /// The function's local array is cleared, but `[u8; 32]` is [`Copy`], so a
+    /// copy retained by the caller is unaffected. Assign a
+    /// [`PresharedKey::take_from`] result to [`Self::preshared_key`] when the
+    /// caller's source array must also be cleared.
+    pub fn with_preshared_key(mut self, mut preshared_key: [u8; 32]) -> Self {
+        self.preshared_key = Some(PresharedKey::take_from(&mut preshared_key));
         self
     }
 
