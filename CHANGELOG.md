@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed
+- Apply the dual-stack address mapping on every target served by the generic UDP
+  socket implementation, not only Apple targets. Sending to an IPv4 peer on a
+  dual-stack socket previously failed with `EAFNOSUPPORT` on those targets, and
+  received datagrams reported an unmapped `::ffff:` source address.
+#### iOS
+- Stop compiling `check_send_max_number_of_packets` on targets that never call it.
 
 
 ## [0.9.2] - 2026-08-31
