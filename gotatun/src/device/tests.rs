@@ -501,6 +501,68 @@ async fn reconfigure_while_suspended_stays_down() {
     drop((alice, bob));
 }
 
+/// [`Device::force_handshake`] performs a single handshake, and nothing once a session exists.
+#[tokio::test]
+#[test_log::test]
+async fn force_handshake() {
+    use crate::device::Error;
+    use x25519_dalek::{PublicKey, StaticSecret};
+
+    let (alice, _bob, eve) = mock::device_pair().await;
+    let mut inits = std::pin::pin!(eve.wg_handshake_init());
+    let bob_public_key = get_first_and_only_peer(&alice).await.public_key;
+
+    // Concurrent callers share a single handshake.
+    let (first, second) = timeout(Duration::from_secs(2), async {
+        join!(
+            alice.device.force_handshake(&bob_public_key),
+            alice.device.force_handshake(&bob_public_key),
+        )
+    })
+    .await
+    .expect("session should be established");
+    first.expect("first wait should succeed");
+    second.expect("second wait should succeed");
+
+    let first_init = timeout(Duration::from_secs(1), inits.next())
+        .await
+        .expect("a handshake init should be observed");
+    assert!(first_init.is_some());
+
+    assert!(
+        timeout(Duration::from_millis(500), inits.next())
+            .await
+            .is_err(),
+        "no additional handshake init should be sent"
+    );
+
+    // With an active WireGuard session, no handshake is initiated.
+    alice
+        .device
+        .force_handshake(&bob_public_key)
+        .await
+        .expect("wait with a fresh session should succeed");
+
+    assert!(
+        timeout(Duration::from_millis(500), inits.next())
+            .await
+            .is_err(),
+        "no additional handshake init should be sent"
+    );
+
+    let unknown_peer = PublicKey::from(&StaticSecret::random());
+    assert!(matches!(
+        alice.device.force_handshake(&unknown_peer).await,
+        Err(Error::PeerNotFound)
+    ));
+
+    alice.device.suspend().await;
+    assert!(matches!(
+        alice.device.force_handshake(&bob_public_key).await,
+        Err(Error::NotConnected)
+    ));
+}
+
 /// Helper method to test that packets can be sent from one [`Device`] to another.
 /// Use `eavesdrop` to sniff wireguard packets and assert things about the connection.
 async fn test_device_pair(eavesdrop: impl AsyncFnOnce(MockEavesdropper) + Send) {
