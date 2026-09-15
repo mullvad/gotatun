@@ -14,11 +14,13 @@ use ipnetwork::IpNetwork;
 
 use std::net::SocketAddr;
 
+use tokio::sync::watch;
+
 use crate::device::AllowedIps;
 #[cfg(feature = "daita")]
 use crate::device::daita::{DaitaHooks, DaitaSettings};
-use crate::noise::Tunn;
 use crate::noise::errors::WireGuardError;
+use crate::noise::{Tunn, TunnResult};
 #[cfg(feature = "daita")]
 use crate::packet;
 use crate::packet::WgKind;
@@ -32,6 +34,14 @@ pub struct Endpoint {
     pub addr: Option<SocketAddr>,
 }
 
+/// A handshake initiated by [`PeerState::force_handshake`].
+pub struct PendingHandshake {
+    /// Notified when a handshake initiated by us completes.
+    pub completed: watch::Receiver<()>,
+    /// The initiation to send and where to send it, or `None` if one is already in flight.
+    pub initiation: Option<(WgKind, SocketAddr)>,
+}
+
 pub struct PeerState {
     /// The associated tunnel struct
     pub(crate) tunnel: Tunn,
@@ -42,6 +52,9 @@ pub struct PeerState {
     daita_settings: Option<DaitaSettings>,
     #[cfg(feature = "daita")]
     pub(crate) daita: Option<DaitaHooks>,
+
+    /// Notified whenever a handshake that we initiated completes.
+    handshake_completed: watch::Sender<()>,
 }
 
 impl PeerState {
@@ -59,7 +72,30 @@ impl PeerState {
             daita_settings,
             #[cfg(feature = "daita")]
             daita: None,
+            handshake_completed: watch::Sender::new(()),
         }
+    }
+
+    /// Process an incoming packet, notifying waiters if it completes a handshake we initiated.
+    pub fn handle_incoming_packet(&mut self, packet: WgKind) -> TunnResult {
+        let is_handshake_resp = matches!(packet, WgKind::HandshakeResp(_));
+        let result = self.tunnel.handle_incoming_packet(packet);
+        if is_handshake_resp && matches!(result, TunnResult::WriteToNetwork(_)) {
+            self.notify_handshake_completed();
+        }
+        result
+    }
+
+    /// Subscribe to completions of handshakes that we initiated.
+    ///
+    /// The receiver only sees completions that happen after this call.
+    fn subscribe_handshake_completed(&self) -> watch::Receiver<()> {
+        self.handshake_completed.subscribe()
+    }
+
+    /// Wake everyone waiting on [`Self::subscribe_handshake_completed`].
+    fn notify_handshake_completed(&self) {
+        self.handshake_completed.send_replace(());
     }
 
     #[cfg(feature = "daita")]
@@ -93,6 +129,30 @@ impl PeerState {
     /// Drop all sessions and reset the tunnel, forcing a fresh handshake.
     pub fn reset(&mut self) {
         self.tunnel.reset();
+    }
+
+    /// Start a handshake unless there is an active session or our own initiation is in flight.
+    ///
+    /// Returns `None` if there is an active session.
+    pub fn force_handshake(&mut self) -> Result<Option<PendingHandshake>, super::Error> {
+        if self.tunnel.has_active_session() {
+            return Ok(None);
+        }
+        let endpoint_addr = self.endpoint.addr.ok_or(super::Error::NoEndpoint)?;
+
+        // Subscribe before creating the initiation so that a fast response cannot be missed
+        let completed = self.subscribe_handshake_completed();
+
+        // `None` means that our own initiation is already in flight
+        let initiation = self
+            .tunnel
+            .format_handshake_initiation(false)
+            .map(|packet| (WgKind::from(packet), endpoint_addr));
+
+        Ok(Some(PendingHandshake {
+            completed,
+            initiation,
+        }))
     }
 
     #[cfg(feature = "daita")]

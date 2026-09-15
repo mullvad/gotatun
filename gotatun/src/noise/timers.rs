@@ -467,6 +467,16 @@ impl<R: rand::RngCore + Send> Tunn<R> {
         }
     }
 
+    /// Whether the current session exists and is not yet due for rekeying.
+    pub fn has_active_session(&self) -> bool {
+        let current_session = self.current % super::N_SESSIONS;
+        let session_age = self
+            .timers
+            .now()
+            .saturating_sub(self.timers.session_timers[current_session]);
+        self.sessions[current_session].is_some() && session_age < self.timers.rekey_after_time
+    }
+
     /// Get the persistent keepalive interval in seconds.
     ///
     /// Returns `None` if persistent keepalive is disabled.
