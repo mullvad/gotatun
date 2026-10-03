@@ -163,16 +163,32 @@ impl UdpSend for super::UdpSocket {
     }
 }
 
+impl super::UdpSocket {
+    async fn recv_datagram(&self, pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
+        let mut buf = pool.get();
+        loop {
+            match self.socket().recv_from(&mut buf).await {
+                Ok((n, src)) => {
+                    buf.truncate(n);
+                    return Ok((buf, self.map_src(src)));
+                }
+                // Winsock discards the remainder of an oversized datagram. The socket
+                // remains usable; never pass its truncated contents to the protocol.
+                Err(err) if err.raw_os_error() == Some(WinSock::WSAEMSGSIZE) => {
+                    tokio::task::yield_now().await;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+}
+
 #[cfg(not(feature = "windows-gro"))]
 impl UdpRecv for super::UdpSocket {
     type RecvManyBuf = ();
 
     async fn recv_from(&mut self, pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
-        let mut buf = pool.get();
-        let (n, src) = self.socket().recv_from(&mut buf).await?;
-        buf.truncate(n);
-        let src = self.map_src(src);
-        Ok((buf, src))
+        self.recv_datagram(pool).await
     }
 }
 
@@ -210,11 +226,7 @@ mod gro {
             &mut self,
             pool: &mut PacketBufPool,
         ) -> io::Result<(Packet, SocketAddr)> {
-            let mut buf = pool.get();
-            let (n, src) = self.socket().recv_from(&mut buf).await?;
-            buf.truncate(n);
-            let src = self.map_src(src);
-            Ok((buf, src))
+            self.recv_datagram(pool).await
         }
 
         async fn recv_many_from(
