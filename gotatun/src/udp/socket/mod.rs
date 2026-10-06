@@ -283,6 +283,9 @@ mod tests {
         {
             use std::os::fd::{AsRawFd, FromRawFd};
             let raw_fd = dual_sock.socket().as_raw_fd();
+            // SAFETY:
+            // - raw_socket is an [owned socket](https://doc.rust-lang.org/stable/std/io/index.html#io-safety).
+            // - raw_socket is open.
             let socket2 = unsafe { socket2::Socket::from_raw_fd(raw_fd) };
             assert!(!socket2.only_v6().unwrap());
             std::mem::forget(socket2); // Don't close the socket
@@ -291,6 +294,10 @@ mod tests {
         {
             use std::os::windows::io::{AsRawSocket, FromRawSocket};
             let raw_socket = dual_sock.socket().as_raw_socket();
+            // SAFETY:
+            // - raw_socket is an [owned socket](https://doc.rust-lang.org/stable/std/io/index.html#io-safety).
+            // - raw_socket is open.
+            // - raw_socket may be freed via [`closesocket`](https://docs.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-closesocket).
             let socket2 = unsafe { socket2::Socket::from_raw_socket(raw_socket) };
             assert!(!socket2.only_v6().unwrap());
             std::mem::forget(socket2); // Don't close the socket
