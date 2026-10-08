@@ -18,8 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   socket implementation, not only Apple targets. Sending to an IPv4 peer on a
   dual-stack socket previously failed with `EAFNOSUPPORT` on those targets, and
   received datagrams reported an unmapped `::ffff:` source address.
+- Report UDP receive failures as fatal device errors. The inbound task previously
+  stopped silently on such failures, so `Device::wait` was never woken and the
+  device stopped receiving without any indication.
 #### iOS
 - Stop compiling `check_send_max_number_of_packets` on targets that never call it.
+
+### Security
+#### Windows
+- Fix a remotely triggerable denial of service in the UDP receive path used
+  without the `windows-gro` feature. A single unauthenticated UDP datagram larger
+  than the 4096-byte receive buffer stopped the receive task, halting inbound
+  traffic for every peer on the device until the connection was rebuilt.
+  Oversized datagrams are now discarded and reception continues.
 
 
 ## [0.9.2] - 2026-08-31
