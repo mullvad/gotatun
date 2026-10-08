@@ -76,12 +76,24 @@ impl PeerState {
         }
     }
 
-    /// Process an incoming packet, notifying waiters if it completes a handshake we initiated.
-    pub fn handle_incoming_packet(&mut self, packet: WgKind) -> TunnResult {
+    /// Process an incoming packet received from `addr`.
+    ///
+    /// Any authenticated packet updates the peer endpoint to `addr`. Waiters are notified if the
+    /// packet completes a handshake that we initiated.
+    pub fn handle_incoming_packet(&mut self, packet: WgKind, addr: SocketAddr) -> TunnResult {
         let is_handshake_resp = matches!(packet, WgKind::HandshakeResp(_));
         let result = self.tunnel.handle_incoming_packet(packet);
-        if is_handshake_resp && matches!(result, TunnResult::WriteToNetwork(_)) {
-            self.notify_handshake_completed();
+        match result {
+            TunnResult::WriteToNetwork(_) => {
+                self.endpoint.addr = Some(addr);
+                if is_handshake_resp {
+                    self.notify_handshake_completed();
+                }
+            }
+            TunnResult::WriteToTunnel(_) => self.endpoint.addr = Some(addr),
+            // Don't update the peer endpoint on cookie replies, for consistency
+            // with both the Linux kernel and wireguard-go.
+            TunnResult::Done | TunnResult::Err(_) => {}
         }
         result
     }
@@ -167,10 +179,6 @@ impl PeerState {
 
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
-    }
-
-    pub fn set_endpoint(&mut self, addr: SocketAddr) {
-        self.endpoint.addr = Some(addr);
     }
 
     pub fn allowed_ips(&self) -> impl Iterator<Item = IpNetwork> + '_ {

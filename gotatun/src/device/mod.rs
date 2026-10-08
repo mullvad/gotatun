@@ -717,7 +717,7 @@ impl<T: DeviceTransports> DeviceState<T> {
             let Some(peer_arc) = peer else { continue };
             let mut peer = peer_arc.lock().await;
 
-            let result = peer.handle_incoming_packet(parsed_packet);
+            let result = peer.handle_incoming_packet(parsed_packet, addr);
 
             #[cfg(feature = "daita")]
             let PeerState { tunnel, daita, .. } = &mut *peer;
@@ -725,10 +725,7 @@ impl<T: DeviceTransports> DeviceState<T> {
             let PeerState { tunnel, .. } = &mut *peer;
 
             match result {
-                TunnResult::Done => {
-                    // Don't update the peer endpoint on cookie replies, for consistency
-                    // with both the Linux kernel and wireguard-go.
-                }
+                TunnResult::Done => {}
                 TunnResult::Err(_) => continue,
                 // Flush pending queue
                 TunnResult::WriteToNetwork(packet) => {
@@ -751,9 +748,6 @@ impl<T: DeviceTransports> DeviceState<T> {
                             break;
                         }
                     }
-
-                    // Update the peer endpoint if we received any authenticated packet
-                    peer.set_endpoint(addr);
                 }
                 #[cfg_attr(not(feature = "daita"), expect(unused_mut))]
                 TunnResult::WriteToTunnel(mut packet) => {
@@ -764,9 +758,6 @@ impl<T: DeviceTransports> DeviceState<T> {
                             None => continue,
                         }
                     }
-
-                    // Update the peer endpoint if we received any authenticated packet
-                    peer.set_endpoint(addr);
 
                     // keepalive
                     if packet.is_empty() {
