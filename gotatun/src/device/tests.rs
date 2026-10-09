@@ -20,6 +20,7 @@ use tokio::{
 };
 use zerocopy::IntoBytes;
 
+use crate::noise::TimerParams;
 use crate::noise::index_table::IndexTable;
 use crate::packet::{Ip, Packet};
 
@@ -308,6 +309,34 @@ async fn update_peer_preshared_key_reaches_tunnel() {
         advance_mock_clock();
     })
     .await;
+}
+
+/// Ensures setting a peer's timer params via Device::modify_peer propagates into its noise state,
+/// and that clearing them restores the defaults
+#[tokio::test]
+#[test_log::test]
+async fn modify_peer_timer_params_reach_tunnel() {
+    let (_alice, mut bob, _eve) = mock::device_pair().await;
+    let peer = get_first_and_only_peer(&bob).await;
+    assert_eq!(peer.danger_timer_params, Some(TimerParams::default()));
+
+    let timer_params = TimerParams {
+        keepalive_timeout: Duration::from_secs(3)..=Duration::from_secs(5),
+        ..TimerParams::default()
+    };
+    for expected in [Some(timer_params.clone()), None] {
+        let updated = bob
+            .device
+            .modify_peer(&peer.public_key, |peer_mut| {
+                peer_mut.dangerously_set_timer_params(expected.clone());
+            })
+            .await
+            .expect("modify_peer should succeed");
+        assert!(updated, "peer update should affect an existing peer");
+
+        let peer = get_first_and_only_peer(&bob).await;
+        assert_eq!(peer.danger_timer_params, Some(expected.unwrap_or_default()),);
+    }
 }
 
 /// The number of packets we send through the tunnel
