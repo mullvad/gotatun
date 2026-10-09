@@ -17,6 +17,7 @@ use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::device::Error;
 use crate::device::{Connection, Device, DeviceState, DeviceTransports, Peer, Reconfigure};
+use crate::noise::TimerParams;
 
 /// Read-only view of a WireGuard device for inspection.
 ///
@@ -94,6 +95,7 @@ pub struct PeerMut {
     preshared_key: Update<[u8; 32]>,
     endpoint: Update<SocketAddr>,
     keepalive: Update<u16>,
+    timer_params: Update<TimerParams>,
 
     clear_allowed_ips: bool,
     add_allowed_ips: Vec<IpNetwork>,
@@ -113,6 +115,14 @@ impl PeerMut {
     /// Set or clear the persistent keepalive interval (in seconds) for this peer.
     pub fn set_keepalive(&mut self, keepalive: Option<u16>) {
         self.keepalive = keepalive.into();
+    }
+
+    /// Override the WireGuard timer deadlines for this peer, or restore the defaults with `None`.
+    ///
+    /// Any deadlines sampled from the previous timer params are reset. An established session is
+    /// kept. See [`TimerParams`].
+    pub fn dangerously_set_timer_params(&mut self, timer_params: Option<TimerParams>) {
+        self.timer_params = timer_params.into();
     }
 
     /// Clear all allowed IPs for this peer.
@@ -320,6 +330,7 @@ impl<T: DeviceTransports> DeviceWrite<'_, T> {
             add_allowed_ips,
             endpoint,
             keepalive,
+            timer_params,
         } = peer_mut;
 
         if let Update::Set(preshared_key) = preshared_key {
@@ -328,6 +339,12 @@ impl<T: DeviceTransports> DeviceWrite<'_, T> {
 
         if let Update::Set(keepalive) = keepalive {
             existing_peer.tunnel.set_persistent_keepalive(keepalive);
+        }
+
+        if let Update::Set(timer_params) = timer_params {
+            existing_peer
+                .tunnel
+                .dangerously_set_timer_params(timer_params.unwrap_or_default());
         }
 
         if let Update::Set(addr) = endpoint {
