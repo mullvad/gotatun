@@ -14,14 +14,16 @@ use ipnetwork::IpNetwork;
 
 use std::net::SocketAddr;
 
+use tokio::sync::watch;
+
 use crate::device::AllowedIps;
 #[cfg(feature = "daita")]
 use crate::device::daita::{DaitaHooks, DaitaSettings};
-use crate::noise::Tunn;
 use crate::noise::errors::WireGuardError;
+use crate::noise::{Tunn, TunnResult};
 #[cfg(feature = "daita")]
 use crate::packet;
-use crate::packet::WgKind;
+use crate::packet::{Packet, WgHandshakeInit, WgKind};
 #[cfg(feature = "daita")]
 use crate::tun::MtuWatcher;
 #[cfg(feature = "daita")]
@@ -30,6 +32,14 @@ use crate::udp::UdpSend;
 #[derive(Default, Debug)]
 pub struct Endpoint {
     pub addr: Option<SocketAddr>,
+}
+
+/// A handshake initiated by [`PeerState::force_handshake`].
+pub struct PendingHandshake {
+    /// Notified when a handshake initiated by us completes.
+    pub completed: watch::Receiver<()>,
+    /// The initiation to send and where to send it, or `None` if one is already in flight.
+    pub initiation: Option<(Packet<WgHandshakeInit>, SocketAddr)>,
 }
 
 pub struct PeerState {
@@ -42,6 +52,9 @@ pub struct PeerState {
     daita_settings: Option<DaitaSettings>,
     #[cfg(feature = "daita")]
     pub(crate) daita: Option<DaitaHooks>,
+
+    /// Notified whenever a handshake that we initiated completes.
+    handshake_completed: watch::Sender<()>,
 }
 
 impl PeerState {
@@ -59,7 +72,42 @@ impl PeerState {
             daita_settings,
             #[cfg(feature = "daita")]
             daita: None,
+            handshake_completed: watch::Sender::new(()),
         }
+    }
+
+    /// Process an incoming packet received from `addr`.
+    ///
+    /// Any authenticated packet updates the peer endpoint to `addr`. Waiters are notified if the
+    /// packet completes a handshake that we initiated.
+    pub fn handle_incoming_packet(&mut self, packet: WgKind, addr: SocketAddr) -> TunnResult {
+        let is_handshake_resp = matches!(packet, WgKind::HandshakeResp(_));
+        let result = self.tunnel.handle_incoming_packet(packet);
+        match result {
+            TunnResult::WriteToNetwork(_) => {
+                self.endpoint.addr = Some(addr);
+                if is_handshake_resp {
+                    self.notify_handshake_completed();
+                }
+            }
+            TunnResult::WriteToTunnel(_) => self.endpoint.addr = Some(addr),
+            // Don't update the peer endpoint on cookie replies, for consistency
+            // with both the Linux kernel and wireguard-go.
+            TunnResult::Done | TunnResult::Err(_) => {}
+        }
+        result
+    }
+
+    /// Subscribe to completions of handshakes that we initiated.
+    ///
+    /// The receiver only sees completions that happen after this call.
+    fn subscribe_handshake_completed(&self) -> watch::Receiver<()> {
+        self.handshake_completed.subscribe()
+    }
+
+    /// Wake everyone waiting on [`Self::subscribe_handshake_completed`].
+    fn notify_handshake_completed(&self) {
+        self.handshake_completed.send_replace(());
     }
 
     #[cfg(feature = "daita")]
@@ -95,6 +143,30 @@ impl PeerState {
         self.tunnel.reset();
     }
 
+    /// Start a handshake unless there is an active session or our own initiation is in flight.
+    ///
+    /// Returns `None` if there is an active session.
+    pub fn force_handshake(&mut self) -> Result<Option<PendingHandshake>, super::Error> {
+        if self.tunnel.has_active_session() {
+            return Ok(None);
+        }
+        let endpoint_addr = self.endpoint.addr.ok_or(super::Error::NoEndpoint)?;
+
+        // Subscribe before creating the initiation so that a fast response cannot be missed
+        let completed = self.subscribe_handshake_completed();
+
+        // `None` means that our own initiation is already in flight
+        let initiation = self
+            .tunnel
+            .format_handshake_initiation(false)
+            .map(|packet| (packet, endpoint_addr));
+
+        Ok(Some(PendingHandshake {
+            completed,
+            initiation,
+        }))
+    }
+
     #[cfg(feature = "daita")]
     pub fn daita_settings(&self) -> Option<&DaitaSettings> {
         self.daita_settings.as_ref()
@@ -107,10 +179,6 @@ impl PeerState {
 
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
-    }
-
-    pub fn set_endpoint(&mut self, addr: SocketAddr) {
-        self.endpoint.addr = Some(addr);
     }
 
     pub fn allowed_ips(&self) -> impl Iterator<Item = IpNetwork> + '_ {

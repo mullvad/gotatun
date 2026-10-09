@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- Add `Device::force_handshake` to establish a WireGuard session for a peer.
+
 ### Fixed
 - Bind the UAPI unix socket at `/var/run/wireguard/<name>.sock` without a doubled
   slash in the path. The kernel previously reported the bound path as
