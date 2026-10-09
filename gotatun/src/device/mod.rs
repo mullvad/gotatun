@@ -674,15 +674,19 @@ impl<T: DeviceTransports> DeviceState<T> {
             (private_key, public_key, rate_limiter, tun_mtu)
         };
 
-        while let Ok((src_buf, addr)) = udp_rx.recv_from(&mut packet_pool).await {
+        loop {
+            let (src_buf, addr) = udp_rx
+                .recv_from(&mut packet_pool)
+                .await
+                .map_err(Error::IoError)?;
             let parsed_packet = match rate_limiter.verify_packet(addr, src_buf) {
                 Ok(packet) => packet,
                 Err(TunnResult::WriteToNetwork(WgKind::CookieReply(cookie))) => {
                     // Note: Cookies should not affect counters.
-                    if let Err(_err) = udp_tx.send_to(cookie.into(), addr).await {
-                        tracing::trace!("udp.send_to failed");
-                        break;
-                    }
+                    udp_tx
+                        .send_to(cookie.into(), addr)
+                        .await
+                        .map_err(Error::IoError)?;
                     continue;
                 }
                 Err(_) => continue,
@@ -797,8 +801,6 @@ impl<T: DeviceTransports> DeviceState<T> {
                 }
             }
         }
-
-        Ok(())
     }
 
     /// Read from tunnel device, encapsulate, and write to UDP socket for the corresponding peer

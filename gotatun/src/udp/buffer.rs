@@ -120,7 +120,7 @@ impl UdpSend for BufferedUdpSend {
 /// buffer is empty.
 pub struct BufferedUdpReceive {
     _recv_task: Arc<Task>,
-    recv_rx: mpsc::Receiver<(Packet, SocketAddr)>,
+    recv_rx: mpsc::Receiver<io::Result<(Packet, SocketAddr)>>,
 }
 
 impl BufferedUdpReceive {
@@ -130,7 +130,7 @@ impl BufferedUdpReceive {
         mut udp_rx: impl UdpRecv + 'static,
         mut recv_pool: PacketBufPool,
     ) -> Self {
-        let (recv_tx, recv_rx) = mpsc::channel::<(Packet, SocketAddr)>(capacity);
+        let (recv_tx, recv_rx) = mpsc::channel(capacity);
 
         let recv_task = Task::spawn("buffered UDP receive", async move {
             let mut recv_many_buf = Default::default();
@@ -138,19 +138,19 @@ impl BufferedUdpReceive {
 
             loop {
                 // Read packets from the socket.
-                let Ok(()) = udp_rx
+                if let Err(err) = udp_rx
                     .recv_many_from(&mut recv_many_buf, &mut recv_pool, &mut packet_bufs)
                     .await
-                else {
-                    // TODO
+                {
+                    let _ = recv_tx.send(Err(err)).await;
                     return;
-                };
+                }
 
                 for (packet_buf, src) in packet_bufs.drain(..) {
-                    match recv_tx.try_send((packet_buf, src)) {
+                    match recv_tx.try_send(Ok((packet_buf, src))) {
                         Ok(()) => (),
-                        Err(mpsc::error::TrySendError::Full((packet_buf, addr))) => {
-                            if recv_tx.send((packet_buf, addr)).await.is_err() {
+                        Err(mpsc::error::TrySendError::Full(packet)) => {
+                            if recv_tx.send(packet).await.is_err() {
                                 // Buffer dropped
                                 return;
                             }
@@ -172,9 +172,12 @@ impl UdpRecv for BufferedUdpReceive {
     type RecvManyBuf = ();
 
     async fn recv_from(&mut self, _pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
-        let Some((rx_packet, src)) = self.recv_rx.recv().await else {
-            return Err(io::Error::other("No packet available"));
+        let Some(packet) = self.recv_rx.recv().await else {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "UDP receive task stopped",
+            ));
         };
-        Ok((rx_packet, src))
+        packet
     }
 }
