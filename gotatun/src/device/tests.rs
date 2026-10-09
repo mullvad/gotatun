@@ -524,9 +524,17 @@ async fn force_handshake() {
     first.expect("first wait should succeed");
     second.expect("second wait should succeed");
 
-    timeout(Duration::from_secs(1), inits.next())
+    let first_init = timeout(Duration::from_secs(1), inits.next())
         .await
         .expect("a handshake init should be observed");
+    assert!(first_init.is_some());
+
+    assert!(
+        timeout(Duration::from_millis(500), inits.next())
+            .await
+            .is_err(),
+        "no additional handshake init should be sent"
+    );
 
     // With an active WireGuard session, no handshake is initiated.
     alice

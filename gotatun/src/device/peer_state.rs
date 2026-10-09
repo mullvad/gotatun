@@ -23,7 +23,7 @@ use crate::noise::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult};
 #[cfg(feature = "daita")]
 use crate::packet;
-use crate::packet::WgKind;
+use crate::packet::{Packet, WgHandshakeInit, WgKind};
 #[cfg(feature = "daita")]
 use crate::tun::MtuWatcher;
 #[cfg(feature = "daita")]
@@ -39,7 +39,7 @@ pub struct PendingHandshake {
     /// Notified when a handshake initiated by us completes.
     pub completed: watch::Receiver<()>,
     /// The initiation to send and where to send it, or `None` if one is already in flight.
-    pub initiation: Option<(WgKind, SocketAddr)>,
+    pub initiation: Option<(Packet<WgHandshakeInit>, SocketAddr)>,
 }
 
 pub struct PeerState {
@@ -159,7 +159,7 @@ impl PeerState {
         let initiation = self
             .tunnel
             .format_handshake_initiation(false)
-            .map(|packet| (WgKind::from(packet), endpoint_addr));
+            .map(|packet| (packet, endpoint_addr));
 
         Ok(Some(PendingHandshake {
             completed,

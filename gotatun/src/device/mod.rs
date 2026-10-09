@@ -377,6 +377,7 @@ impl<T: DeviceTransports> Device<T> {
             };
 
             if let Some((packet, endpoint_addr)) = initiation {
+                let packet = WgKind::from(packet);
                 DeviceState::<T>::register_handshake_idx(&device.peers_by_idx, &packet, peer_arc);
                 drop(peer);
 
