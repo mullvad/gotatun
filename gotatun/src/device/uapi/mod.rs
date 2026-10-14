@@ -536,12 +536,7 @@ async fn on_api_get(_: Get, d: &DeviceState<impl DeviceTransports>) -> GetRespon
 
     GetResponse {
         private_key: d.key_pair.as_ref().map(|k| KeyBytes(k.0.to_bytes())),
-        listen_port: Some(
-            d.connection
-                .as_ref()
-                .and_then(|con| con.listen_port)
-                .unwrap_or(0),
-        ),
+        listen_port: Some(d.port),
         fwmark: d.fwmark,
         peers,
         errno: 0,

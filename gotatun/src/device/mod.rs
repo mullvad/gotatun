@@ -162,8 +162,6 @@ pub(crate) struct DeviceState<T: DeviceTransports> {
 pub(crate) struct Connection<T: DeviceTransports> {
     udp: <T::UdpTransportFactory as UdpTransportFactory>::Send,
 
-    listen_port: Option<u16>,
-
     /// The task that reads IPv4 traffic from the UDP socket.
     incoming: Task,
 
@@ -196,6 +194,12 @@ impl<T: DeviceTransports> Connection<T> {
         }
 
         let (udp_tx, udp_rx) = device.open_listen_socket().await?;
+
+        // Remember the bound port in case it was 0
+        if let Some(addr) = udp_tx.local_addr()? {
+            device.port = addr.port();
+        }
+
         let (buffered_ip_tx, buffered_ip_rx) = crate::tun::buffer::channel(
             MAX_PACKET_BUFS,
             pool.clone(),
@@ -260,7 +264,6 @@ impl<T: DeviceTransports> Connection<T> {
 
         debug_assert!(device.connection.is_none());
         device.connection = Some(Connection {
-            listen_port: udp_tx.local_addr()?.map(|sa| sa.port()),
             udp: udp_tx,
             incoming,
             timers,
@@ -906,7 +909,6 @@ impl<T: DeviceTransports> Connection<T> {
     async fn stop(self) {
         let Self {
             udp,
-            listen_port: _,
             incoming,
             timers,
             outgoing,

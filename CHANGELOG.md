@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Report UDP receive failures as fatal device errors. The inbound task previously
   stopped silently on such failures, so `Device::wait` was never woken and the
   device stopped receiving without any indication.
+- When `listen_port` is 0, `DeviceRead::listen_port` and UAPI `get` report the
+  actually assigned port instead of 0. That port is also kept across suspend/resume
+  and other rebinds.
+
 #### iOS
 - Stop compiling `check_send_max_number_of_packets` on targets that never call it.
 

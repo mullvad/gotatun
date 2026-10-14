@@ -455,6 +455,38 @@ async fn suspend_and_resume() {
     drop((alice, bob));
 }
 
+/// Binding to port 0 reports the actual port, and keeps it across rebinds.
+#[tokio::test]
+#[test_log::test]
+async fn listen_port_zero_reports_bound_port() {
+    use crate::device::{DeviceBuilder, Peer};
+    use x25519_dalek::{PublicKey, StaticSecret};
+
+    let (tun, _app_tx, _app_rx) = mock::mock_tun();
+    let peer = Peer::new(PublicKey::from(&StaticSecret::random()));
+
+    let device = DeviceBuilder::new()
+        .with_private_key(StaticSecret::random())
+        .with_ip(tun)
+        .with_default_udp()
+        .with_listen_port(0)
+        .with_peer(peer)
+        .build()
+        .await
+        .expect("create device");
+
+    let port = device.read(async |d| d.listen_port()).await;
+    assert_ne!(port, 0);
+
+    device.suspend().await;
+    device.resume().await.expect("resume should succeed");
+
+    let port_after_resume = device.read(async |d| d.listen_port()).await;
+    assert_eq!(port, port_after_resume);
+
+    device.stop().await;
+}
+
 /// A reconfiguration that would normally rebuild the connection must not
 /// silently un-suspend the device: the change is applied to `DeviceState` but
 /// the connection stays down until [`Device::resume`].
