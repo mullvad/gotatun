@@ -181,3 +181,29 @@ impl UdpRecv for BufferedUdpReceive {
         packet
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod test {
+    use super::*;
+    use crate::udp::socket::{SockOpt, UdpSocket};
+
+    #[tokio::test]
+    /// Regression test for security advisory GHSA-6gxq-8xp9-742r.
+    async fn empty_loopback_datagram_mustnt_stop_buffered_udp_receive() {
+        let socket = UdpSocket::bind("127.0.0.1:0".parse().unwrap(), SockOpt::default()).unwrap();
+        let addr = socket.local_addr().unwrap();
+        let mut receiver = BufferedUdpReceive::new(16, socket, PacketBufPool::new(16));
+        let sender = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+
+        sender.send_to(&[], addr).unwrap();
+        sender.send_to(b"after-empty", addr).unwrap();
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            receiver.recv_from(&mut PacketBufPool::new(1)),
+        )
+        .await
+        .expect("the receive task must stop promptly")
+        .expect("the panicked receive task must not close its channel");
+    }
+}
