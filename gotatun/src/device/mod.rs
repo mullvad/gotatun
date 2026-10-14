@@ -623,6 +623,12 @@ impl<T: DeviceTransports> DeviceState<T> {
                 .lock()
                 .retain(|idx, _| device.index_table.in_use(*idx));
 
+            // Reset the packet counts here in addition to `peer_state.update_timers` in case there
+            // is no peer.
+            if let Some(rate_limiter) = device.rate_limiter.as_ref() {
+                rate_limiter.try_reset_count();
+            }
+
             // TODO: pass in peers instead?
             let peer_map = &device.peers;
 

@@ -47,6 +47,20 @@ struct IpCounts {
     last_reset: Instant,
 }
 
+impl IpCounts {
+    #[inline(always)]
+    pub fn try_reset(&mut self) {
+        let current_time = Instant::now();
+        if current_time.duration_since(self.last_reset) >= RESET_PERIOD {
+            // Explicitly drop the backing memory of the previous `counts` map.
+            // Prevent `self.counts` from potentially retaining a lot of allocated memory
+            // indefinitely.
+            self.counts = HashMap::new();
+            self.last_reset = current_time;
+        }
+    }
+}
+
 /// There are two places where WireGuard requires "randomness" for cookies
 /// * The 24 byte nonce in the cookie massage - here the only goal is to avoid nonce reuse
 /// * A secret value that changes every two minutes
@@ -104,12 +118,8 @@ impl RateLimiter {
 
     /// Reset packet counts (ideally should be called with a period of 1 second)
     pub fn try_reset_count(&self) {
-        let current_time = Instant::now();
         let mut ip_counts = self.ip_counts.lock();
-        if current_time.duration_since(ip_counts.last_reset) >= RESET_PERIOD {
-            ip_counts.counts.clear();
-            ip_counts.last_reset = current_time;
-        }
+        ip_counts.try_reset();
     }
 
     /// Compute the correct cookie value based on the current secret value and the source address
