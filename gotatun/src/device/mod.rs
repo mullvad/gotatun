@@ -623,6 +623,13 @@ impl<T: DeviceTransports> DeviceState<T> {
                 .lock()
                 .retain(|idx, _| device.index_table.in_use(*idx));
 
+            // NOTE: Try to reset the packet counts here in addition to inside of `PeerState::update_timers`.
+            // Otherwise if the device has no peers, try_reset_count will never trigger, and packet
+            // counts will accumulate indefinitely. Fixes GHSA-m2rr-7rr7-vmp7.
+            if let Some(rate_limiter) = device.rate_limiter.as_ref() {
+                rate_limiter.try_reset_count();
+            }
+
             // TODO: pass in peers instead?
             let peer_map = &device.peers;
 

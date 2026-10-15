@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Fixed
+- Fix IP counts not resetting periodically for devices without registered peers.
 #### Linux
 - Fix panic upon reading an empty UDP datagram if UDP GRO optimizations were enabled.
   The panic would terminates the device's shared UDP receive task, denying inbound traffic for
