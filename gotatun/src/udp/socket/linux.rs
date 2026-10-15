@@ -122,6 +122,7 @@ mod gro {
     use bytes::BytesMut;
     use nix::cmsg_space;
     use nix::sys::socket::{ControlMessageOwned, MsgFlags, MultiHeaders, SockaddrStorage};
+    use std::hint::cold_path;
     use std::io::{self, IoSliceMut};
     use std::net::SocketAddr;
     use std::os::fd::AsRawFd;
@@ -195,7 +196,13 @@ mod gro {
                     )?;
 
                     for result in results {
-                        let iov = result.iovs().next().expect("we create exactly one IoSlice");
+                        let Some(iov) = result.iovs().next() else {
+                            cold_path();
+                            if cfg!(debug_assertions) {
+                                tracing::trace!("Received empty datagram from IoSlice");
+                            }
+                            continue;
+                        };
 
                         let Some(source_addr) = result.address.as_ref().and_then(|addr| {
                             addr.as_sockaddr_in()
