@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.10.0] - 2026-10-14
 ### Added
 - Add `Device::force_handshake` to establish a WireGuard session for a peer.
+- Add `PeerMut::dangerously_set_timer_params`, so that timer params can be changed
+  for an existing peer.
 
 ### Fixed
 - Bind the UAPI unix socket at `/var/run/wireguard/<name>.sock` without a doubled
