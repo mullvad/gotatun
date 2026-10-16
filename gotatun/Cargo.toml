@@ -46,6 +46,7 @@ either = { workspace = true }
 eyre = { workspace = true }
 futures = { workspace = true }
 hmac = { workspace = true }
+io-uring = "0.7.15"
 ip_network = { workspace = true }
 ip_network_table = { workspace = true }
 ipnetwork = { workspace = true }

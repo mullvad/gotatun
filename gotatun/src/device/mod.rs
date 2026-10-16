@@ -200,6 +200,7 @@ impl<T: DeviceTransports> Connection<T> {
             device.port = addr.port();
         }
 
+        // TODO: remove buffers in favor of io_uring buffer?
         let (buffered_ip_tx, buffered_ip_rx) = crate::tun::buffer::channel(
             MAX_PACKET_BUFS,
             pool.clone(),

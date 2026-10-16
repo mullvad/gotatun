@@ -11,8 +11,13 @@
 
 //! Implementations of [`IpSend`] and [`IpRecv`] for the [`tun`] crate.
 
-use tokio::{sync::watch, time::sleep};
+use io_uring::{IoUring, opcode, types};
+use tokio::{
+    sync::{mpsc, watch},
+    time::sleep,
+};
 use tun::AbstractDevice;
+use zerocopy::IntoBytes;
 
 use crate::{
     packet::{Ip, Packet, PacketBufPool},
@@ -20,7 +25,9 @@ use crate::{
     tun::{IpRecv, IpSend, MtuWatcher},
 };
 
-use std::{convert::Infallible, io, iter, sync::Arc, time::Duration};
+use std::{
+    cell::UnsafeCell, convert::Infallible, io, iter, os::fd::AsRawFd, sync::Arc, time::Duration,
+};
 
 /// Error from [`TunDevice`].
 #[derive(Debug, thiserror::Error)]
@@ -50,6 +57,7 @@ pub enum Error {
 pub struct TunDevice {
     tun: Arc<tun::AsyncDevice>,
     state: Arc<TunDeviceState>,
+    write_tx: mpsc::Sender<Packet<Ip>>,
 }
 
 struct TunDeviceState {
@@ -135,7 +143,15 @@ impl TunDevice {
             watch_task().await;
         });
 
+        let (write_tx, write_rx) = mpsc::channel(URING_SLOTS);
+        let write_task = WriteTask {
+            tun: tun.clone(),
+            write_rx,
+        };
+        tokio::task::spawn_blocking(move || write_task.run());
+
         Ok(Self {
+            write_tx,
             tun,
             state: Arc::new(TunDeviceState {
                 mtu: rx.into(),
@@ -152,7 +168,11 @@ impl TunDevice {
 
 impl IpSend for TunDevice {
     async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
-        self.tun.send(&packet.into_bytes()).await?;
+        self.write_tx
+            .send(packet)
+            .await
+            .map_err(|_| io::ErrorKind::BrokenPipe)?;
+        // self.tun.send(&packet.into_bytes()).await?;
         Ok(())
     }
 }
@@ -173,5 +193,93 @@ impl IpRecv for TunDevice {
 
     fn mtu(&self) -> MtuWatcher {
         self.state.mtu.clone()
+    }
+}
+
+struct WriteTask {
+    tun: Arc<tun::AsyncDevice>,
+    write_rx: mpsc::Receiver<Packet<Ip>>,
+}
+
+// Must be power of 2.
+// TODO: tune for best performance
+const URING_SLOTS: usize = 1024;
+
+impl WriteTask {
+    pub fn run(self) {
+        let WriteTask { tun, mut write_rx } = self;
+
+        let mut slots: [Option<UnsafeCell<Packet<Ip>>>; URING_SLOTS] =
+            [const { None }; URING_SLOTS];
+        let mut bufs = Vec::with_capacity(URING_SLOTS);
+
+        // TODO: dont unwrap
+        let mut uring = IoUring::new(URING_SLOTS as u32).unwrap();
+
+        let mut free_slots = URING_SLOTS;
+        let mut next_slot = 0;
+
+        loop {
+            let num_to_submit = write_rx.blocking_recv_many(&mut bufs, free_slots);
+
+            debug_assert!(num_to_submit <= free_slots);
+            debug_assert!(num_to_submit > 0);
+
+            // Move packets into `slots` and submit them to the uring.
+            for packet in bufs.drain(..) {
+                let packet_len = packet.as_bytes().len();
+
+                // Find the first free slot. This will always find a slot, as we never recv
+                // more packets than we have space for
+                let slot_i = loop {
+                    let slot_i = next_slot;
+                    next_slot = (next_slot + 1) % URING_SLOTS;
+                    if slots[slot_i].is_none() {
+                        break slot_i;
+                    }
+                };
+
+                // Wrap the packet in an UnsafeCell so we can safely have the kernel mutate it
+                // while we mutate other things in `slots`.
+                // TODO: is this true? is there a point to using UnsafeCell here?
+                let cell = slots[slot_i].insert(UnsafeCell::new(packet));
+                let ptr = cell.get_mut().as_mut_bytes().as_mut_ptr();
+                free_slots -= 1;
+
+                let write_op =
+                    opcode::Write::new(types::Fd(tun.as_raw_fd()), ptr, packet_len as u32)
+                        .build()
+                        .user_data(slot_i as u64);
+
+                // SAFETY: `ptr` points into `slots`, the slot is valid for the duration of the
+                // operation. Buffers aren't removed from `slots` until the corresponding
+                // io-operation completes.
+                unsafe { uring.submission().push(&write_op) }.expect("uring is not full");
+            }
+
+            // let ongoing_operations = URING_SLOTS - free_slots;
+            // if num_to_submit != ongoing_operations {
+            //     tracing::info!("submitting {num_to_submit} ops (total={ongoing_operations})");
+            //     tracing::info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1");
+            // }
+
+            // Wait for one operation to complete
+            // TODO: is it better to wait for ALL operations, or SOME operations?
+            let num_completed = uring.submit_and_wait(1).unwrap();
+
+            // Free buffers for completed operations
+            for completion in uring.completion().take(num_completed) {
+                let slot_i = completion.user_data() as usize;
+                debug_assert!(slot_i < URING_SLOTS);
+
+                // Free the slot and the packet buffer.
+                // TODO: don't panic
+                let cell = slots[slot_i].take().expect("slot is some");
+                let buf = cell.into_inner();
+                drop(buf);
+
+                free_slots += 1;
+            }
+        }
     }
 }
