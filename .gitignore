@@ -6,3 +6,4 @@ result
 .helix/
 .zed/
 .local
+/.direnv
