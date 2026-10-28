@@ -57,13 +57,6 @@ pub struct DaitaHooks {
     _events_task: Task,
 }
 
-/// RNG used for DAITA. Same as maybenot-ffi.
-///
-/// This setup uses [`SysRng`] as the source of entropy, but extrapolates each call to [`SysRng`]
-/// using [`rand_chacha::ChaCha12Core`].
-type Rng = ChaCha12Rng;
-const RNG_RESEED_THRESHOLD: u64 = 1024 * 64; // 64 KiB
-
 impl DaitaHooks {
     /// Create a new DAITA hooks instance.
     ///
