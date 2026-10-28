@@ -39,7 +39,8 @@ ip_network = "0.4.1"
 ip_network_table = "0.2.0"
 ipnetwork = "0.21.1"
 libc = "0.2.180"
-maybenot = "2.2.2"
+# TODO: Switch back to crates.io release
+maybenot = { git = "https://github.com/maybenot-io/maybenot", rev = "16701dc6f6586acc1ff7f64a368e39cb2aa937de" }
 mimalloc = { version = "0.1", default-features = false }
 mock_instant = "0.6"
 nix = { version = "0.31", default-features = false }
