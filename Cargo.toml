@@ -36,7 +36,7 @@ gotatun = { path = "./gotatun", version = "0.10.3", default-features = false }
 gotatun-crypto = { path = "gotatun-crypto" }
 gotatun-packet = { path = "gotatun-packet" }
 hex = "0.4.3"
-hmac = "0.12.1"
+hmac = "0.13.0"
 ip_network = "0.4.1"
 ip_network_table = "0.2.0"
 ipnetwork = "0.21.1"
