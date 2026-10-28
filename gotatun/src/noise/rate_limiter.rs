@@ -18,10 +18,14 @@ use crate::packet::{Packet, WgCookieReply, WgHandshakeBase, WgKind};
 use constant_time_eq::constant_time_eq;
 #[cfg(feature = "mock_instant")]
 use mock_instant::thread_local::Instant;
+#[cfg(not(target_has_atomic = "64"))]
+use portable_atomic::AtomicU64;
 use rand::TryRngCore;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(target_has_atomic = "64")]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 #[cfg(not(feature = "mock_instant"))]
@@ -228,5 +232,40 @@ impl RateLimiter {
         }
 
         Ok(handshake)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_concurrent_cookie_nonces_cross_u32_boundary() {
+        let limiter = RateLimiter::new(&crate::x25519::PublicKey::from([0u8; 32]), 10);
+        let start = u64::from(u32::MAX) - 127;
+        limiter.nonce_ctr.store(start, Ordering::Relaxed);
+        let barrier = std::sync::Barrier::new(4);
+
+        let mut nonces = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..4)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        (0..64).map(|_| limiter.nonce()).collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|handle| handle.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        let mut expected: Vec<_> = (start..start + 256)
+            .map(|counter| b2s_mac_24(&limiter.nonce_key, &counter.to_le_bytes()))
+            .collect();
+        nonces.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(nonces, expected);
+        assert_eq!(limiter.nonce_ctr.load(Ordering::Relaxed), start + 256);
     }
 }

@@ -79,6 +79,9 @@ test-log = { workspace = true }
 tokio-stream = { workspace = true, features = ["sync"] }
 x25519-dalek = { workspace = true, features = ["getrandom"] }
 
+[target.'cfg(not(target_has_atomic = "64"))'.dependencies]
+portable-atomic = { workspace = true }
+
 [target.'cfg(target_os = "windows")'.dependencies]
 wintun-bindings = { workspace = true, default-features = false, optional = true }
 windows-sys = { workspace = true, features = [

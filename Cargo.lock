@@ -836,6 +836,7 @@ dependencies = [
  "nix",
  "parking_lot",
  "pcap-file",
+ "portable-atomic",
  "rand",
  "rand_chacha",
  "rand_core 0.6.4",
@@ -1300,6 +1301,12 @@ dependencies = [
  "opaque-debug",
  "universal-hash",
 ]
+
+[[package]]
+name = "portable-atomic"
+version = "1.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
 
 [[package]]
 name = "powerfmt"
