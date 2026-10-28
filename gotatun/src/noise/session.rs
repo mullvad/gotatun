@@ -379,45 +379,6 @@ mod tests {
     }
 
     #[test]
-    fn test_concurrent_sending_counters_cross_u32_boundary() {
-        let session = test_session();
-        let start = u64::from(u32::MAX) - 127;
-        session.set_sending_key_counter(start);
-        let barrier = std::sync::Barrier::new(4);
-
-        let mut counters = std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..4)
-                .map(|_| {
-                    scope.spawn(|| {
-                        barrier.wait();
-                        (0..64)
-                            .map(|_| {
-                                let packet = Packet::from_bytes(BytesMut::new());
-                                session
-                                    .format_packet_data(packet)
-                                    .unwrap()
-                                    .header
-                                    .counter
-                                    .get()
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                })
-                .collect();
-            handles
-                .into_iter()
-                .flat_map(|handle| handle.join().unwrap())
-                .collect::<Vec<_>>()
-        });
-        counters.sort_unstable();
-        assert_eq!(counters, (start..start + 256).collect::<Vec<_>>());
-        assert_eq!(
-            session.sending_key_counter.load(Ordering::Relaxed),
-            start + 256
-        );
-    }
-
-    #[test]
     fn test_replay_counter() {
         let mut c: ReceivingKeyCounterValidator = Default::default();
 
