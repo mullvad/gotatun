@@ -16,7 +16,7 @@ repository = "https://github.com/mullvad/gotatun"
 license = "MPL-2.0"
 
 [workspace.dependencies]
-aead = "0.5.2"
+aead = "0.6.1"
 aws-lc-rs = "1.16.2"
 base64 = "0.22.1"
 bitfield-struct = "0.12.1"
