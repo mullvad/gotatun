@@ -20,7 +20,7 @@ use std::time::Duration;
 use bytes::BytesMut;
 #[cfg(feature = "mock_instant")]
 use mock_instant::thread_local::Instant;
-use rand::Rng;
+use rand::RngExt;
 
 #[cfg(not(feature = "mock_instant"))]
 use crate::sleepyinstant::Instant;
@@ -211,7 +211,7 @@ impl IndexMut<TimerName> for Timers {
     }
 }
 
-impl<R: rand::RngCore + Send> Tunn<R> {
+impl<R: rand::Rng + Send> Tunn<R> {
     pub(super) fn timer_tick(&mut self, timer_name: TimerName) {
         let time = self.timers[TimeCurrent];
 

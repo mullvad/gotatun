@@ -12,15 +12,14 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use rand::rngs::StdRng;
-use rand::{RngCore, SeedableRng};
+use rand::rngs::SysRng;
 
 /// A table of unique session IDs.
 ///
 /// All peers share a single `IndexTable` to ensure no two sessions use the same index.
 /// Indices are random `u32`s and freed automatically when the returned [`Index`] is dropped.
 #[derive(Clone)]
-pub struct IndexTable<Rng = StdRng>(Arc<Mutex<(Rng, HashSet<u32>)>>);
+pub struct IndexTable<Rng = SysRng>(Arc<Mutex<(Rng, HashSet<u32>)>>);
 
 /// A 32-bit index that locally represents the other peer, analogous to IPsec’s “SPI”.
 ///
@@ -28,14 +27,14 @@ pub struct IndexTable<Rng = StdRng>(Arc<Mutex<(Rng, HashSet<u32>)>>);
 /// automatically freed from its [`IndexTable`] on drop.
 ///
 /// See section 5.4 of the [whitepaper](https://www.wireguard.com/papers/wireguard.pdf).
-pub struct Index<Rng = StdRng> {
+pub struct Index<Rng = SysRng> {
     value: u32,
     table: IndexTable<Rng>,
 }
 
 impl<Rng> IndexTable<Rng>
 where
-    Rng: RngCore,
+    Rng: rand::TryRng,
 {
     /// Generate a random `u32` not already in the table.
     ///
@@ -58,7 +57,7 @@ where
 
     /// Naively generate the next session ID. This index is not guaranteed to be locally unique.
     pub(crate) fn next_id(rng: &mut Rng) -> u32 {
-        rng.next_u32()
+        rng.try_next_u32().unwrap()
     }
 
     /// Create a new [`IndexTable`] using the given [`RngCore`].
@@ -73,13 +72,11 @@ where
     }
 }
 
-impl<Rng> IndexTable<Rng>
-where
-    Rng: SeedableRng + RngCore,
-{
-    /// Create a new [`IndexTable`] seeded using [`SeedableRng::from_os_rng`].
+impl IndexTable<SysRng> {
+    /// Create a new [`IndexTable`] seeded using [`SysRng`].
     pub fn from_os_rng() -> Self {
-        Self::from_rng(Rng::from_os_rng())
+        let rng = SysRng;
+        IndexTable::from_rng(rng)
     }
 }
 
@@ -118,6 +115,10 @@ impl std::fmt::Display for Index {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
+
+    use rand::TryRng;
+
     use super::*;
 
     #[derive(Default)]
@@ -126,18 +127,20 @@ mod tests {
         divisor: u32,
     }
 
-    impl RngCore for ModCounter {
-        fn next_u32(&mut self) -> u32 {
+    impl TryRng for ModCounter {
+        type Error = Infallible;
+
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
             let v = self.dividend % self.divisor;
             self.dividend += 1;
-            v
+            Ok(v)
         }
 
-        fn next_u64(&mut self) -> u64 {
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
             unimplemented!()
         }
 
-        fn fill_bytes(&mut self, _: &mut [u8]) {
+        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
             unimplemented!()
         }
     }
