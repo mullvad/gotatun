@@ -20,7 +20,8 @@ use crate::task::Task;
 use crate::udp::UdpSend;
 use crate::{packet::Packet, tun::MtuWatcher};
 use maybenot::TriggerEvent;
-use rand::rngs::{OsRng, ReseedingRng};
+use rand::SeedableRng;
+use rand::rngs::{ChaCha12Rng, SysRng};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Weak};
 use tokio::sync::Mutex;
@@ -55,16 +56,6 @@ pub struct DaitaHooks {
     _actions_task: Task,
     _events_task: Task,
 }
-
-/// RNG used for DAITA. Same as maybenot-ffi.
-///
-/// This setup uses [`OsRng`] as the source of entropy, but extrapolates each call to [`OsRng`] into
-/// at least [`RNG_RESEED_THRESHOLD`] bytes of randomness using [`rand_chacha::ChaCha12Core`].
-///
-/// This is the same Rng that [`rand::thread_rng`] uses internally,
-/// but unlike `thread_rng`, this is Sync.
-type Rng = ReseedingRng<rand_chacha::ChaCha12Core, OsRng>;
-const RNG_RESEED_THRESHOLD: u64 = 1024 * 64; // 64 KiB
 
 impl DaitaHooks {
     /// Create a new DAITA hooks instance.
@@ -108,7 +99,7 @@ impl DaitaHooks {
             max_decoy_frac,
             max_delay_frac,
             std::time::Instant::now(),
-            Rng::new(RNG_RESEED_THRESHOLD, OsRng).unwrap(),
+            ChaCha12Rng::try_from_rng(&mut SysRng).unwrap(),
         )?;
 
         let action_handler = ActionHandler::builder()

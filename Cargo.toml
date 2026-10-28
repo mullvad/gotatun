@@ -46,8 +46,8 @@ mock_instant = "0.6"
 nix = { version = "0.31", default-features = false }
 parking_lot = "0.12.5"
 pcap-file = "2.0.0"
-rand = "0.9.2"
-rand_chacha = "0.9.0"
+rand = "0.10"
+rand_chacha = "0.10"
 # We need this for x25519-dalek
 rand_core = "0.6.4"
 ring = "0.17.14"
