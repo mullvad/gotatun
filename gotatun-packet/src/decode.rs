@@ -11,12 +11,12 @@
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
-use crate::packet::Packet;
+use crate::Packet;
 
 use super::PoD;
 
 /// A trait that enables byte-wise conversion from one packet type to another through zerocopy.
-/// See [`crate::packet::Ipv4Decoder`] for an example.
+/// See [`crate::Ipv4Decoder`] for an example.
 ///
 /// # Validation
 /// This trait asserts, at minimum, that `Src` can be soundly transmuted into `Dst`, but

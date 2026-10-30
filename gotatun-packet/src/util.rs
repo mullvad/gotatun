@@ -9,11 +9,11 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use std::mem::offset_of;
+use core::mem::offset_of;
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, big_endian};
 
-use crate::packet::{IpNextProtocol, Tcp, TcpHeader, Udp, UdpHeader};
+use crate::{IpNextProtocol, Tcp, TcpHeader, Udp, UdpHeader};
 
 /// Check that the size of type `T` is `size`. If not, panic.
 ///
@@ -132,8 +132,7 @@ pub fn checksum(payload: &[&[u8]]) -> u16 {
 /// Compute an "Internet checksum" for IPv4.
 /// This skips the checksum field, so it works for even if non-zero.
 pub fn checksum_ipv4_with_skip(payload: &[u8]) -> u16 {
-    const SKIP_WORD: usize =
-        offset_of!(crate::packet::Ipv4Header, header_checksum) / size_of::<u16>();
+    const SKIP_WORD: usize = offset_of!(crate::Ipv4Header, header_checksum) / size_of::<u16>();
     let sum = checksum_payload_with_skip(payload, SKIP_WORD);
     finalize_csum(sum)
 }
@@ -217,8 +216,8 @@ fn finalize_csum(mut sum: u32) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::Ipv4Header;
-    use std::net::Ipv4Addr;
+    use crate::Ipv4Header;
+    use core::net::Ipv4Addr;
 
     #[test]
     fn test_ipv4_header_checksum() {
