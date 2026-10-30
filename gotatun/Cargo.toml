@@ -22,15 +22,10 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 
 [[bench]]
 harness = false
-name = "crypto_benches"
-
-[[bench]]
-harness = false
 name = "throughput_benches"
 
 [dependencies]
 aead = { workspace = true }
-aws-lc-rs = { workspace = true, optional = true }
 base64 = { workspace = true }
 blake2 = { workspace = true }
 bytes = { workspace = true }
@@ -40,6 +35,7 @@ duplicate = { workspace = true, default-features = false }
 either = { workspace = true }
 eyre = { workspace = true }
 futures = { workspace = true }
+gotatun-crypto.workspace = true
 gotatun-packet.workspace = true
 hmac = { workspace = true }
 ip_network = { workspace = true }
@@ -53,7 +49,6 @@ pcap-file = { workspace = true, optional = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 rand_core = { workspace = true, features = ["getrandom"] }
-ring = { workspace = true, optional = true }
 socket2 = { workspace = true, features = ["all"], optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "rt", "sync", "time"] }
@@ -114,7 +109,7 @@ default = ["aws-lc-rs"]
 # Use the `aws-lc-rs` crate as the AEAD backend. Default. At least
 # one of `ring` and `aws-lc-rs` must be enabled; `aws-lc-rs` wins
 # if both are.
-aws-lc-rs = ["dep:aws-lc-rs"]
+aws-lc-rs = ["gotatun-crypto/aws-lc-rs"]
 daita = ["dep:maybenot", "device"]
 # Add non-compliant UAPI support for DAITA.
 # See `UAPI.md` for details.
@@ -124,7 +119,7 @@ pcap = ["dep:pcap-file"]
 # Use the `ring` crate as the AEAD backend. Combine with
 # `default-features = false` to avoid also pulling in `aws-lc-rs`,
 # which would otherwise be compiled and linked unused.
-ring = ["dep:ring"]
+ring = ["gotatun-crypto/ring"]
 socket = ["dep:socket2", "tokio/net"]
 tun = ["dep:tun", "dep:wintun-bindings"]
 # UDP GRO appears to be broken on Windows.
