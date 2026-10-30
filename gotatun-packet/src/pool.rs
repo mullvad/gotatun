@@ -15,7 +15,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::packet::Packet;
+use crate::Packet;
 
 /// A pool of packet buffers.
 #[derive(Clone)]
@@ -42,8 +42,8 @@ impl<const N: usize> PacketBufPool<N> {
     }
 
     /// Create an empty [`PacketBufPool`] with space for at least `capacity` returned buffers.
-    #[cfg(feature = "device")]
-    pub(crate) fn new_lazy(capacity: usize) -> Self {
+    #[cfg(feature = "pool")]
+    pub fn new_lazy(capacity: usize) -> Self {
         Self {
             queue: Arc::new(Mutex::new(VecDeque::with_capacity(capacity))),
             capacity,
@@ -140,7 +140,7 @@ impl Drop for ReturnToPool {
 mod tests {
     use std::{hint::black_box, thread};
 
-    #[cfg(feature = "device")]
+    #[cfg(feature = "pool")]
     use std::sync::{Arc, Barrier};
 
     use super::PacketBufPool;
@@ -204,7 +204,7 @@ mod tests {
     }
 
     /// Test demand-driven allocation and recycle semantics of [PacketBufPool].
-    #[cfg(feature = "device")]
+    #[cfg(feature = "pool")]
     #[test]
     fn pool_lazy_allocation_and_recycle() {
         const N: usize = 1024;
@@ -223,7 +223,7 @@ mod tests {
     }
 
     /// Test that concurrent allocations do not grow lazy pool retention beyond its capacity.
-    #[cfg(feature = "device")]
+    #[cfg(feature = "pool")]
     #[test]
     fn lazy_pool_retention_is_bounded() {
         const CAPACITY: usize = 4;
