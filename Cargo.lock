@@ -812,7 +812,6 @@ name = "gotatun"
 version = "0.11.0"
 dependencies = [
  "aead",
- "aws-lc-rs",
  "base64",
  "blake2",
  "bytes",
@@ -825,6 +824,7 @@ dependencies = [
  "eyre",
  "futures",
  "gotatun",
+ "gotatun-crypto",
  "gotatun-packet",
  "hex",
  "hmac",
@@ -840,7 +840,6 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rand_core 0.6.4",
- "ring",
  "socket2",
  "test-log",
  "thiserror 1.0.69",
@@ -872,6 +871,21 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "gotatun-crypto"
+version = "0.1.0"
+dependencies = [
+ "aead",
+ "aws-lc-rs",
+ "blake2",
+ "chacha20poly1305",
+ "criterion",
+ "hmac",
+ "rand",
+ "ring",
+ "x25519-dalek",
 ]
 
 [[package]]
