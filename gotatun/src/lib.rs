@@ -23,7 +23,6 @@ mod crypto;
 #[cfg(feature = "device")]
 pub mod device;
 pub mod noise;
-pub mod packet;
 pub mod tun;
 pub mod udp;
 
@@ -34,6 +33,11 @@ pub(crate) mod sleepyinstant;
 
 #[cfg(feature = "device")]
 pub(crate) mod serialization;
+
+/// Re-export `gotatun-packet` types
+pub mod packet {
+    pub use gotatun_packet::*;
+}
 
 /// Re-export of the x25519 types
 pub mod x25519 {

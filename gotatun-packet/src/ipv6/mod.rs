@@ -10,12 +10,12 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use bitfield_struct::bitfield;
+use core::{fmt::Debug, net::Ipv6Addr};
 use duplicate::duplicate_item;
 use eyre::eyre;
-use std::{fmt::Debug, net::Ipv6Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
-use crate::packet::{Tcp, TcpDecoder};
+use crate::{Tcp, TcpDecoder};
 
 use super::{
     DecodeError, Decoder, IpNextProtocol, PseudoHeaderV6, Udp, UdpDecoder, util::size_must_be,
@@ -28,7 +28,7 @@ use super::{
 ///
 /// Use [`Ipv6Decoder`] and [`Ipv6PayloadDecoder`] for parsing into these packet types from
 /// byte slices and such. You can also use [`FromBytes`] and [`IntoBytes`] if you want minimal
-/// validation. [Read more](crate::packet)
+/// validation. [Read more](crate)
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Ipv6<Payload: ?Sized = [u8]> {
@@ -234,7 +234,7 @@ impl Decoder<Ipv6<[u8]>, Ipv6<Proto>> for Ipv6PayloadDecoder<ProtoDecoder> {
                 ipv6.header.destination_address,
                 proto,
             );
-            let expected_csum = crate::packet::util::checksum_fn(header, proto);
+            let expected_csum = crate::util::checksum_fn(header, proto);
             if expected_csum != proto.header.checksum.get() {
                 return Err(DecodeError::InvalidValue(concat!(proto_str, " checksum")));
             }
@@ -277,8 +277,8 @@ mod tests {
     use zerocopy::{FromBytes, IntoBytes};
 
     use super::{Ipv6, Ipv6Decoder};
-    use crate::packet::{Decoder, IpNextProtocol, Ipv6Header};
-    use std::{net::Ipv6Addr, str::FromStr};
+    use crate::{Decoder, IpNextProtocol, Ipv6Header};
+    use core::{net::Ipv6Addr, str::FromStr};
 
     const EXAMPLE_IPV6_ICMP: &[u8] = &[
         0x60, 0x8, 0xc7, 0xf3, 0x0, 0x40, 0x3a, 0x40, 0xfc, 0x0, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0x1,

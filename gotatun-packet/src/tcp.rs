@@ -9,12 +9,12 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use std::fmt;
+use core::fmt;
 
 use bitfield_struct::bitfield;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
-use crate::packet::{
+use crate::{
     DecodeError, Decoder, IpNextProtocol, PseudoHeaderV4, PseudoHeaderV6, util::size_must_be,
 };
 
@@ -24,7 +24,7 @@ use super::{Ipv4, Ipv6};
 ///
 /// This is a dynamically sized zerocopy type, which means you can compose packet types like
 /// `Ipv6<Tcp<T>>` and cast them to/from byte slices using [`FromBytes`] and [`IntoBytes`].
-/// [Read more](crate::packet)
+/// [Read more](crate)
 #[repr(C)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Tcp<OptionsAndPayload: ?Sized = [u8]> {
@@ -238,7 +238,7 @@ impl Ipv4<Tcp> {
             IpNextProtocol::Tcp,
             self.payload.as_bytes(),
         );
-        crate::packet::util::checksum_tcp_with_skip(header, tcp)
+        crate::util::checksum_tcp_with_skip(header, tcp)
     }
 
     /// Calculate and set the TCP checksum for this packet.
@@ -258,7 +258,7 @@ impl Ipv6<Tcp> {
             IpNextProtocol::Tcp,
             self.payload.as_bytes(),
         );
-        crate::packet::util::checksum_tcp_with_skip(header, tcp)
+        crate::util::checksum_tcp_with_skip(header, tcp)
     }
 
     /// Calculate and set the TCP checksum for this packet.
@@ -320,7 +320,7 @@ impl fmt::Debug for TcpHeader {
 
 #[cfg(test)]
 mod tests {
-    use crate::packet::{
+    use crate::{
         Decoder, Ipv4, Ipv4Decoder, Ipv4PayloadDecoder, Ipv6Decoder, Ipv6PayloadDecoder, Tcp,
         TcpDecoder,
     };

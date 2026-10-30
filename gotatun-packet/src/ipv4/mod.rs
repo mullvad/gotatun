@@ -10,15 +10,15 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use bitfield_struct::bitfield;
+use core::{fmt::Debug, net::Ipv4Addr};
 use duplicate::duplicate_item;
 use eyre::{bail, eyre};
-use std::{fmt::Debug, net::Ipv4Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
 mod protocol;
 pub use protocol::*;
 
-use crate::packet::{DecodeError, Decoder, PseudoHeaderV4, Tcp, TcpDecoder, Udp, UdpDecoder};
+use crate::{DecodeError, Decoder, PseudoHeaderV4, Tcp, TcpDecoder, Udp, UdpDecoder};
 
 use super::util::size_must_be;
 
@@ -29,7 +29,7 @@ use super::util::size_must_be;
 ///
 /// Use [`Ipv4Decoder`] and [`Ipv4PayloadDecoder`] for parsing into these packet types from
 /// byte slices and such. You can also use [`FromBytes`] and [`IntoBytes`] if you want minimal
-/// validation [Read more](crate::packet).
+/// validation [Read more](crate).
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable, PartialEq, Eq)]
 pub struct Ipv4<Payload: ?Sized = [u8]> {
@@ -146,7 +146,7 @@ fn validate_ipv4(d: &Ipv4Decoder, ipv4: &Ipv4) -> Result<usize, DecodeError> {
             .get(..header_len)
             .filter(|header| header.len() >= Ipv4Header::LEN)
             .ok_or(DecodeError::InvalidValue("IHL"))?;
-        let expected_csum = crate::packet::util::checksum_ipv4_with_skip(header);
+        let expected_csum = crate::util::checksum_ipv4_with_skip(header);
         if ipv4.header.header_checksum.get() != expected_csum {
             return Err(DecodeError::InvalidValue("checksum"));
         }
@@ -218,7 +218,7 @@ impl Decoder<Ipv4<[u8]>, Ipv4<Udp>> for Ipv4PayloadDecoder<UdpDecoder> {
                     ipv4.header.destination_address,
                     udp,
                 );
-                let expected_csum = crate::packet::util::checksum_udp_with_skip(header, udp);
+                let expected_csum = crate::util::checksum_udp_with_skip(header, udp);
                 if expected_csum != udp.header.checksum.get() {
                     return Err(DecodeError::InvalidValue("UDP checksum"));
                 }
@@ -253,7 +253,7 @@ impl Decoder<Ipv4<[u8]>, Ipv4<Tcp>> for Ipv4PayloadDecoder<TcpDecoder> {
                 ipv4.header.destination_address,
                 tcp,
             );
-            let expected_csum = crate::packet::util::checksum_tcp_with_skip(header, tcp);
+            let expected_csum = crate::util::checksum_tcp_with_skip(header, tcp);
             if expected_csum != tcp.header.checksum.get() {
                 return Err(DecodeError::InvalidValue("TCP checksum"));
             }
@@ -268,7 +268,7 @@ impl Decoder<Ipv4<[u8]>, Ipv4<Tcp>> for Ipv4PayloadDecoder<TcpDecoder> {
 #[repr(C)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Ipv4Options<T: ?Sized = [u8]> {
-    _pd: std::marker::PhantomData<T>,
+    _pd: core::marker::PhantomData<T>,
     options_and_payload: [u8],
 }
 
@@ -444,7 +444,7 @@ impl Ipv4Header {
 
     /// Compute expected header checksum.
     pub fn compute_checksum(&self) -> u16 {
-        crate::packet::util::checksum_ipv4_with_skip(self.as_bytes())
+        crate::util::checksum_ipv4_with_skip(self.as_bytes())
     }
 }
 
@@ -531,8 +531,8 @@ mod tests {
     use zerocopy::{FromBytes, IntoBytes, big_endian};
 
     use super::{Ipv4, Ipv4Decoder, Ipv4Header, Ipv4Options, Ipv4PayloadDecoder};
-    use crate::packet::{DecodeError, Decoder, IpNextProtocol, Udp, UdpDecoder, UdpHeader};
-    use std::net::Ipv4Addr;
+    use crate::{DecodeError, Decoder, IpNextProtocol, Udp, UdpDecoder, UdpHeader};
+    use core::net::Ipv4Addr;
 
     const EXAMPLE_IPV4_ICMP: &[u8] = &[
         0x45, 0x83, 0x0, 0x54, 0xa3, 0x13, 0x40, 0x0, 0x40, 0x1, 0xc6, 0x26, 0xa, 0x8c, 0xc2, 0xdd,
