@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["gotatun", "gotatun-cli", "gotatun-packet"]
+members = ["gotatun", "gotatun-cli", "gotatun-crypto", "gotatun-packet"]
 
 [workspace.package]
 authors = [
@@ -33,6 +33,7 @@ etherparse = "0.13"
 eyre = "0.6.12"
 futures = "0.3.31"
 gotatun = { path = "./gotatun", version = "0.11.0", default-features = false }
+gotatun-crypto = { path = "gotatun-crypto" }
 gotatun-packet = { path = "gotatun-packet" }
 hex = "0.4.3"
 hmac = "0.12.1"

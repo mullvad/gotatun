@@ -36,7 +36,7 @@ use crate::noise::timers::{TimerName, Timers};
 pub use crate::noise::timers::TimerParams;
 use crate::packet::{Packet, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind};
 use crate::tun::MtuWatcher;
-use crate::x25519;
+use gotatun_crypto::x25519;
 
 use std::collections::VecDeque;
 use std::sync::Arc;

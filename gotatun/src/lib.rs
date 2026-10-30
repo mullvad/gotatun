@@ -19,7 +19,6 @@
 // `RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features`
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-mod crypto;
 #[cfg(feature = "device")]
 pub mod device;
 pub mod noise;
@@ -39,9 +38,7 @@ pub mod packet {
     pub use gotatun_packet::*;
 }
 
-/// Re-export of the x25519 types
-pub mod x25519 {
-    pub use x25519_dalek::{
-        EphemeralSecret, PublicKey, ReusableSecret, SharedSecret, StaticSecret,
-    };
+/// Re-export `gotatun-crypto` types
+pub mod crypto {
+    pub use gotatun_crypto::*;
 }
