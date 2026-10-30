@@ -9,11 +9,11 @@
 //   Copyright (c) 2019 Cloudflare, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: MPL-2.0
-use blake2s_benching::{bench_blake2s_hash, bench_blake2s_hmac, bench_blake2s_keyed};
-use chacha20poly1305_benching::bench_chacha20poly1305;
+use blake2s::{bench_blake2s_hash, bench_blake2s_hmac, bench_blake2s_keyed};
+use chacha20poly1305::bench_chacha20poly1305;
 
-mod blake2s_benching;
-mod chacha20poly1305_benching;
+mod blake2s;
+mod chacha20poly1305;
 
 criterion::criterion_group!(
     crypto_benches,

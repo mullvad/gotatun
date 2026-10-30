@@ -16,9 +16,9 @@
 mod tests {
     use crate::device::{DefaultDeviceTransports, Device, DeviceBuilder};
     use crate::udp::socket::UdpSocketFactory;
-    use crate::x25519::{PublicKey, StaticSecret};
     use base64::Engine as _;
     use base64::prelude::BASE64_STANDARD;
+    use gotatun_crypto::x25519::{PublicKey, StaticSecret};
     use hex::encode;
     use rand::{TryRngCore, rngs::OsRng};
     use std::fmt::Write as _;
