@@ -9,15 +9,13 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use std::net::IpAddr;
+use core::net::IpAddr;
 
 use bitfield_struct::bitfield;
 use either::Either;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
-use crate::packet::{
-    Decoder, Ipv4, Ipv4Decoder, Ipv4Header, Ipv4Options, Ipv6, Ipv6Decoder, Ipv6Header,
-};
+use crate::{Decoder, Ipv4, Ipv4Decoder, Ipv4Header, Ipv4Options, Ipv6, Ipv6Decoder, Ipv6Header};
 
 /// A packet bitfield-struct containing the `version`-field that is shared between IPv4 and IPv6.
 #[bitfield(u8)]
@@ -30,7 +28,7 @@ pub struct IpvxVersion {
 }
 
 /// An IP packet, including headers, that may be either IPv4 or IPv6.
-/// [Read more](crate::packet)
+/// [Read more](crate)
 #[repr(C, packed)]
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Ip {

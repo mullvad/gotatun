@@ -10,15 +10,15 @@
 // SPDX-License-Identifier: MPL-2.0
 
 #![deny(clippy::unwrap_used)]
-use std::fmt::{self, Debug};
-use std::mem::offset_of;
-use std::ops::Deref;
+use core::fmt::{self, Debug};
+use core::mem::offset_of;
+use core::ops::{Deref, DerefMut};
 
 use eyre::{bail, eyre};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, Unaligned, little_endian};
 
-use crate::packet::util::size_must_be;
-use crate::packet::{Packet, PoD};
+use crate::util::size_must_be;
+use crate::{Packet, PoD};
 
 #[derive(FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 #[repr(C, packed)]
@@ -267,7 +267,7 @@ impl Deref for WgDataAndTag {
     }
 }
 
-impl std::ops::DerefMut for WgDataAndTag {
+impl DerefMut for WgDataAndTag {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.as_mut_bytes()
     }
