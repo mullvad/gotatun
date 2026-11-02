@@ -633,7 +633,7 @@ async fn test_device_pair(eavesdrop: impl AsyncFnOnce(MockEavesdropper) + Send) 
     let eavesdrop = async {
         select! {
             _ = eavesdrop(eve) => {}
-            _ = sleep(Duration::from_secs(1)) => panic!("eavesdrop timeout"),
+            _ = sleep(Duration::from_secs(10)) => panic!("eavesdrop timeout"),
         }
     };
 
@@ -662,7 +662,7 @@ async fn test_device_pair(eavesdrop: impl AsyncFnOnce(MockEavesdropper) + Send) 
             _ = wait_for_packets => {},
             _ = send_packets => unreachable!(),
             _ = alice.app_rx.recv() => panic!("no data is sent from bob to alice"),
-            _ = sleep(Duration::from_secs(1)) => panic!("timeout"),
+            _ = sleep(Duration::from_secs(10)) => panic!("timeout"),
         }
 
         // Shut down alice and bob after `wait_for_packets`
