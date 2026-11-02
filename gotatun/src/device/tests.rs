@@ -86,7 +86,7 @@ async fn one_keepalive() {
     .await
 }
 
-/// Assert that all WgData packets lenghts are a multiple of 16.
+/// Assert that all WgData packets lengths are a multiple of 16.
 #[tokio::test]
 #[test_log::test]
 async fn wg_data_length_is_x16() {

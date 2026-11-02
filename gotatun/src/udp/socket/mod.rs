@@ -303,7 +303,7 @@ mod tests {
             std::mem::forget(socket2); // Don't close the socket
         }
 
-        // Bind two new sockets for receving packets from `dual_sock`
+        // Bind two new sockets for receiving packets from `dual_sock`
         let bind = async |addr: IpAddr| tokio::net::UdpSocket::bind((addr, 0)).await.unwrap();
         let v4 = bind(Ipv4Addr::LOCALHOST.into()).await;
         let v6 = bind(Ipv6Addr::LOCALHOST.into()).await;
