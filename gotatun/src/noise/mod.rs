@@ -696,7 +696,7 @@ mod tests {
     }
 
     #[test]
-    // Verify that a valid hanshake is accepted by two linked peers when rate limiting is not
+    // Verify that a valid handshake is accepted by two linked peers when rate limiting is not
     // applied.
     fn verify_handshake() {
         let (mut my_tun, mut their_tun) = create_two_tuns();
@@ -759,7 +759,7 @@ mod tests {
     }
 
     #[test]
-    // Verify that an invalid hanshake is rejected by both linked peers.
+    // Verify that an invalid handshake is rejected by both linked peers.
     fn reject_handshake() {
         let (mut my_tun, mut their_tun) = create_two_tuns();
         let mut init = create_handshake_init(&mut my_tun);

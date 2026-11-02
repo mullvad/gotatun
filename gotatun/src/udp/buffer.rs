@@ -49,7 +49,7 @@ impl BufferedUdpSend {
             let mut send_many_buf = Default::default();
 
             loop {
-                // use seperate channels because we musn't call `send_many_to` with mixed IPv4/IPv6.
+                // use separate channels because we musn't call `send_many_to` with mixed IPv4/IPv6.
                 let (count, buf) = select! {
                     // recv_many is cancel-safe
                     n = send_rx_v4.recv_many(&mut buf_v4, max_packet_count).fuse() => (n, &mut buf_v4),

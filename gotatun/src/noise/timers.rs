@@ -293,7 +293,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
 
         for (i, t) in timers.session_timers.iter_mut().enumerate() {
             if time_now - *t > REJECT_AFTER_TIME {
-                // Forget about expired sesssions
+                // Forget about expired sessions
                 if let Some(session) = self.sessions[i].take() {
                     tracing::trace!(
                         "SESSION_EXPIRED(REJECT_AFTER_TIME): {}",

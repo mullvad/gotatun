@@ -30,7 +30,7 @@
 //! use zerocopy::FromBytes;
 //! use std::net::Ipv4Addr;
 //!
-//! // Decode the `&[u8]` to an &Ipv4, while validaing the checksum, and IP header fields.
+//! // Decode the `&[u8]` to an &Ipv4, while validating the checksum, and IP header fields.
 //! // Note that this doesn't validate anything about the ICMP payload.
 //! let packet: &mut Ipv4<[u8]> = Ipv4Decoder::CHECK_ALL.decode_mut(example_ipv4_icmp)
 //!     .expect("Is a valid IPv4 packet");

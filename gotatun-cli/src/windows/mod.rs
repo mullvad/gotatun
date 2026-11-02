@@ -111,7 +111,7 @@ async fn setup_device(args: &Args) -> eyre::Result<Device<DefaultDeviceTransport
     let dev = DeviceBuilder::new()
         .with_uapi(uapi)
         .with_default_udp()
-        // Use 7MB socket buffers. Empirically this seems to be more perfomant than the default OS
+        // Use 7MB socket buffers. Empirically this seems to be more performant than the default OS
         // socket buffer sizes.
         .udp_recv_buffer_size(7 * 1024 * 1024)
         .udp_send_buffer_size(7 * 1024 * 1024)
