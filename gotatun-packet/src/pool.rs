@@ -16,7 +16,6 @@ use std::collections::VecDeque;
 use crate::Packet;
 
 /// A thread-local pool of packet buffers.
-#[derive(Clone)]
 pub struct PacketBufPool<const N: usize = 4096> {
     queue: VecDeque<BytesMut>,
     capacity: usize,

@@ -293,7 +293,7 @@ mod gro {
             let recv_addr = receiver.local_addr().unwrap();
             let sender_addr = sender.local_addr().unwrap();
 
-            let send_pool = PacketBufPool::<4096>::new(1);
+            let mut send_pool = PacketBufPool::<4096>::new(1);
             let mut packet = send_pool.get();
             packet.truncate(5);
             packet.copy_from_slice(b"hello");

@@ -186,8 +186,6 @@ impl<T: DeviceTransports> Connection<T> {
             return Ok(());
         }
 
-        let pool = PacketBufPool::new_lazy(MAX_PACKET_BUFS);
-
         // clean up existing connection
         if let Some(conn) = device.connection.take() {
             conn.stop().await;
@@ -202,7 +200,7 @@ impl<T: DeviceTransports> Connection<T> {
 
         let (buffered_ip_tx, buffered_ip_rx) = crate::tun::buffer::channel(
             MAX_PACKET_BUFS,
-            pool.clone(),
+            PacketBufPool::new_lazy(MAX_PACKET_BUFS),
             Arc::clone(&device.tun_tx),
             Arc::clone(&device.tun_rx),
         )
@@ -210,14 +208,18 @@ impl<T: DeviceTransports> Connection<T> {
 
         let buffered_udp_tx = BufferedUdpSend::new(MAX_PACKET_BUFS, udp_tx.clone());
 
-        let buffered_udp_rx = BufferedUdpReceive::new(MAX_PACKET_BUFS, udp_rx, pool.clone());
+        let buffered_udp_rx = BufferedUdpReceive::new(
+            MAX_PACKET_BUFS,
+            udp_rx,
+            PacketBufPool::new_lazy(MAX_PACKET_BUFS),
+        );
 
         // Start DAITA/hooks tasks
         #[cfg(feature = "daita")]
         for peer_arc in device.peers.values() {
             PeerState::maybe_start_daita(
                 peer_arc,
-                pool.clone(),
+                PacketBufPool::new_lazy(MAX_PACKET_BUFS),
                 device.tun_rx_mtu.clone(),
                 buffered_udp_tx.clone(),
             )
@@ -242,7 +244,7 @@ impl<T: DeviceTransports> Connection<T> {
                 Arc::downgrade(&device_arc),
                 buffered_ip_rx,
                 buffered_udp_tx.clone(),
-                pool.clone(),
+                PacketBufPool::new_lazy(MAX_PACKET_BUFS),
             )
             .map_err(register_fatal_error.clone()),
         );
@@ -257,7 +259,7 @@ impl<T: DeviceTransports> Connection<T> {
                 buffered_ip_tx.clone(),
                 buffered_udp_tx,
                 buffered_udp_rx,
-                pool.clone(),
+                PacketBufPool::new_lazy(MAX_PACKET_BUFS),
             )
             .map_err(register_fatal_error.clone()),
         );

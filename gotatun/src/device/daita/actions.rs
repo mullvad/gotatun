@@ -228,7 +228,7 @@ where
     }
 
     pub(crate) fn encapsulate_decoy(
-        &self,
+        &mut self,
         peer: &mut tokio::sync::OwnedMutexGuard<PeerState>,
         mtu: u16,
     ) -> Result<Packet<WgData>> {
@@ -241,7 +241,7 @@ where
             .map_err(|_| ErrorAction::Ignore(IgnoreReason::NoSession))
     }
 
-    pub(crate) fn create_decoy_packet(&self, mtu: u16) -> Packet {
+    pub(crate) fn create_decoy_packet(&mut self, mtu: u16) -> Packet {
         let decoy_packet_header = DecoyHeader::new(mtu.into());
         let mut decoy_packet_buf = self.packet_pool.get();
         decoy_packet_buf.buf_mut().clear();
