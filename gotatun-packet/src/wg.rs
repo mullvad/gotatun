@@ -12,7 +12,7 @@
 #![deny(clippy::unwrap_used)]
 use core::fmt::{self, Debug};
 use core::mem::offset_of;
-use core::ops::Deref;
+use core::ops::{Deref, DerefMut};
 
 use eyre::{bail, eyre};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, Unaligned, little_endian};
@@ -267,7 +267,7 @@ impl Deref for WgDataAndTag {
     }
 }
 
-impl std::ops::DerefMut for WgDataAndTag {
+impl DerefMut for WgDataAndTag {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.as_mut_bytes()
     }

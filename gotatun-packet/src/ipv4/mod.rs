@@ -10,7 +10,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use bitfield_struct::bitfield;
-use core::{fmt::Debug, net::Ipv4Addr};
+use core::{fmt, net::Ipv4Addr};
 use duplicate::duplicate_item;
 use eyre::{bail, eyre};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
@@ -505,8 +505,8 @@ where
     }
 }
 
-impl Debug for Ipv4Header {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Ipv4Header {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Ipv4Header")
             .field("version", &self.version())
             .field("ihl", &self.ihl())

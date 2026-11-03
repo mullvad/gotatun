@@ -10,7 +10,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use bitfield_struct::bitfield;
-use core::{fmt::Debug, net::Ipv6Addr};
+use core::{fmt, net::Ipv6Addr};
 use duplicate::duplicate_item;
 use eyre::eyre;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
@@ -147,8 +147,8 @@ where
     }
 }
 
-impl Debug for Ipv6Header {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Ipv6Header {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Ipv6Header")
             .field("version", &self.version())
             .field("traffic_class", &self.traffic_class())

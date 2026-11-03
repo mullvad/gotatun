@@ -28,7 +28,7 @@
 //!
 //! use gotatun_packet::{Decoder, Ipv4, Ipv4Decoder, Ipv4Header, IpNextProtocol};
 //! use zerocopy::FromBytes;
-//! use std::net::Ipv4Addr;
+//! use core::net::Ipv4Addr;
 //!
 //! // Decode the `&[u8]` to an &Ipv4, while validating the checksum, and IP header fields.
 //! // Note that this doesn't validate anything about the ICMP payload.
@@ -52,7 +52,7 @@
 //! assert_eq!(&example_ipv4_icmp[20..][..12], b"Hello there!");
 //! ```
 
-use std::{
+use core::{
     fmt::{self, Debug},
     marker::PhantomData,
     ops::{Deref, DerefMut},
@@ -95,7 +95,7 @@ pub use wg::*;
 ///
 /// ```
 /// use gotatun_packet::*;
-/// use std::net::Ipv4Addr;
+/// use core::net::Ipv4Addr;
 /// use zerocopy::IntoBytes;
 ///
 /// let ip_header = Ipv4Header::new(

@@ -10,10 +10,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use bytes::BytesMut;
-use std::{
-    collections::VecDeque,
-    sync::{Arc, Mutex},
-};
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 use crate::Packet;
 
@@ -138,7 +136,8 @@ impl Drop for ReturnToPool {
 
 #[cfg(test)]
 mod tests {
-    use std::{hint::black_box, thread};
+    use core::hint::black_box;
+    use std::thread;
 
     #[cfg(feature = "pool")]
     use std::sync::{Arc, Barrier};
