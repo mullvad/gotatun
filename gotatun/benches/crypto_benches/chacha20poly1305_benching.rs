@@ -14,7 +14,7 @@
 //! pure-Rust [`chacha20poly1305`] crate on the same workload, to track the
 //! gap between our production backend and a portable software fallback.
 
-use aead::{AeadInPlace, KeyInit};
+use aead::{AeadInOut, KeyInit, inout::InOutBuf};
 #[cfg(feature = "aws-lc-rs")]
 use aws_lc_rs::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use criterion::{BenchmarkId, Criterion, Throughput};
@@ -60,11 +60,12 @@ fn chacha20poly1305_pure_rust(key_bytes: &[u8], buf: &mut [u8]) {
     let aead = chacha20poly1305::ChaCha20Poly1305::new_from_slice(key_bytes).unwrap();
     let nonce = chacha20poly1305::Nonce::default();
 
+    let (buf_tag_input, buf_tag_output) = buf.split_at_mut_checked(n).unwrap();
+    let buf_tag_input = InOutBuf::from(buf_tag_input);
     let tag = aead
-        .encrypt_in_place_detached(&nonce, &[], &mut buf[..n])
+        .encrypt_inout_detached(&nonce, &[], buf_tag_input)
         .unwrap();
-
-    buf[n..].copy_from_slice(tag.as_ref());
+    buf_tag_output.copy_from_slice(tag.as_ref());
 }
 
 pub fn bench_chacha20poly1305(c: &mut Criterion) {

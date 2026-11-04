@@ -1,3 +1,4 @@
+use aead::consts::U16;
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -83,8 +84,8 @@ pub fn bench_blake2s_keyed(c: &mut Criterion) {
                     OsRng.try_fill_bytes(&mut key).unwrap();
                     key
                 },
-                |key| -> [u8; 16] {
-                    let mut hmac = Blake2sMac::new_from_slice(&key).unwrap();
+                |key: [u8; 16]| -> [u8; 16] {
+                    let mut hmac = Blake2sMac::<U16>::new_from_slice(&key).unwrap();
                     blake2::digest::Update::update(&mut hmac, &buf_in);
                     hmac.finalize_fixed().into()
                 },

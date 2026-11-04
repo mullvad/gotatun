@@ -15,6 +15,7 @@ use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
 use crate::noise::{TunnResult, WireGuardError};
 use crate::packet::{Packet, WgCookieReply, WgHandshakeBase, WgKind};
 
+use aead::inout::InOutBuf;
 use constant_time_eq::constant_time_eq;
 #[cfg(feature = "mock_instant")]
 use mock_instant::thread_local::Instant;
@@ -27,8 +28,7 @@ use std::time::Duration;
 #[cfg(not(feature = "mock_instant"))]
 use crate::sleepyinstant::Instant;
 
-use aead::generic_array::GenericArray;
-use aead::{AeadInPlace, KeyInit};
+use aead::{AeadInOut, KeyInit, Nonce};
 use chacha20poly1305::{Key, XChaCha20Poly1305};
 use parking_lot::Mutex;
 use rand::rngs::OsRng;
@@ -163,12 +163,11 @@ impl RateLimiter {
         wg_cookie_reply.nonce = self.nonce();
 
         let cipher = XChaCha20Poly1305::new(&self.cookie_key);
-
-        let iv = GenericArray::from_slice(&wg_cookie_reply.nonce);
-
+        let iv = Nonce::<XChaCha20Poly1305>::try_from(wg_cookie_reply.nonce.as_slice()).unwrap();
         wg_cookie_reply.encrypted_cookie.encrypted = cookie;
+        let buffer = InOutBuf::from(wg_cookie_reply.encrypted_cookie.encrypted.as_mut_slice());
         let tag = cipher
-            .encrypt_in_place_detached(iv, mac1, &mut wg_cookie_reply.encrypted_cookie.encrypted)
+            .encrypt_inout_detached(&iv, mac1, buffer)
             .expect("wg_cookie_reply is large enough");
 
         wg_cookie_reply.encrypted_cookie.tag = tag.into();
