@@ -9,11 +9,11 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use std::fmt;
+use core::fmt;
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned, big_endian};
 
-use crate::packet::{DecodeError, Decoder};
+use crate::{DecodeError, Decoder};
 
 use super::util::size_must_be;
 
@@ -21,7 +21,7 @@ use super::util::size_must_be;
 ///
 /// This is a dynamically sized zerocopy type, which means you can compose packet types like
 /// `Ipv6<Udp<WgData>>` and cast them to/from byte slices using [`FromBytes`] and [`IntoBytes`].
-/// [Read more](crate::packet)
+/// [Read more](crate)
 #[repr(C)]
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Unaligned, Immutable)]
 pub struct Udp<Payload: ?Sized = [u8]> {

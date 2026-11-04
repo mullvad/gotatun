@@ -814,7 +814,6 @@ dependencies = [
  "aead",
  "aws-lc-rs",
  "base64",
- "bitfield-struct",
  "blake2",
  "bytes",
  "chacha20poly1305",
@@ -825,6 +824,8 @@ dependencies = [
  "etherparse",
  "eyre",
  "futures",
+ "gotatun",
+ "gotatun-packet",
  "hex",
  "hmac",
  "ip_network",
@@ -871,6 +872,19 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "gotatun-packet"
+version = "0.1.0"
+dependencies = [
+ "bitfield-struct",
+ "bytes",
+ "duplicate",
+ "either",
+ "eyre",
+ "thiserror 1.0.69",
+ "zerocopy",
 ]
 
 [[package]]

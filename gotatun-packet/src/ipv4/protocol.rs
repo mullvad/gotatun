@@ -10,7 +10,7 @@
 // SPDX-License-Identifier: MPL-2.0
 #![allow(clippy::doc_markdown)]
 
-use std::fmt::Debug;
+use core::fmt;
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
@@ -456,8 +456,8 @@ impl IpNextProtocol {
     pub const Rohc: IpNextProtocol = IpNextProtocol(142);
 }
 
-impl Debug for IpNextProtocol {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for IpNextProtocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match *self {
             IpNextProtocol::Hopopt => "Hopopt",
             IpNextProtocol::Icmp => "Icmp",
