@@ -36,12 +36,5 @@ pub(crate) mod serialization;
 /// Re-export `gotatun-packet` types
 pub use gotatun_packet as packet;
 
-/// Re-export `gotatun-crypto` types
-pub mod crypto {
-    pub use gotatun_crypto::*;
-}
-
 /// Re-export of the x25519 types
-pub mod x25519 {
-    pub use gotatun_crypto::x25519::*;
-}
+pub use gotatun_crypto::x25519;
