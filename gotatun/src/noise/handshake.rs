@@ -196,7 +196,13 @@ impl TimeStamper {
 
     /// Take time reading and generate a 12 byte timestamp
     pub fn stamp(&self) -> [u8; 12] {
-        const TAI64_BASE: u64 = (1u64 << 62) + 37;
+        // The TAI64 label for Unix time `t` is `2^62 + 10 + t` (TAI was 10 s
+        // ahead of UTC at the Unix epoch). The kernel module and wireguard-go
+        // use exactly that; `+ 37` (today's TAI-UTC offset) stamped 27 s
+        // ahead, so after switching an initiator from this implementation
+        // to the kernel or Go one with the same key, the responder rejected
+        // the new, lower timestamps as replays for 27 s.
+        const TAI64_BASE: u64 = (1u64 << 62) + 10;
         let mut ext_stamp = [0u8; 12];
         let stamp = Instant::now().duration_since(self.instant_at_start) + self.duration_at_start;
         ext_stamp[0..8].copy_from_slice(&(stamp.as_secs() + TAI64_BASE).to_be_bytes());
@@ -982,5 +988,29 @@ mod tests {
 
         aead_chacha20_open(&mut [], &key, counter, &encrypted_nothing, &aad)
             .expect("Should open what we just sealed");
+    }
+
+    /// The kernel module and wireguard-go stamp handshakes with TAI64N base
+    /// `2^62 + 10` (Unix seconds + 10). A larger base makes the next
+    /// handshake from a kernel/Go initiator using the same key look like a
+    /// replay until the clocks catch up.
+    #[test]
+    fn timestamp_epoch_matches_kernel() {
+        const KERNEL_TAI64_BASE: u64 = 0x4000_0000_0000_000a;
+        let unix = || {
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        };
+        let before = unix();
+        let stamp = TimeStamper::new().stamp();
+        let after = unix();
+        let secs = u64::from_be_bytes(stamp[..8].try_into().unwrap());
+        let decoded = secs.wrapping_sub(KERNEL_TAI64_BASE);
+        assert!(
+            (before..=after).contains(&decoded),
+            "stamp {secs:#x} decodes to Unix {decoded}, expected {before}..={after}"
+        );
     }
 }

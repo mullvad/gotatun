@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `gotatun-packet` module.
 - Add `gotatun-crypto` module.
 
+### Fixed
+- Use the TAI64N base `2^62 + 10` for handshake timestamps, as the kernel module and
+  wireguard-go do. The previous `2^62 + 37` ran 27 seconds ahead, so a responder that had
+  seen a GotaTun initiator rejected the next kernel or wireguard-go initiation with the
+  same key as a replay for up to 27 seconds.
+
 
 ## [0.10.2] - 2026-10-20
 ### Added
