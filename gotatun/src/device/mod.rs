@@ -48,8 +48,8 @@ use crate::task::Task;
 use crate::tun::{IpRecv, IpSend, MtuWatcher};
 use crate::udp::buffer::{BufferedUdpReceive, BufferedUdpSend};
 use crate::udp::{UdpRecv, UdpSend, UdpTransportFactory, UdpTransportFactoryParams};
-use crate::x25519;
 use allowed_ips::AllowedIps;
+use gotatun_crypto::x25519;
 use peer_state::{PeerState, PendingHandshake};
 
 #[cfg(feature = "tun")]
