@@ -156,6 +156,33 @@ jobs:
       - name: Run clippy
         run: cargo clippy --locked --workspace --all-targets --all-features
 
+  clippy-ricv:
+    name: Clippy (RISC-V)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install RISC-V toolchain
+        run: sudo apt install gcc-riscv64-linux-gnu g++-riscv64-linux-gnu libc6-dev-riscv64-cross
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+          target: riscv64gc-unknown-linux-gnu
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run clippy
+        run: cargo clippy --locked --workspace --target riscv64gc-unknown-linux-gnu --all-features
+
   clippy-android:
     name: Clippy (Android)
     runs-on: ubuntu-latest
@@ -202,7 +229,7 @@ jobs:
     name: Test
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest, ubuntu-24.04-riscv]
         features:
           - ""
           - "--no-default-features --features ring"
