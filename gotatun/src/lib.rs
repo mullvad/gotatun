@@ -35,9 +35,7 @@ pub(crate) mod sleepyinstant;
 pub(crate) mod serialization;
 
 /// Re-export `gotatun-packet` types
-pub mod packet {
-    pub use gotatun_packet::*;
-}
+pub use gotatun_packet as packet;
 
 /// Re-export of the x25519 types
 pub mod x25519 {
