@@ -24,7 +24,7 @@ pub mod rate_limiter;
 mod session;
 mod timers;
 
-use rand::{RngCore, SeedableRng, rngs::StdRng};
+use rand::rngs::StdRng;
 use zerocopy::IntoBytes;
 
 use crate::noise::errors::WireGuardError;
@@ -66,7 +66,7 @@ impl From<WireGuardError> for TunnResult {
 }
 
 /// Tunnel represents a point-to-point WireGuard connection.
-pub struct Tunn<R: RngCore + Send = StdRng> {
+pub struct Tunn<R: rand::Rng + Send = StdRng> {
     /// The handshake currently in progress.
     handshake: handshake::Handshake,
     /// The [`N_SESSIONS`] most recent sessions.
@@ -105,12 +105,12 @@ impl Tunn<StdRng> {
             persistent_keepalive,
             index_table,
             rate_limiter,
-            StdRng::from_os_rng(),
+            rand::make_rng(),
         )
     }
 }
 
-impl<R: RngCore + Send> Tunn<R> {
+impl<R: rand::Rng + Send> Tunn<R> {
     /// Create a new tunnel using own private key and the peer public key.
     pub fn new_with_rng(
         static_private: x25519::StaticSecret,

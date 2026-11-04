@@ -20,7 +20,8 @@ mod tests {
     use base64::Engine as _;
     use base64::prelude::BASE64_STANDARD;
     use hex::encode;
-    use rand::{TryRngCore, rngs::OsRng};
+    use rand::TryRng;
+    use rand::rngs::SysRng;
     use std::fmt::Write as _;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -484,7 +485,7 @@ mod tests {
     fn temp_path() -> String {
         let mut path = String::from("/tmp/");
         let mut buf = [0u8; 32];
-        OsRng.try_fill_bytes(&mut buf).unwrap();
+        SysRng.try_fill_bytes(&mut buf).unwrap();
         path.push_str(&encode(buf));
         path
     }

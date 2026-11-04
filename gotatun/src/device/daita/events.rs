@@ -12,7 +12,7 @@
 use super::types::{self, MachineTimer, MachineTimers};
 use futures::FutureExt;
 use maybenot::{Framework, Machine, MachineId, TriggerAction, TriggerEvent};
-use rand::RngCore;
+use rand::Rng;
 use tokio::{sync::mpsc, time::Instant};
 
 pub async fn handle_events<M, R>(
@@ -23,7 +23,7 @@ pub async fn handle_events<M, R>(
 ) -> Option<()>
 where
     M: AsRef<[Machine]> + Send + 'static,
-    R: RngCore,
+    R: Rng,
 {
     let mut machine_timers = MachineTimers::new(maybenot.num_machines() * 2);
     let mut event_buf = Vec::new();
