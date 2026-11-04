@@ -196,7 +196,8 @@ impl TimeStamper {
 
     /// Take time reading and generate a 12 byte timestamp
     pub fn stamp(&self) -> [u8; 12] {
-        const TAI64_BASE: u64 = (1u64 << 62) + 37;
+        // https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireguard/noise.c#n512
+        const TAI64_BASE: u64 = 0x4000_0000_0000_000a;
         let mut ext_stamp = [0u8; 12];
         let stamp = Instant::now().duration_since(self.instant_at_start) + self.duration_at_start;
         ext_stamp[0..8].copy_from_slice(&(stamp.as_secs() + TAI64_BASE).to_be_bytes());

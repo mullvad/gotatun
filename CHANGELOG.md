@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Fix `AtomicU64` build errors on targets without native 64-bit atomics,
   such as MIPS32.
+- Use the TAI64N base `2^62 + 10` for handshake timestamps. The previous `2^62 + 37` ran 27 seconds
+  ahead, so a responder that had seen a GotaTun handshake rejected the next kernel or wireguard-go
+  initiation with the same key as a replay for up to 27 seconds.
 
 
 ## [0.10.2] - 2026-10-20
