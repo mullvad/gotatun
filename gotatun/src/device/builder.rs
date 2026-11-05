@@ -17,7 +17,7 @@ use x25519_dalek::StaticSecret;
 use crate::device::Error;
 use crate::noise::index_table::IndexTable;
 #[cfg(feature = "tun")]
-use crate::tun::tun_async_device::TunDevice;
+use crate::tun::tun_async_device::{TunDevice, TunDeviceRx, TunDeviceTx};
 use crate::{
     device::{Device, DeviceState, allowed_ips::AllowedIps, peer::Peer, uapi::UapiServer},
     task::Task,
@@ -140,21 +140,21 @@ impl<X> DeviceBuilder<X, Nul, Nul> {
     ///
     /// # Warning
     ///
-    /// If this is used on Windows, you are recommended to enable the `verify_binary_signature`
-    /// feature for the `tun` crate. By default, `tun` will load `wintun.dll` using the
+    /// If this is used on Windows, `tun-rs` will load `wintun.dll` using the
     /// [default search order], which includes the `PATH` environment variable.
     ///
-    /// The recommended way is to use [`Self::with_ip`] and pass an absolute path to `wintun.dll`
-    /// to the `tun` config.
+    /// The recommended way is to use [`Self::with_ip`] with a [`TunDevice`] created via
+    /// [`TunDevice::from_name_with_wintun_path`].
     ///
     /// [default search order]: <https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order>
     #[cfg(feature = "tun")]
     pub fn create_tun(
         self,
         tun_name: &str,
-    ) -> Result<DeviceBuilder<X, TunDevice, TunDevice>, Error> {
+    ) -> Result<DeviceBuilder<X, TunDeviceTx, TunDeviceRx>, Error> {
         let tun = TunDevice::from_name(tun_name)?;
-        Ok(self.with_ip(tun))
+        let (tun_tx, tun_rx) = tun.split();
+        Ok(self.with_ip_pair(tun_tx, tun_rx))
     }
 
     /// Set the channel where the device will read and write IP packets.

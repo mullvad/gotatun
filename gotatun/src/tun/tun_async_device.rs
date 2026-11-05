@@ -9,7 +9,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-//! Implementations of [`IpSend`] and [`IpRecv`] for the [`tun`] crate.
+//! Implementations of [`IpSend`] and [`IpRecv`] for the [`tun_rs`] crate.
 
 use tokio::{sync::watch, time::sleep};
 use tun_rs::AsyncDevice;
@@ -21,6 +21,17 @@ use crate::{
 };
 
 use std::{convert::Infallible, io, sync::Arc, time::Duration};
+
+/// Fallback interface MTU used when querying the MTU fails.
+#[cfg(target_os = "linux")]
+const DEFAULT_TUN_MTU: u16 = 1500;
+
+/// Headroom added on top of the interface MTU when sizing TUN packet buffers.
+///
+/// Each GSO segment produced by [`tun_rs`] repeats the IP and transport headers of the
+/// original packet, which may make a segment slightly larger than the MTU.
+#[cfg(target_os = "linux")]
+const GRO_SEGMENT_HEADROOM: usize = 128;
 
 /// Error from [`TunDevice`].
 #[derive(Debug, thiserror::Error)]
@@ -62,9 +73,9 @@ struct RxState {
 #[cfg(target_os = "linux")]
 struct TxState {
     gro_table: tun_rs::GROTable,
-    // each buffer reserves the first TX_OFFSET bytes for the virtio header
-    // and has room for one MTU-sized packet after it
-    bufs: Vec<Vec<u8>>, // BATCH buffers, each len TX_OFFSET + MTU
+    /// Batch buffers, each with room for the virtio header followed by one MTU-sized packet.
+    /// GRO coalescing may grow a buffer beyond this; tun-rs then reallocates it.
+    bufs: Vec<Vec<u8>>,
 }
 
 struct TunDeviceState {
@@ -76,7 +87,6 @@ struct TunDeviceState {
 
 pub struct TunDeviceTx {
     tun: Arc<AsyncDevice>,
-    state: Arc<TunDeviceState>,
     #[cfg(target_os = "linux")]
     tx_state: TxState,
 }
@@ -89,27 +99,31 @@ pub struct TunDeviceRx {
 }
 
 impl TunDevice {
-    // Split TunDevice into a read and a write half.
+    /// Split TunDevice into a read and a write half.
     pub fn split(self) -> (TunDeviceTx, TunDeviceRx) {
+        #[cfg(target_os = "linux")]
+        // Packets are at most MTU-sized, but each GSO segment repeats the IP (and possibly
+        // extension/transport) headers of the original packet.
+        let buf_size = tun_rs::VIRTIO_NET_HDR_LEN
+            + usize::from(self.tun.mtu().unwrap_or(DEFAULT_TUN_MTU))
+            + GRO_SEGMENT_HEADROOM;
+
         #[cfg(target_os = "linux")]
         let tx_state = TxState {
             gro_table: tun_rs::GROTable::default(),
-            // BATCH buffers, each sized to hold the virtio header + one MTU packet,
-            // pre-zeroed (ZEROED_BUFFER pattern) so uninitialized regions are clean.
-            bufs: vec![vec![0u8; tun_rs::VIRTIO_NET_HDR_LEN + 1500]; tun_rs::IDEAL_BATCH_SIZE],
+            bufs: vec![vec![0u8; buf_size]; tun_rs::IDEAL_BATCH_SIZE],
         };
 
         #[cfg(target_os = "linux")]
         let rx_state = RxState {
             original_buffer: vec![0u8; tun_rs::VIRTIO_NET_HDR_LEN + 65535],
-            bufs: vec![vec![0u8; 1500]; tun_rs::IDEAL_BATCH_SIZE],
+            bufs: vec![vec![0u8; buf_size]; tun_rs::IDEAL_BATCH_SIZE],
             sizes: vec![0; tun_rs::IDEAL_BATCH_SIZE],
         };
 
         (
             TunDeviceTx {
                 tun: Arc::clone(&self.tun),
-                state: Arc::clone(&self.state),
                 #[cfg(target_os = "linux")]
                 tx_state,
             },
@@ -125,9 +139,8 @@ impl TunDevice {
     ///
     /// # Warning
     ///
-    /// If this is used on Windows, you are recommended to enable the `verify_binary_signature`
-    /// feature for the `tun` crate. By default, `tun` will load `wintun.dll` using the
-    /// [default search order], which includes the `PATH` environment variable.
+    /// On Windows, `tun-rs` will load `wintun.dll` using the [default search order],
+    /// which includes the `PATH` environment variable.
     ///
     /// [default search order]: <https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order>
     pub fn from_name(name: &str) -> Result<Self, Error> {
@@ -147,8 +160,8 @@ impl TunDevice {
         #[cfg(target_os = "linux")]
         let tun_config = tun_config.multi_queue(true);
 
-        // TODO: for wintun, must set path or enable signature check
-        // we should upstream to `tun`
+        // TODO: for wintun, consider using `from_name_with_wintun_path` or setting an explicit
+        // path via `DeviceBuilder::wintun_file` to avoid relying on the DLL search order.
         let tun = tun_config.build_async().map_err(Error::OpenTun)?;
         let tun = TunDevice::from_tun_device(tun)?;
         Ok(tun)
@@ -162,12 +175,10 @@ impl TunDevice {
         name: &str,
         wintun_path: &std::path::Path,
     ) -> Result<Self, Error> {
-        let mut tun_config = tun::Configuration::default();
-        tun_config.tun_name(name);
-        tun_config.platform_config(|p| {
-            p.wintun_file(wintun_path.as_os_str());
-        });
-        let tun = tun::create_as_async(&tun_config).map_err(Error::OpenTun)?;
+        let tun_config = tun_rs::DeviceBuilder::new()
+            .name(name)
+            .wintun_file(wintun_path.to_string_lossy().into_owned());
+        let tun = tun_config.build_async().map_err(Error::OpenTun)?;
         TunDevice::from_tun_device(tun)
     }
 
@@ -254,19 +265,20 @@ impl IpSend for TunDeviceTx {
             gro_table, bufs, ..
         } = &mut self.tx_state;
 
-        let n = packets.len();
-        for (i, packet) in packets.into_iter().enumerate() {
-            let buf = &mut bufs[i];
-            let bytes = packet.as_bytes();
-            // TODO: Get rid of resize
-            buf.resize(offset + bytes.len(), 0);
-            buf[offset..offset + bytes.len()].copy_from_slice(bytes);
-        }
+        // Send in chunks that fit within the pre-allocated buffers.
+        for chunk in packets.chunks(bufs.len()) {
+            for (i, packet) in chunk.iter().enumerate() {
+                let buf = &mut bufs[i];
+                let bytes = packet.as_bytes();
+                // TODO: Get rid of resize
+                buf.resize(offset + bytes.len(), 0);
+                buf[offset..offset + bytes.len()].copy_from_slice(bytes);
+            }
 
-        let _bytes_sent = self
-            .tun
-            .send_multiple(gro_table, &mut bufs[..n], offset)
-            .await?;
+            self.tun
+                .send_multiple(gro_table, &mut bufs[..chunk.len()], offset)
+                .await?;
+        }
         Ok(())
     }
 }
@@ -297,13 +309,22 @@ impl IpRecv for TunDeviceRx {
             let packet_size = sizes[i];
             let raw_packet = &bufs[i][offset..offset + packet_size];
             let mut packet = pool.get();
+            if packet_size > packet.len() {
+                // The packet can't fit in a pooled buffer. This should never happen with a
+                // sane MTU; drop the packet instead of panicking.
+                tracing::warn!("Dropping oversized IP packet: {packet_size} bytes");
+                continue;
+            }
             packet.truncate(packet_size);
             // copy the segmented packet data in
             packet.copy_from_slice(raw_packet);
 
             match packet.try_into_ip() {
                 Ok(packet) => out.push(packet),
-                Err(e) => return Err(io::Error::other(e.to_string())),
+                Err(e) => {
+                    // A malformed packet must not make us drop the rest of the batch.
+                    tracing::warn!("Dropping malformed IP packet: {e}");
+                }
             }
         }
 

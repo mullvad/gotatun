@@ -24,6 +24,10 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+/// Upper bound on the size of a batch of packets handed to [`IpSend::send_many`].
+/// This is sized to fit the TUN send path's pre-allocated buffers.
+pub const SEND_BATCH_SIZE: usize = 12;
+
 /// Create a pair of [`BufferedIpSend`] and [`BufferedIpRecv`] with `capacity`.
 ///
 /// This takes an `Arc<Mutex<S>>` and `Arc<Mutex<R>>` because the inner `S` and `R` will be re-used
@@ -74,8 +78,8 @@ impl BufferedIpSend {
                 .expect("Deadlock on IpSend. There must be no more than one IpSend active at any given time.");
 
             loop {
-                let mut pkts = vec![];
-                let n = rx.recv_many(&mut pkts, 12).await;
+                let mut pkts = Vec::with_capacity(SEND_BATCH_SIZE);
+                let n = rx.recv_many(&mut pkts, SEND_BATCH_SIZE).await;
                 if n == 0 {
                     break; // no more packets on channel.
                 }
@@ -221,19 +225,6 @@ fn is_fatal_tun_error(err: &io::Error) -> bool {
         const ERROR_HANDLE_EOF: i32 = windows_sys::Win32::Foundation::ERROR_HANDLE_EOF as i32;
 
         if err.raw_os_error() == Some(ERROR_HANDLE_EOF) {
-            return true;
-        }
-
-        // TODO: Propagate the underlying error from tun/wintun-bindings and remove this
-        #[cfg(feature = "tun")]
-        if let Some(ERROR_HANDLE_EOF) = err
-            .get_ref()
-            .and_then(|e| e.downcast_ref::<wintun_bindings::Error>())
-            .and_then(|e| match e {
-                wintun_bindings::Error::Io(io_err) => io_err.raw_os_error(),
-                _ => None,
-            })
-        {
             return true;
         }
     }

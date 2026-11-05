@@ -105,6 +105,8 @@ async fn setup_device(args: &Args) -> eyre::Result<Device<DefaultDeviceTransport
     let tun_name = tun.name().context("Failed to get TUN device name")?;
     info!("Tunnel interface: {tun_name}");
 
+    let (tun_tx, tun_rx) = tun.split();
+
     let uapi =
         UapiServer::default_named_pipe(&tun_name).context("Failed to create UAPI named pipe")?;
 
@@ -115,7 +117,7 @@ async fn setup_device(args: &Args) -> eyre::Result<Device<DefaultDeviceTransport
         // socket buffer sizes.
         .udp_recv_buffer_size(7 * 1024 * 1024)
         .udp_send_buffer_size(7 * 1024 * 1024)
-        .with_ip(tun)
+        .with_ip_pair(tun_tx, tun_rx)
         .build()
         .await
         .context("Failed to start WireGuard device")?;

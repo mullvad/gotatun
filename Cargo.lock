@@ -903,7 +903,6 @@ dependencies = [
  "tun-rs",
  "typed-builder",
  "windows-sys 0.61.2",
- "wintun-bindings",
  "x25519-dalek",
  "zerocopy",
 ]
@@ -2573,18 +2572,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
 dependencies = [
  "cfg-if",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "wintun-bindings"
-version = "0.7.40"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4316764300a7eb4aecf4770c81ae629ff1161b54905d48721a6832fd296ce5f"
-dependencies = [
- "libloading",
- "log",
- "thiserror 2.0.20",
  "windows-sys 0.61.2",
 ]
 

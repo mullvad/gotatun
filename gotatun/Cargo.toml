@@ -88,7 +88,6 @@ windows-sys = {
     "Win32_System_Threading",
   ]
 }
-wintun-bindings = { workspace = true, default-features = false, optional = true }
 
 [target."cfg(unix)".dependencies]
 nix = {
@@ -121,7 +120,7 @@ pcap = ["dep:pcap-file"]
 # which would otherwise be compiled and linked unused.
 ring = ["gotatun-crypto/ring"]
 socket = ["dep:socket2", "tokio/net"]
-tun = ["dep:tun-rs", "dep:wintun-bindings"]
+tun = ["dep:tun-rs"]
 # UDP GRO appears to be broken on Windows.
 # In some cases it fails to return UDP_COALESCED_INFO
 windows-gro = []
