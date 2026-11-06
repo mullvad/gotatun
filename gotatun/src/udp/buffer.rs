@@ -180,6 +180,21 @@ impl UdpRecv for BufferedUdpReceive {
         };
         packet
     }
+
+    async fn recv_many_from(
+        &mut self,
+        _recv_buf: &mut Self::RecvManyBuf,
+        _pool: &mut PacketBufPool,
+        packets: &mut Vec<(Packet, SocketAddr)>,
+    ) -> io::Result<()> {
+        // Wait for the first packet.
+        packets.push(self.recv_from(_pool).await?);
+        // Then drain the packets that have already arrived, without waiting for more.
+        while let Ok(packet) = self.recv_rx.try_recv() {
+            packets.push(packet?);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(all(test, target_os = "linux"))]
