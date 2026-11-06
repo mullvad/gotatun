@@ -534,8 +534,12 @@ fn pad_to_x16(mut packet: Packet, tun_mtu: &mut MtuWatcher) -> Packet {
 mod tests {
     use std::net::{Ipv4Addr, SocketAddr};
 
+    use crate::Instant;
+    use crate::noise::timers::REJECT_AFTER_TIME;
     #[cfg(feature = "mock_instant")]
-    use crate::noise::timers::{MAX_JITTER, REKEY_AFTER_TIME, REKEY_TIMEOUT, TimerName};
+    use crate::noise::timers::{
+        KEEPALIVE_TIMEOUT, MAX_JITTER, REKEY_AFTER_TIME, REKEY_TIMEOUT, TimerName,
+    };
     use crate::packet::Ipv4;
 
     const HANDSHAKE_RATE_LIMIT: u64 = 100;
@@ -799,6 +803,194 @@ mod tests {
             matches!(result, TunnResult::WriteToNetwork(WgKind::Data(_))),
             "expected a keepalive after the handshake, got {result:?}"
         );
+    }
+
+    /// A freshly created tunnel has exactly one armed timer, the connection expiry, so that
+    /// is what [`Tunn::next_timer_deadline`] reports.
+    #[test]
+    fn next_timer_deadline_on_a_fresh_tunnel() {
+        let (my_tun, _their_tun) = create_two_tuns();
+
+        let wait = my_tun
+            .time_to_next_timer()
+            .expect("even a tunnel that never handshakes expires");
+        assert!(
+            wait <= REJECT_AFTER_TIME * 3 && wait > REJECT_AFTER_TIME * 3 - Duration::from_secs(5),
+            "expected the connection-expiry deadline, got {wait:?}"
+        );
+
+        // The instant and the duration describe the same moment.
+        let deadline = my_tun
+            .next_timer_deadline()
+            .expect("the same timer as above");
+        assert!(
+            deadline
+                .duration_since(Instant::now())
+                .abs_diff(wait)
+                .as_secs()
+                < 1
+        );
+    }
+
+    /// With a session established but no data moved, the session expiry is the earliest
+    /// timer: neither rekey timer is armed until the session carries traffic.
+    #[test]
+    fn next_timer_deadline_with_an_established_session() {
+        let (my_tun, _their_tun) = create_two_tuns_and_handshake();
+
+        let wait = my_tun
+            .time_to_next_timer()
+            .expect("an established session expires");
+        assert!(
+            wait <= REJECT_AFTER_TIME && wait > REJECT_AFTER_TIME - Duration::from_secs(5),
+            "expected the session-expiry deadline, got {wait:?}"
+        );
+    }
+
+    /// A timer that is already due reports a zero wait, never a future deadline.
+    #[test]
+    fn next_timer_deadline_is_zero_when_work_is_already_due() {
+        let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
+
+        // Arm the passive keepalive with a zero timeout, so that it comes due the moment a
+        // data packet arrives that we have not answered.
+        my_tun.dangerously_set_timer_params(TimerParams {
+            keepalive_timeout: Duration::ZERO..=Duration::ZERO,
+            ..TimerParams::default()
+        });
+        let data = their_tun
+            .handle_outgoing_packet(create_ipv4_udp_packet().into_bytes(), None)
+            .expect("session should encrypt the packet");
+        assert!(matches!(
+            my_tun.handle_incoming_packet(data),
+            TunnResult::WriteToTunnel(_)
+        ));
+
+        assert_eq!(my_tun.time_to_next_timer(), Some(Duration::ZERO));
+        assert!(matches!(
+            my_tun.update_timers(),
+            Ok(Some(WgKind::Data(packet))) if packet.is_keepalive()
+        ));
+    }
+
+    /// The deadline is never later than the first moment [`Tunn::update_timers`] produces
+    /// work: polling at every second before it finds nothing, and the deadline itself
+    /// yields the keepalive. This is the case a `sleep_until` caller relies on.
+    #[test]
+    #[cfg(feature = "mock_instant")]
+    fn next_timer_deadline_is_not_later_than_the_first_work() {
+        const INTERVAL: Duration = Duration::from_secs(25);
+        const STEP: Duration = Duration::from_secs(1);
+
+        MockClock::set_time(Duration::ZERO);
+        let (mut my_tun, _their_tun) = create_two_tuns_and_handshake();
+        my_tun.set_persistent_keepalive(Some(25));
+
+        // A newly configured interval is due at once.
+        assert_eq!(my_tun.time_to_next_timer(), Some(Duration::ZERO));
+        assert!(matches!(
+            my_tun.update_timers(),
+            Ok(Some(WgKind::Data(packet))) if packet.is_keepalive()
+        ));
+
+        let wait = my_tun
+            .time_to_next_timer()
+            .expect("a live tunnel always has a timer pending");
+        assert_eq!(wait, INTERVAL);
+
+        // Nothing to do at any point before the deadline, and the remaining time shrinks
+        // in step with the clock.
+        let mut waited = Duration::ZERO;
+        while waited + STEP < wait {
+            MockClock::advance(STEP);
+            waited += STEP;
+            assert!(
+                matches!(my_tun.update_timers(), Ok(None)),
+                "found work {waited:?} in, before the reported {wait:?} deadline"
+            );
+            assert_eq!(my_tun.time_to_next_timer(), Some(wait - waited));
+        }
+
+        // And work exactly at it.
+        MockClock::advance(wait - waited);
+        assert!(matches!(
+            my_tun.update_timers(),
+            Ok(Some(WgKind::Data(packet))) if packet.is_keepalive()
+        ));
+    }
+
+    /// The new-handshake-after-silence timer is reported, including its sampled jitter, and
+    /// nothing fires before it.
+    #[test]
+    #[cfg(feature = "mock_instant")]
+    fn next_timer_deadline_covers_the_new_handshake_timer() {
+        MockClock::set_time(Duration::ZERO);
+        let (mut my_tun, _their_tun) = create_two_tuns_and_handshake();
+
+        // Move `TimeCurrent` off the session timestamp, then send data, which arms the
+        // "sent a data packet and heard nothing back" timer.
+        MockClock::advance(Duration::from_secs(1));
+        assert!(matches!(my_tun.update_timers(), Ok(None)));
+        let _data = my_tun
+            .handle_outgoing_packet(create_ipv4_udp_packet().into_bytes(), None)
+            .expect("expected encapsulated packet");
+
+        let wait = my_tun
+            .time_to_next_timer()
+            .expect("the new-handshake timer is armed");
+        let base = KEEPALIVE_TIMEOUT + REKEY_TIMEOUT;
+        assert!(
+            (base..=base + MAX_JITTER).contains(&wait),
+            "expected the new-handshake deadline, got {wait:?}"
+        );
+
+        MockClock::advance(wait - Duration::from_millis(1));
+        assert!(matches!(my_tun.update_timers(), Ok(None)));
+        MockClock::advance(Duration::from_millis(1));
+        update_timer_results_in_handshake(&mut my_tun);
+
+        // With that initiation in flight, the retransmit timer takes over, and the
+        // keepalive timers are out of the picture until it is answered.
+        let wait = my_tun
+            .time_to_next_timer()
+            .expect("the retransmit timer is armed");
+        assert!(
+            (REKEY_TIMEOUT..=REKEY_TIMEOUT + MAX_JITTER).contains(&wait),
+            "expected the handshake-retransmit deadline, got {wait:?}"
+        );
+
+        MockClock::advance(wait - Duration::from_millis(1));
+        assert!(matches!(my_tun.update_timers(), Ok(None)));
+        MockClock::advance(Duration::from_millis(1));
+        update_timer_results_in_handshake(&mut my_tun);
+    }
+
+    /// An expired connection has no deadline: [`Tunn::update_timers`] repeats
+    /// [`WireGuardError::ConnectionExpired`] without changing anything, so a fixed-tick
+    /// poll learns nothing that a sleeping caller misses.
+    #[test]
+    #[cfg(feature = "mock_instant")]
+    fn next_timer_deadline_is_none_once_the_connection_expired() {
+        MockClock::set_time(Duration::ZERO);
+        let (mut my_tun, _their_tun) = create_two_tuns();
+
+        let wait = my_tun
+            .time_to_next_timer()
+            .expect("even a tunnel that never handshakes expires");
+        assert_eq!(wait, REJECT_AFTER_TIME * 3);
+
+        MockClock::advance(wait);
+        assert!(matches!(
+            my_tun.update_timers(),
+            Err(WireGuardError::ConnectionExpired)
+        ));
+
+        assert!(my_tun.next_timer_deadline().is_none());
+        assert!(my_tun.time_to_next_timer().is_none());
+        assert!(matches!(
+            my_tun.update_timers(),
+            Err(WireGuardError::ConnectionExpired)
+        ));
     }
 
     #[test]

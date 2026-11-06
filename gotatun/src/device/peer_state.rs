@@ -16,6 +16,7 @@ use std::net::SocketAddr;
 
 use tokio::sync::watch;
 
+use crate::Instant;
 use crate::device::AllowedIps;
 #[cfg(feature = "daita")]
 use crate::device::daita::{DaitaHooks, DaitaSettings};
@@ -136,6 +137,37 @@ impl PeerState {
 
     pub fn update_timers(&mut self) -> Result<Option<WgKind>, WireGuardError> {
         self.tunnel.update_timers()
+    }
+
+    /// The earliest instant at which [`Self::update_timers`] could next produce work for
+    /// this peer, or `None` if nothing is pending.
+    ///
+    /// See [`Tunn::next_timer_deadline`] for when the answer stops being valid, and for
+    /// what it does not cover. A device that waits on this instead of polling must also
+    /// keep driving the device-wide work that is not part of a peer's timers: the shared
+    /// [`RateLimiter::try_reset_count`](crate::noise::rate_limiter::RateLimiter::try_reset_count)
+    /// and the stale-index sweep.
+    // `PeerState` is crate-internal and `Device::handle_timers` still polls on a fixed
+    // tick, so nothing in the crate calls this yet. It is the peer-level mirror of
+    // `Tunn::next_timer_deadline`, kept beside `update_timers` for a deadline-driven
+    // device loop.
+    #[expect(
+        dead_code,
+        reason = "mirrors update_timers for a future deadline-driven loop"
+    )]
+    pub fn next_timer_deadline(&self) -> Option<Instant> {
+        self.tunnel.next_timer_deadline()
+    }
+
+    /// How long until [`Self::next_timer_deadline`], or `None` if nothing is pending.
+    ///
+    /// See [`Tunn::time_to_next_timer`].
+    #[expect(
+        dead_code,
+        reason = "mirrors update_timers for a future deadline-driven loop"
+    )]
+    pub fn time_to_next_timer(&self) -> Option<std::time::Duration> {
+        self.tunnel.time_to_next_timer()
     }
 
     /// Drop all sessions and reset the tunnel, forcing a fresh handshake.

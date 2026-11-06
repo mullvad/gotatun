@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Add `gotatun-packet` module.
 - Add `gotatun-crypto` module.
+- Add `Tunn::next_timer_deadline` and `Tunn::time_to_next_timer`, so that a caller driving
+  a `Tunn` by hand can sleep until the next WireGuard timer expires instead of polling
+  `update_timers` on a fixed tick. `PeerState` mirrors both. The clock they are measured
+  against is now public as `gotatun::Instant` (the `sleepyinstant` module), together with
+  `Instant::checked_add`.
 
 
 ## [0.10.2] - 2026-10-20
