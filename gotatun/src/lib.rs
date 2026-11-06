@@ -28,7 +28,24 @@ pub mod udp;
 mod task;
 
 #[cfg(not(feature = "mock_instant"))]
-pub(crate) mod sleepyinstant;
+pub mod sleepyinstant;
+
+/// The monotonic clock that the tunnel timers are measured against, and that
+/// [`noise::Tunn::next_timer_deadline`] returns deadlines on.
+///
+/// This is [`sleepyinstant::Instant`], which — unlike [`std::time::Instant`] — keeps running
+/// while the system is suspended. With the `mock_instant` feature it is instead
+/// `mock_instant`'s controllable clock, so that tests can drive the timers.
+#[cfg(not(feature = "mock_instant"))]
+pub use sleepyinstant::Instant;
+
+/// The monotonic clock that the tunnel timers are measured against, and that
+/// [`noise::Tunn::next_timer_deadline`] returns deadlines on.
+///
+/// The `mock_instant` feature replaces the real clock with `mock_instant`'s controllable one,
+/// so that tests can drive the timers.
+#[cfg(feature = "mock_instant")]
+pub use mock_instant::thread_local::Instant;
 
 #[cfg(feature = "device")]
 pub(crate) mod serialization;

@@ -75,6 +75,14 @@ impl Instant {
     pub fn elapsed(&self) -> Duration {
         Self::now().duration_since(*self)
     }
+
+    /// Returns `Some(t)` where `t` is the instant `duration` after `self`, or `None` if the
+    /// result is not representable by the underlying clock.
+    ///
+    /// Mirrors [`std::time::Instant::checked_add`].
+    pub fn checked_add(&self, duration: Duration) -> Option<Instant> {
+        self.t.checked_add(duration).map(|t| Instant { t })
+    }
 }
 
 #[cfg(test)]
@@ -87,5 +95,27 @@ mod tests {
         let start = Instant::now();
         std::thread::sleep(sleep_time);
         assert!(start.elapsed() >= sleep_time);
+    }
+
+    #[test]
+    fn checked_add_moves_the_instant_forward() {
+        let start = Instant::now();
+
+        assert_eq!(
+            start
+                .checked_add(Duration::ZERO)
+                .unwrap()
+                .duration_since(start),
+            Duration::ZERO
+        );
+
+        // A sub-second addition that carries into the seconds field for at least one of
+        // the two readings below, whatever the clock's current nanosecond offset is.
+        for nanos in [1, 500_000_000, 999_999_999] {
+            let added = Duration::new(7, nanos);
+            let later = start.checked_add(added).expect("representable");
+            assert_eq!(later.duration_since(start), added);
+            assert!(start.checked_duration_since(later).is_none());
+        }
     }
 }
