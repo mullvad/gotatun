@@ -18,7 +18,11 @@ use crate::{
 use bytes::{Buf, BytesMut};
 use gotatun_crypto::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(not(target_has_atomic = "64"))]
+use portable_atomic::AtomicU64;
+#[cfg(target_has_atomic = "64")]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use zerocopy::FromBytes;
 
 /// The maximum number of transport data messages that may be sent or received under a single

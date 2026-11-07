@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `gotatun-packet` module.
 - Add `gotatun-crypto` module.
 
+### Fixed
+- Fix `AtomicU64` build errors on targets without native 64-bit atomics,
+  such as MIPS32.
+
 
 ## [0.10.2] - 2026-10-20
 ### Added

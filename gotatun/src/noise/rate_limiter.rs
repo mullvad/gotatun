@@ -19,10 +19,14 @@ use constant_time_eq::constant_time_eq;
 use gotatun_crypto::x25519;
 #[cfg(feature = "mock_instant")]
 use mock_instant::thread_local::Instant;
+#[cfg(not(target_has_atomic = "64"))]
+use portable_atomic::AtomicU64;
 use rand::TryRngCore;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(target_has_atomic = "64")]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 #[cfg(not(feature = "mock_instant"))]
