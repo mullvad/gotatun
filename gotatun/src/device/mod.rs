@@ -749,7 +749,7 @@ impl<T: DeviceTransports> DeviceState<T> {
 
                     // TODO: does this end up with the packets being out-of-order?
                     let packets =
-                        std::iter::once(packet).chain(tunnel.get_queued_packets(&mut tun_mtu));
+                        std::iter::once(packet).chain(tunnel.get_queued_packets(tun_mtu.get()));
 
                     #[cfg(feature = "daita")]
                     let packets = packets.filter_map(|p| match daita {
@@ -883,7 +883,8 @@ impl<T: DeviceTransports> DeviceState<T> {
                 #[cfg(not(feature = "daita"))]
                 let packet = packet.into();
 
-                let Some(packet) = tunnel.handle_outgoing_packet(packet, Some(&mut tun_mtu)) else {
+                let Some(packet) = tunnel.handle_outgoing_packet(packet, Some(tun_mtu.get()))
+                else {
                     continue;
                 };
 

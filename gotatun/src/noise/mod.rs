@@ -35,7 +35,6 @@ use crate::noise::timers::{TimerName, Timers};
 
 pub use crate::noise::timers::TimerParams;
 use crate::packet::{Packet, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind};
-use crate::tun::MtuWatcher;
 use gotatun_crypto::x25519;
 
 use std::collections::VecDeque;
@@ -202,10 +201,10 @@ impl<R: RngCore + Send> Tunn<R> {
     pub fn handle_outgoing_packet(
         &mut self,
         mut packet: Packet,
-        tun_mtu: Option<&mut MtuWatcher>,
+        tun_mtu: Option<u16>,
     ) -> Option<WgKind> {
-        if let Some(tun_mtu) = tun_mtu {
-            packet = pad_to_x16(packet, tun_mtu);
+        if let Some(mtu) = tun_mtu {
+            packet = pad_to_x16(packet, mtu);
         }
 
         match self.encapsulate_with_session(packet) {
@@ -433,10 +432,10 @@ impl<R: RngCore + Send> Tunn<R> {
     }
 
     /// Encapsulate and return all queued packets.
-    pub fn get_queued_packets(&mut self, tun_mtu: &mut MtuWatcher) -> impl Iterator<Item = WgKind> {
-        std::iter::from_fn(|| {
+    pub fn get_queued_packets(&mut self, mtu: u16) -> impl Iterator<Item = WgKind> {
+        std::iter::from_fn(move || {
             self.dequeue_packet()
-                .and_then(|packet| self.handle_outgoing_packet(packet, Some(tun_mtu)))
+                .and_then(|packet| self.handle_outgoing_packet(packet, Some(mtu)))
         })
     }
 
@@ -506,14 +505,12 @@ impl<R: RngCore + Send> Tunn<R> {
 /// A literal interpretation would imply keeping track of the route MTU for each peer.
 /// Using the MTU from the TUN device instead is a simpler, more reasonable, approach.
 /// `wireguard-go` uses this same method.
-fn pad_to_x16(mut packet: Packet, tun_mtu: &mut MtuWatcher) -> Packet {
+fn pad_to_x16(mut packet: Packet, mtu: u16) -> Packet {
     if packet.len().is_multiple_of(16) {
         return packet;
     }
 
     let padded_packet_len = {
-        // Getting the MTU involves atomics. Don't do it until we need to.
-        let mtu = tun_mtu.get();
         let mtu = usize::from(mtu);
 
         if cfg!(debug_assertions) && packet.len() > mtu {
