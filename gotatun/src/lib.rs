@@ -21,14 +21,10 @@
 
 #[cfg(feature = "device")]
 pub mod device;
-pub mod noise;
 pub mod tun;
 pub mod udp;
 
 mod task;
-
-#[cfg(not(feature = "mock_instant"))]
-pub(crate) mod sleepyinstant;
 
 #[cfg(feature = "device")]
 pub(crate) mod serialization;
@@ -38,3 +34,6 @@ pub use gotatun_packet as packet;
 
 /// Re-export of the x25519 types
 pub use gotatun_crypto::x25519;
+
+/// Re-export `gotatun-noise` protocol.
+pub use gotatun_noise as noise;

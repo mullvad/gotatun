@@ -10,10 +10,9 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::noise::errors::WireGuardError;
-use crate::noise::index_table::{Index, IndexTable};
-use crate::noise::session::Session;
-use crate::packet::{Packet, WgCookieReply, WgHandshakeBase, WgHandshakeInit, WgHandshakeResp};
+use crate::errors::WireGuardError;
+use crate::index_table::{Index, IndexTable};
+use crate::session::Session;
 #[cfg(not(feature = "mock_instant"))]
 use crate::sleepyinstant::Instant;
 use aead::{Aead, Payload};
@@ -23,6 +22,7 @@ use chacha20poly1305::XChaCha20Poly1305;
 use constant_time_eq::constant_time_eq_n;
 use gotatun_crypto::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use gotatun_crypto::x25519;
+use gotatun_packet::{Packet, WgCookieReply, WgHandshakeBase, WgHandshakeInit, WgHandshakeResp};
 use std::convert::TryInto;
 use std::time::{Duration, SystemTime};
 use zerocopy::IntoBytes;
@@ -526,8 +526,8 @@ impl Handshake {
 
     pub(super) fn receive_handshake_initialization(
         &mut self,
-        packet: crate::packet::Packet<WgHandshakeInit>,
-    ) -> Result<(crate::packet::Packet<WgHandshakeResp>, Session), WireGuardError> {
+        packet: Packet<WgHandshakeInit>,
+    ) -> Result<(Packet<WgHandshakeResp>, Session), WireGuardError> {
         // initiator.chaining_key = HASH(CONSTRUCTION)
         let mut chaining_key = INITIAL_CHAIN_KEY;
         // initiator.hash = HASH(HASH(initiator.chaining_key || IDENTIFIER) || responder.static_public)
@@ -758,7 +758,7 @@ impl Handshake {
         self.cookies.last_mac1 = Some(*packet.mac1());
     }
 
-    pub(super) fn format_handshake_initiation(&mut self) -> crate::packet::Packet<WgHandshakeInit> {
+    pub(super) fn format_handshake_initiation(&mut self) -> Packet<WgHandshakeInit> {
         let mut handshake = WgHandshakeInit::new();
 
         let local_index = self.index_table.new_index();
@@ -839,10 +839,7 @@ impl Handshake {
         Packet::copy_from(&handshake)
     }
 
-    fn format_handshake_response(
-        &mut self,
-        buf: crate::packet::Packet,
-    ) -> (crate::packet::Packet<WgHandshakeResp>, Session) {
+    fn format_handshake_response(&mut self, buf: Packet) -> (Packet<WgHandshakeResp>, Session) {
         let state = std::mem::replace(&mut self.state, HandshakeState::None);
         let (mut chaining_key, mut hash, peer_ephemeral_public, peer_index) = match state {
             HandshakeState::InitReceived {

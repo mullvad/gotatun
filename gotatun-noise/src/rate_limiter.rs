@@ -10,10 +10,10 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use super::handshake::{b2s_hash, b2s_keyed_mac_16, b2s_keyed_mac_16_2, b2s_mac_24};
-use crate::noise::handshake::{LABEL_COOKIE, LABEL_MAC1};
-use crate::noise::{TunnResult, WireGuardError};
-use crate::packet::{Packet, WgCookieReply, WgHandshakeBase, WgKind};
+use crate::handshake::{LABEL_COOKIE, LABEL_MAC1};
+use crate::handshake::{b2s_hash, b2s_keyed_mac_16, b2s_keyed_mac_16_2, b2s_mac_24};
+use crate::{TunnResult, WireGuardError};
+use gotatun_packet::{Packet, WgCookieReply, WgHandshakeBase, WgKind};
 
 use constant_time_eq::constant_time_eq;
 use gotatun_crypto::x25519;

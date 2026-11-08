@@ -11,8 +11,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use super::errors::WireGuardError;
-use crate::noise::Tunn;
-use crate::packet::WgKind;
+use crate::Tunn;
+use gotatun_packet::WgKind;
 
 use std::ops::{Index, IndexMut, RangeInclusive};
 use std::time::Duration;
@@ -270,8 +270,7 @@ impl<R: rand::RngCore + Send> Tunn<R> {
         session_idx: usize,
     ) {
         self.timer_tick(TimeSessionEstablished);
-        self.timers.session_timers[session_idx % crate::noise::N_SESSIONS] =
-            self.timers[TimeCurrent];
+        self.timers.session_timers[session_idx % crate::N_SESSIONS] = self.timers[TimeCurrent];
         self.timers.is_initiator = is_initiator;
         self.timers.rekey_after_time = self.sample_timer(|p| &p.rekey_after_time);
     }
@@ -445,8 +444,10 @@ impl<R: rand::RngCore + Send> Tunn<R> {
         }
 
         if keepalive_required {
-            return Ok(self
-                .handle_outgoing_packet(crate::packet::Packet::from_bytes(BytesMut::new()), None));
+            return Ok(self.handle_outgoing_packet(
+                gotatun_packet::Packet::from_bytes(BytesMut::new()),
+                None,
+            ));
         }
 
         Ok(None)

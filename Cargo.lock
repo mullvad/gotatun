@@ -811,23 +811,18 @@ dependencies = [
 name = "gotatun"
 version = "0.10.2"
 dependencies = [
- "aead",
  "base64",
- "blake2",
  "bytes",
- "chacha20poly1305",
- "constant_time_eq",
  "criterion",
  "duplicate",
  "either",
- "etherparse",
  "eyre",
  "futures",
  "gotatun",
  "gotatun-crypto",
+ "gotatun-noise",
  "gotatun-packet",
  "hex",
- "hmac",
  "ip_network",
  "ip_network_table",
  "ipnetwork",
@@ -837,7 +832,6 @@ dependencies = [
  "nix",
  "parking_lot",
  "pcap-file",
- "portable-atomic",
  "rand",
  "rand_chacha",
  "rand_core 0.6.4",
@@ -887,6 +881,30 @@ dependencies = [
  "rand",
  "ring",
  "x25519-dalek",
+]
+
+[[package]]
+name = "gotatun-noise"
+version = "0.1.0"
+dependencies = [
+ "aead",
+ "blake2",
+ "bytes",
+ "chacha20poly1305",
+ "constant_time_eq",
+ "etherparse",
+ "gotatun-crypto",
+ "gotatun-packet",
+ "hmac",
+ "mock_instant",
+ "nix",
+ "parking_lot",
+ "portable-atomic",
+ "rand",
+ "rand_core 0.6.4",
+ "tracing",
+ "x25519-dalek",
+ "zerocopy",
 ]
 
 [[package]]

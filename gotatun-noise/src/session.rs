@@ -10,13 +10,12 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::{
-    noise::errors::WireGuardError,
-    noise::index_table::Index,
-    packet::{Packet, WgData, WgDataHeader, WgKind},
-};
+use crate::errors::WireGuardError;
+use crate::index_table::Index;
+
 use bytes::{Buf, BytesMut};
 use gotatun_crypto::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
+use gotatun_packet::{Packet, WgData, WgDataHeader, WgKind};
 use parking_lot::Mutex;
 #[cfg(not(target_has_atomic = "64"))]
 use portable_atomic::AtomicU64;
@@ -336,7 +335,7 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::noise::index_table::IndexTable;
+    use crate::index_table::IndexTable;
 
     /// Build a `Session` with throwaway keys and a real receiving index.
     fn test_session() -> Session {

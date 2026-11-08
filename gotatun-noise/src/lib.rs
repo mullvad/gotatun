@@ -22,20 +22,21 @@ pub mod index_table;
 pub mod rate_limiter;
 
 mod session;
+mod sleepyinstant;
 mod timers;
 
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use zerocopy::IntoBytes;
 
-use crate::noise::errors::WireGuardError;
-use crate::noise::handshake::Handshake;
-use crate::noise::index_table::IndexTable;
-use crate::noise::rate_limiter::RateLimiter;
-use crate::noise::timers::{TimerName, Timers};
+use crate::errors::WireGuardError;
+use crate::handshake::Handshake;
+use crate::index_table::IndexTable;
+use crate::rate_limiter::RateLimiter;
+use crate::timers::{TimerName, Timers};
 
-pub use crate::noise::timers::TimerParams;
-use crate::packet::{Packet, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind};
+pub use crate::timers::TimerParams;
 use gotatun_crypto::x25519;
+use gotatun_packet::{Packet, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind};
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -532,8 +533,8 @@ mod tests {
     use std::net::{Ipv4Addr, SocketAddr};
 
     #[cfg(feature = "mock_instant")]
-    use crate::noise::timers::{MAX_JITTER, REKEY_AFTER_TIME, REKEY_TIMEOUT, TimerName};
-    use crate::packet::Ipv4;
+    use crate::timers::{MAX_JITTER, REKEY_AFTER_TIME, REKEY_TIMEOUT, TimerName};
+    use gotatun_packet::Ipv4;
 
     const HANDSHAKE_RATE_LIMIT: u64 = 100;
 
