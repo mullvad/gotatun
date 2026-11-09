@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [0.10.3] - 2026-11-09
 ### Fixed
 - Fix `AtomicU64` build errors on targets without native 64-bit atomics,
   such as MIPS32.
