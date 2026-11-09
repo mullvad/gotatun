@@ -28,10 +28,10 @@ use crate::sleepyinstant::Instant;
 // Some constants, represent time in seconds
 // https://www.wireguard.com/papers/wireguard.pdf#page=14
 pub(crate) const REKEY_AFTER_TIME: Duration = Duration::from_secs(120);
-const REJECT_AFTER_TIME: Duration = Duration::from_secs(180);
+pub(crate) const REJECT_AFTER_TIME: Duration = Duration::from_secs(180);
 const REKEY_ATTEMPT_TIME: Duration = Duration::from_secs(90);
 pub(crate) const REKEY_TIMEOUT: Duration = Duration::from_secs(5);
-const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 const COOKIE_EXPIRATION_TIME: Duration = Duration::from_secs(120);
 pub(crate) const MAX_JITTER: Duration = Duration::from_millis(333);
 
@@ -191,8 +191,15 @@ impl Timers {
     /// This is guaranteed to be monotonic and no less than `self[TimeCurrent]`.
     /// It never panics.
     fn now(&self) -> Duration {
-        Instant::now()
-            .checked_duration_since(self.time_started)
+        self.elapsed_at(Instant::now())
+    }
+
+    /// [`Self::now`] for an already-taken clock reading.
+    ///
+    /// Exists so that a caller can derive both an elapsed time and an [`Instant`] from a
+    /// single reading, instead of two readings that disagree by the time between them.
+    fn elapsed_at(&self, now: Instant) -> Duration {
+        now.checked_duration_since(self.time_started)
             .unwrap_or(Duration::ZERO)
             .max(self[TimeCurrent])
     }
@@ -450,6 +457,176 @@ impl<R: rand::RngCore + Send> Tunn<R> {
         }
 
         Ok(None)
+    }
+
+    /// The earliest instant at which [`Self::update_timers`] could next produce work, or
+    /// `None` if nothing is pending.
+    ///
+    /// A caller that sleeps until this instant and then calls [`Self::update_timers`] sees
+    /// every timer the WireGuard state machine arms, without having to poll on a fixed tick.
+    /// Since [`Instant`] is not [`std::time::Instant`], convert it to a sleep duration with
+    /// [`Self::time_to_next_timer`], or with `deadline.duration_since(Instant::now())`.
+    ///
+    /// # Validity
+    ///
+    /// The deadline describes the tunnel as it is *right now*. Anything that touches the
+    /// tunnel — [`Self::handle_outgoing_packet`], [`Self::handle_incoming_packet`],
+    /// [`Self::update_timers`], [`Self::reset`], [`Self::set_persistent_keepalive`],
+    /// [`Self::dangerously_set_timer_params`] — can arm a timer and so move the deadline
+    /// earlier. Read it again after every such call, exactly as you would re-arm a timer.
+    ///
+    /// # What is not covered
+    ///
+    /// `update_timers` also calls [`RateLimiter::try_reset_count`], which clears the
+    /// per-source-IP handshake counters once a second. That is shared denial-of-service
+    /// accounting rather than tunnel work: it never changes what `update_timers` returns,
+    /// and the `device` layer already drives it on its own schedule (which is why it is
+    /// not folded into this deadline — a one-second cap would defeat the purpose). If you
+    /// drive a [`Tunn`] by hand *and* verify inbound handshakes with the same
+    /// [`RateLimiter`], keep calling [`try_reset_count`] on it yourself.
+    ///
+    /// [`RateLimiter`]: crate::noise::rate_limiter::RateLimiter
+    /// [`RateLimiter::try_reset_count`]: crate::noise::rate_limiter::RateLimiter::try_reset_count
+    /// [`try_reset_count`]: crate::noise::rate_limiter::RateLimiter::try_reset_count
+    pub fn next_timer_deadline(&self) -> Option<Instant> {
+        let now_instant = Instant::now();
+        let remaining =
+            self.time_to_next_timer_at(now_instant, self.timers.elapsed_at(now_instant))?;
+
+        // The addition only overflows for a deadline beyond the representable range of the
+        // clock, which no WireGuard timer can reach. Fall back to "now" rather than to
+        // `None`, so that the answer is never later than the work it describes.
+        Some(now_instant.checked_add(remaining).unwrap_or(now_instant))
+    }
+
+    /// How long until [`Self::next_timer_deadline`], or `None` if nothing is pending.
+    ///
+    /// `Some(`[`Duration::ZERO`]`)` means [`Self::update_timers`] has work right now. See
+    /// [`Self::next_timer_deadline`] for when the answer stops being valid, and for the one
+    /// thing it does not cover.
+    pub fn time_to_next_timer(&self) -> Option<Duration> {
+        let now_instant = Instant::now();
+        self.time_to_next_timer_at(now_instant, self.timers.elapsed_at(now_instant))
+    }
+
+    /// Time from `now_instant` until the earliest moment [`Self::update_timers`] could act.
+    ///
+    /// `now` must be [`Timers::elapsed_at`] of `now_instant`, i.e. the very value that
+    /// `update_timers` would compute for that same clock reading.
+    ///
+    /// Every branch of `update_timers` is mirrored below, under the same arming condition.
+    /// Where a deadline is only reachable through an external event (a packet sent or
+    /// received), it is reported only while that condition already holds, because an unarmed
+    /// timer has no deadline — it has a trigger. Where `update_timers` would evaluate a
+    /// condition only after an earlier branch declined to fire, the deadline is reported
+    /// unconditionally: that can only move the answer earlier, never later.
+    fn time_to_next_timer_at(&self, now_instant: Instant, now: Duration) -> Option<Duration> {
+        // An expired handshake short-circuits `update_timers` to `ConnectionExpired` on
+        // every call, without touching any state. There is no deadline that would change
+        // that: the tunnel stays dormant until an outgoing packet, an inbound handshake or
+        // `reset` revives it. A fixed-tick poll learns nothing here either, so reporting
+        // `None` loses no work — and reporting a deadline would spin.
+        if self.handshake.is_expired() {
+            return None;
+        }
+
+        // Deadlines below are elapsed times since the start of the tunnel, the frame
+        // `Timers::now` works in. `Duration::MAX` stands for "no deadline yet"; the
+        // connection-expiry deadline is ungated, so it is always replaced.
+        let mut deadline = Duration::MAX;
+
+        let session_established = self.timers[TimeSessionEstablished];
+        let handshake_started = self.timers[TimeLastHandshakeStarted];
+        let data_packet_received = self.timers[TimeLastDataPacketReceived];
+        let data_packet_sent = self.timers[TimeLastDataPacketSent];
+
+        // `update_session_timers`: a session is forgotten once it is older than
+        // `REJECT_AFTER_TIME`. Only a slot that holds a session can do anything; for an
+        // empty slot the branch just restamps the timer, which nothing later reads. The
+        // comparison there is `>`, not `>=`, so this deadline is one instant early.
+        for (session, established) in self.sessions.iter().zip(&self.timers.session_timers) {
+            if session.is_some() {
+                deadline = deadline.min(established.saturating_add(REJECT_AFTER_TIME));
+            }
+        }
+
+        // The write cookie is cleared `COOKIE_EXPIRATION_TIME` after it was received.
+        if self.handshake.has_cookie() {
+            deadline = deadline
+                .min(self.timers[TimeCookieReceived].saturating_add(COOKIE_EXPIRATION_TIME));
+        }
+
+        // The connection expires `REJECT_AFTER_TIME * 3` after the last established
+        // session. Never gated: a tunnel that has never completed a handshake expires this
+        // long after it was created, since `TimeSessionEstablished` is then zero.
+        deadline = deadline.min(session_established.saturating_add(REJECT_AFTER_TIME * 3));
+
+        // A handshake initiation of ours is in flight. `update_timers` consults only the
+        // two handshake timers in this case, and no keepalive timer, so neither do we.
+        if let Some(time_init_sent) = self.handshake.timer() {
+            // Retransmissions cease `REKEY_ATTEMPT_TIME` after the first initiation.
+            deadline = deadline.min(handshake_started.saturating_add(REKEY_ATTEMPT_TIME));
+
+            // The initiation is retransmitted `rekey_timeout` after it was sent. This one
+            // is evaluated against `time_init_sent.elapsed()`, i.e. in the `Instant`
+            // domain, exactly as `update_timers` does: `time_init_sent` can be later than
+            // `now` when the clock has gone backwards.
+            let retransmit = self
+                .timers
+                .rekey_timeout
+                .saturating_sub(now_instant.duration_since(time_init_sent));
+
+            return Some(retransmit.min(deadline.saturating_sub(now)));
+        }
+
+        if self.timers.is_initiator() {
+            // The initiator rekeys `rekey_after_time` after the session was established,
+            // but only once it has sent data over that session.
+            if session_established < data_packet_sent {
+                deadline =
+                    deadline.min(session_established.saturating_add(self.timers.rekey_after_time));
+            }
+
+            // ...and `REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT` after it was
+            // established, but only once it has received data over that session.
+            if session_established < data_packet_received {
+                deadline = deadline.min(
+                    session_established
+                        .saturating_add(REJECT_AFTER_TIME - KEEPALIVE_TIMEOUT - REKEY_TIMEOUT),
+                );
+            }
+        }
+
+        // A new handshake after `new_handshake_timeout` of silence following a data packet
+        // we sent. Armed by `timer_tick(TimeLastDataPacketSent)`.
+        if let Some(since) = self.timers.want_handshake {
+            deadline = deadline.min(since.saturating_add(self.timers.new_handshake_timeout));
+        }
+
+        // A passive keepalive `keepalive_timeout` after a data packet we received and have
+        // not answered. Armed by `timer_tick(TimeLastDataPacketReceived)`.
+        //
+        // `update_timers` only looks at this and the persistent keepalive below when no
+        // handshake fired earlier in the same call. Reporting them regardless is safe: it
+        // can only pull the deadline earlier, and when a handshake does fire at that
+        // deadline the call still returns work.
+        if let Some(since) = self.timers.want_keepalive {
+            deadline = deadline.min(since.saturating_add(self.timers.keepalive_timeout));
+        }
+
+        // The persistent keepalive, when configured. `persistent_keepalive_due` is set
+        // when the interval is first configured and after a reset, and means "send one on
+        // the next call".
+        if let Some(interval) = self.timers.persistent_keepalive {
+            if self.timers.persistent_keepalive_due {
+                deadline = deadline.min(now);
+            } else {
+                deadline =
+                    deadline.min(self.timers[TimePersistentKeepalive].saturating_add(interval));
+            }
+        }
+
+        Some(deadline.saturating_sub(now))
     }
 
     /// Get the time elapsed since the last successful handshake.

@@ -52,4 +52,31 @@ impl Instant {
             Some(Duration::new(tv_sec as _, tv_nsec as _))
         }
     }
+
+    pub(crate) fn checked_add(&self, duration: Duration) -> Option<Instant> {
+        const NANOSECOND: nix::libc::c_long = 1_000_000_000;
+
+        let add_nsec = duration.subsec_nanos() as nix::libc::c_long;
+        let cur_nsec = self.t.tv_nsec();
+
+        // `tv_nsec` from `clock_gettime` is in `[0, NANOSECOND)` and `subsec_nanos` is
+        // below `NANOSECOND`, so the normalized result is too. Compare against the
+        // complement rather than adding the two: `tv_nsec` is a `c_long`, which is only
+        // 32 bits wide on some targets, and their sum does not always fit in that.
+        let (carry, nsec) = if cur_nsec >= NANOSECOND - add_nsec {
+            (1, cur_nsec - (NANOSECOND - add_nsec))
+        } else {
+            (0, cur_nsec + add_nsec)
+        };
+
+        // `time_t` is also only 32 bits wide on some targets. Both of these reject a
+        // result it cannot represent, which takes an uptime far beyond anything a
+        // WireGuard timer waits for.
+        let add_sec: nix::libc::time_t = duration.as_secs().try_into().ok()?;
+        let sec = self.t.tv_sec().checked_add(add_sec)?.checked_add(carry)?;
+
+        Some(Instant {
+            t: TimeSpec::new(sec, nsec),
+        })
+    }
 }
