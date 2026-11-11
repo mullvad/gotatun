@@ -11,7 +11,7 @@
 
 //! Generic buffered `UdpTransport` implementation.
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use futures::{FutureExt, select};
 use tokio::{io, sync::mpsc};
@@ -19,6 +19,15 @@ use tokio::{io, sync::mpsc};
 use crate::packet::{Packet, PacketBufPool};
 use crate::task::Task;
 use crate::udp::{UdpRecv, UdpSend};
+
+/// Delay before retrying a temporary receive error. It doubles with each retry in a row.
+const FIRST_RETRY_DELAY: Duration = Duration::from_millis(1);
+
+/// Longest delay between retries.
+const MAX_RETRY_DELAY: Duration = Duration::from_secs(1);
+
+/// Temporary receive errors in a row after which reception ends: about a second's worth.
+const MAX_RETRIES: u32 = 10;
 
 /// A [`UdpSend`] that wraps another [`UdpSend`] to provide buffering.
 ///
@@ -118,6 +127,10 @@ impl UdpSend for BufferedUdpSend {
 /// This will spawn a background task that continuously calls [`UdpRecv::recv_from`] until the
 /// buffer is full. Any call to [`UdpRecv::recv_from`] on _this_ object will not block unless the
 /// buffer is empty.
+///
+/// The task retries a temporary receive error (see [`is_temporary`]) after a delay that doubles
+/// each time, up to [`MAX_RETRIES`] times in a row. Any other error, or one that keeps coming back,
+/// is passed on, and the task stops.
 pub struct BufferedUdpReceive {
     _recv_task: Arc<Task>,
     recv_rx: mpsc::Receiver<io::Result<(Packet, SocketAddr)>>,
@@ -135,6 +148,7 @@ impl BufferedUdpReceive {
         let recv_task = Task::spawn("buffered UDP receive", async move {
             let mut recv_many_buf = Default::default();
             let mut packet_bufs = vec![];
+            let mut retries = 0;
 
             loop {
                 // Read packets from the socket.
@@ -142,9 +156,19 @@ impl BufferedUdpReceive {
                     .recv_many_from(&mut recv_many_buf, &mut recv_pool, &mut packet_bufs)
                     .await
                 {
+                    if is_temporary(&err) && retries < MAX_RETRIES {
+                        let delay = FIRST_RETRY_DELAY
+                            .saturating_mul(1 << retries)
+                            .min(MAX_RETRY_DELAY);
+                        retries += 1;
+                        tracing::debug!("UDP receive failed, retrying in {delay:?}: {err}");
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
                     let _ = recv_tx.send(Err(err)).await;
                     return;
                 }
+                retries = 0;
 
                 for (packet_buf, src) in packet_bufs.drain(..) {
                     match recv_tx.try_send(Ok((packet_buf, src))) {
@@ -166,6 +190,26 @@ impl BufferedUdpReceive {
             recv_rx,
         }
     }
+}
+
+/// Whether `error`, returned by a receive, is a temporary shortage worth retrying after a delay:
+/// out of memory or buffer space, the network being down, or an interrupted call.
+///
+/// Errors that a socket gets once per stray ICMP report aren't included: `UdpSocket` skips those
+/// itself, and from another [`UdpRecv`] they may repeat indefinitely.
+fn is_temporary(error: &io::Error) -> bool {
+    use io::ErrorKind::*;
+
+    if matches!(error.kind(), OutOfMemory | NetworkDown | Interrupted) {
+        return true;
+    }
+
+    let no_buffers = cfg_select! {
+        unix => Some(libc::ENOBUFS),
+        windows => Some(windows_sys::Win32::Networking::WinSock::WSAENOBUFS),
+        _ => None,
+    };
+    no_buffers.is_some() && error.raw_os_error() == no_buffers
 }
 
 impl UdpRecv for BufferedUdpReceive {
