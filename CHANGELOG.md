@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from another peer. One such report stopped the device's shared UDP receive task, denying inbound
   traffic for every peer until the device was restarted or reconfigured. `UdpSocket` now skips
   receive errors that concern a single earlier datagram, on every platform.
+- Turn off those reports when binding a UDP socket (`SIO_UDP_CONNRESET` and `SIO_UDP_NETRESET`),
+  as Go's standard library does.
 
 
 ## [0.10.3] - 2026-11-09

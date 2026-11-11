@@ -12,9 +12,9 @@
 use socket2::Domain;
 use socket2::Socket;
 use socket2::Type;
-use std::ffi::{c_char, c_uint};
+use std::ffi::{c_char, c_uint, c_void};
 use std::os::windows::io::AsRawSocket;
-use std::{io, mem, net::SocketAddr, sync::LazyLock};
+use std::{io, mem, net::SocketAddr, ptr, sync::LazyLock};
 use tokio::io::Interest;
 use windows_sys::Win32::Networking::WinSock;
 use zerocopy::IntoBytes;
@@ -539,6 +539,41 @@ pub mod cmsg {
     }
 }
 
+/// Stop Windows from reporting an ICMP port unreachable (`SIO_UDP_CONNRESET`) or time exceeded
+/// (`SIO_UDP_NETRESET`) for an earlier send as an error on the socket's next receive.
+///
+/// The reports concern a single earlier datagram, not the socket, and the receive paths skip them
+/// anyway (see [`recv_error::is_stray`](super::recv_error::is_stray)). This stops them at the
+/// source. Go's standard library does the same for every UDP socket on Windows.
+pub(super) fn disable_icmp_error_reports(socket: &Socket) -> io::Result<()> {
+    for control_code in [WinSock::SIO_UDP_CONNRESET, WinSock::SIO_UDP_NETRESET] {
+        let enable = windows_sys::Win32::Foundation::FALSE;
+        let mut bytes_returned = 0u32;
+
+        // SAFETY: `socket` is open for the duration of the call. The input buffer points to a live
+        // `BOOL` and its size is passed with it. There is no output buffer, and no OVERLAPPED or
+        // completion routine, so the call completes before returning.
+        let result = unsafe {
+            WinSock::WSAIoctl(
+                socket.as_raw_socket() as usize,
+                control_code,
+                (&enable as *const i32).cast::<c_void>(),
+                mem::size_of_val(&enable) as u32,
+                ptr::null_mut(),
+                0,
+                &mut bytes_returned,
+                ptr::null_mut(),
+                None,
+            )
+        };
+
+        if result != 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
 /// Maximum number of segments we can send in one go using UDP GSO
 pub static MAX_GSO_SEGMENTS: LazyLock<usize> = LazyLock::new(|| {
     // Detect whether UDP GSO is supported
@@ -567,3 +602,112 @@ pub static MAX_GSO_SEGMENTS: LazyLock<usize> = LazyLock::new(|| {
         _ => 1,
     }
 });
+
+/// Turning the reports off at bind, and skipping them on receive, each keep reception going on
+/// their own. The integration tests in `tests/udp_port_unreachable.rs` cover the two together.
+#[cfg(test)]
+mod icmp_error_reports {
+    use std::net::Ipv4Addr;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use tokio::time::timeout;
+
+    use super::*;
+    use crate::udp::socket::SockOpt;
+
+    const TIMEOUT: Duration = Duration::from_secs(5);
+
+    /// Send from `socket` to a closed loopback port, so that an ICMP port unreachable comes back,
+    /// then have a peer send `marker` to `socket`.
+    async fn report_then_marker(socket: &tokio::net::UdpSocket) {
+        let closed = std::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let peer = tokio::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+
+        socket.send_to(b"to a closed port", closed).await.unwrap();
+
+        // On loopback, once the peer has this, the report for the first datagram has come back.
+        socket
+            .send_to(b"sync", peer.local_addr().unwrap())
+            .await
+            .unwrap();
+        let mut buf = [0u8; 16];
+        timeout(TIMEOUT, peer.recv_from(&mut buf))
+            .await
+            .unwrap()
+            .unwrap();
+
+        let port = socket.local_addr().unwrap().port();
+        peer.send_to(b"marker", (Ipv4Addr::LOCALHOST, port))
+            .await
+            .unwrap();
+    }
+
+    /// The premise of the other tests: by default, the report fails the next receive.
+    #[tokio::test]
+    async fn port_unreachable_fails_a_plain_receive_by_default() {
+        let socket = tokio::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        report_then_marker(&socket).await;
+
+        let mut buf = [0u8; 16];
+        let error = timeout(TIMEOUT, socket.recv_from(&mut buf))
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(WinSock::WSAECONNRESET));
+    }
+
+    /// After `UdpSocket::bind`, not even a plain receive sees the report.
+    #[tokio::test]
+    async fn bind_turns_off_port_unreachable_reports() {
+        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0).into(), SockOpt::default()).unwrap();
+        report_then_marker(socket.socket()).await;
+
+        let mut buf = [0u8; 16];
+        let (n, _) = timeout(TIMEOUT, socket.socket().recv_from(&mut buf))
+            .await
+            .unwrap()
+            .expect("bind must have turned the report off");
+        assert_eq!(&buf[..n], b"marker");
+    }
+
+    /// On a socket without the option, both receive methods skip the report.
+    #[tokio::test]
+    async fn receive_skips_port_unreachable_reports_without_the_option() {
+        let inner = tokio::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let mut socket = UdpSocket {
+            inner: Arc::new(inner),
+            map_ipv4_to_ipv6: false,
+        };
+        socket.enable_udp_gro().ok();
+
+        report_then_marker(socket.socket()).await;
+        let (packet, _) = timeout(TIMEOUT, socket.recv_from(&mut PacketBufPool::new(1)))
+            .await
+            .unwrap()
+            .expect("recv_from must skip the report");
+        assert_eq!(&packet[..], b"marker");
+
+        report_then_marker(socket.socket()).await;
+        #[allow(clippy::let_unit_value)] // `()` without windows-gro
+        let mut recv_buf = <UdpSocket as UdpRecv>::RecvManyBuf::default();
+        let mut packets = vec![];
+        timeout(
+            TIMEOUT,
+            socket.recv_many_from(&mut recv_buf, &mut PacketBufPool::new(1), &mut packets),
+        )
+        .await
+        .unwrap()
+        .expect("recv_many_from must skip the report");
+        assert_eq!(&packets[0].0[..], b"marker");
+    }
+}

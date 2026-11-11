@@ -113,6 +113,8 @@ impl UdpSocket {
     /// - `only_v6`, to bind dual-stack sockets.
     /// - `mark`, only on linux.
     /// - `{recv,send}_buffer_size`, for better performance. See [`SockOpt`].
+    /// - `SIO_UDP_CONNRESET` and `SIO_UDP_NETRESET` off, only on windows, so that ICMP reports
+    ///   about earlier sends don't fail receives.
     pub fn bind(addr: SocketAddr, opts: SockOpt) -> io::Result<Self> {
         let domain = match addr {
             SocketAddr::V4(..) => socket2::Domain::IPV4,
@@ -152,6 +154,11 @@ impl UdpSocket {
             } else {
                 tracing::error!("Failed to change UDP socket send buffer size: {err}");
             }
+        }
+        // Not fatal either: the receive paths skip these reports anyway.
+        #[cfg(windows)]
+        if let Err(err) = windows::disable_icmp_error_reports(&udp_sock) {
+            tracing::warn!("Failed to turn off ICMP error reports on the UDP socket: {err}");
         }
 
         udp_sock.bind(&addr.into())?;
