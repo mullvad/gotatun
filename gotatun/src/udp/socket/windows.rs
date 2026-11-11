@@ -163,26 +163,6 @@ impl UdpSend for super::UdpSocket {
     }
 }
 
-impl super::UdpSocket {
-    async fn recv_datagram(&self, pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
-        let mut buf = pool.get();
-        loop {
-            match self.socket().recv_from(&mut buf).await {
-                Ok((n, src)) => {
-                    buf.truncate(n);
-                    return Ok((buf, self.map_src(src)));
-                }
-                // Winsock discards the remainder of an oversized datagram. The socket
-                // remains usable; never pass its truncated contents to the protocol.
-                Err(err) if err.raw_os_error() == Some(WinSock::WSAEMSGSIZE) => {
-                    tokio::task::yield_now().await;
-                }
-                Err(err) => return Err(err),
-            }
-        }
-    }
-}
-
 #[cfg(not(feature = "windows-gro"))]
 impl UdpRecv for super::UdpSocket {
     type RecvManyBuf = ();
@@ -198,6 +178,7 @@ mod gro {
 
     use std::{ffi::c_char, ptr};
 
+    use crate::udp::socket::recv_error;
     use socket2::{Domain, SockAddr, SockAddrStorage, Type};
     use std::{mem, os::windows::io::AsRawSocket, sync::LazyLock};
     use windows_sys::Win32::Networking::WinSock::{self, SOCKADDR_INET, WSABUF, WSAMSG};
@@ -238,11 +219,18 @@ mod gro {
             let socket = self.socket();
             recv_buf.gro_buf.resize(MAX_COALESCED_SIZE, 0);
 
-            let msg = socket
-                .async_io(Interest::READABLE, || {
-                    recvmsg(recv_buf.gro_buf.as_mut_slice(), &mut recv_buf.cmsg, socket)
-                })
-                .await?;
+            let msg = loop {
+                let result = socket
+                    .async_io(Interest::READABLE, || {
+                        recvmsg(recv_buf.gro_buf.as_mut_slice(), &mut recv_buf.cmsg, socket)
+                    })
+                    .await;
+                match result {
+                    Ok(msg) => break msg,
+                    Err(err) if recv_error::is_stray(&err) => recv_error::skip(&err).await,
+                    Err(err) => return Err(err),
+                }
+            };
 
             let src = self.map_src(msg.source_addr);
 

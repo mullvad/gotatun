@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `gotatun-packet` module.
 - Add `gotatun-crypto` module.
 
+### Fixed
+#### Windows
+- Keep receiving after an ICMP port unreachable or time exceeded report. Windows reports these on a
+  UDP socket's next receive, as `WSAECONNRESET` and `WSAENETRESET`, even when the next datagram is
+  from another peer. One such report stopped the device's shared UDP receive task, denying inbound
+  traffic for every peer until the device was restarted or reconfigured. `UdpSocket` now skips
+  receive errors that concern a single earlier datagram, on every platform.
+
 
 ## [0.10.3] - 2026-11-09
 ### Fixed

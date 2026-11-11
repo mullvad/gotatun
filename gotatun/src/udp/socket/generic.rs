@@ -37,10 +37,6 @@ impl UdpRecv for super::UdpSocket {
     type RecvManyBuf = ();
 
     async fn recv_from(&mut self, pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
-        let mut buf = pool.get();
-        let (n, src) = self.socket().recv_from(&mut buf).await?;
-        buf.truncate(n);
-        let src = self.map_src(src);
-        Ok((buf, src))
+        self.recv_datagram(pool).await
     }
 }

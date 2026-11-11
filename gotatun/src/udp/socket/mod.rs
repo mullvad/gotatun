@@ -18,6 +18,9 @@ use std::{
 };
 
 use super::{UdpRecv, UdpTransportFactory, UdpTransportFactoryParams};
+use crate::packet::{Packet, PacketBufPool};
+
+mod recv_error;
 
 /// Implementations of [`super::UdpSend`]/[`super::UdpRecv`] for all targets
 #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "windows")))]
@@ -187,6 +190,22 @@ impl UdpSocket {
     #[inline(always)]
     fn map_src(&self, addr: SocketAddr) -> SocketAddr {
         map_src_addr(self.map_ipv4_to_ipv6, addr)
+    }
+
+    /// Receive one datagram. Errors that don't concern the socket are skipped, see
+    /// [`recv_error::is_stray`].
+    async fn recv_datagram(&self, pool: &mut PacketBufPool) -> io::Result<(Packet, SocketAddr)> {
+        let mut buf = pool.get();
+        loop {
+            match self.socket().recv_from(&mut buf).await {
+                Ok((n, src)) => {
+                    buf.truncate(n);
+                    return Ok((buf, self.map_src(src)));
+                }
+                Err(err) if recv_error::is_stray(&err) => recv_error::skip(&err).await,
+                Err(err) => return Err(err),
+            }
+        }
     }
 }
 

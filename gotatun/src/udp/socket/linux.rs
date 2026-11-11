@@ -117,7 +117,7 @@ mod gro {
 
     use super::MAX_PACKET_COUNT;
     use crate::packet::{Packet, PacketBufPool};
-    use crate::udp::socket::map_src_addr;
+    use crate::udp::socket::{map_src_addr, recv_error};
     use crate::udp::{UdpRecv, socket::UdpSocket};
     use bytes::BytesMut;
     use nix::cmsg_space;
@@ -150,11 +150,7 @@ mod gro {
             &mut self,
             pool: &mut PacketBufPool,
         ) -> io::Result<(Packet, SocketAddr)> {
-            let mut buf = pool.get();
-            let (n, src) = self.socket().recv_from(&mut buf).await?;
-            buf.truncate(n);
-            let src = self.map_src(src);
-            Ok((buf, src))
+            self.recv_datagram(pool).await
         }
 
         async fn recv_many_from(
@@ -167,6 +163,40 @@ mod gro {
             let fd = socket.as_raw_fd();
             let map_ipv4_to_ipv6 = self.map_ipv4_to_ipv6;
 
+            loop {
+                let result =
+                    Self::recvmmsg(socket, fd, map_ipv4_to_ipv6, recv_many_bufs, pool, packets)
+                        .await;
+                match result {
+                    Ok(()) => return Ok(()),
+                    Err(err) if recv_error::is_stray(&err) => recv_error::skip(&err).await,
+                    Err(err) => return Err(err),
+                }
+            }
+        }
+
+        fn enable_udp_gro(&self) -> io::Result<()> {
+            // TODO: missing constants on Android
+            use std::os::fd::AsFd;
+            nix::sys::socket::setsockopt(
+                &self.as_fd(),
+                nix::sys::socket::sockopt::UdpGroSegment,
+                &true,
+            )?;
+            Ok(())
+        }
+    }
+
+    impl UdpSocket {
+        /// Receive a batch of datagrams with `recvmmsg`, splitting those coalesced by GRO.
+        async fn recvmmsg(
+            socket: &tokio::net::UdpSocket,
+            fd: std::os::fd::RawFd,
+            map_ipv4_to_ipv6: bool,
+            recv_many_bufs: &mut RecvManyBuf,
+            pool: &mut PacketBufPool,
+            packets: &mut Vec<(Packet, SocketAddr)>,
+        ) -> io::Result<()> {
             socket
                 .async_io(Interest::READABLE, move || {
                     // TODO: the CMSG space cannot be reused, so we must allocate new headers each
@@ -258,17 +288,6 @@ mod gro {
                 })
                 .await?;
 
-            Ok(())
-        }
-
-        fn enable_udp_gro(&self) -> io::Result<()> {
-            // TODO: missing constants on Android
-            use std::os::fd::AsFd;
-            nix::sys::socket::setsockopt(
-                &self.as_fd(),
-                nix::sys::socket::sockopt::UdpGroSegment,
-                &true,
-            )?;
             Ok(())
         }
     }
@@ -376,11 +395,7 @@ mod android {
             &mut self,
             pool: &mut PacketBufPool,
         ) -> io::Result<(Packet, SocketAddr)> {
-            let mut buf = pool.get();
-            let (n, src) = self.socket().recv_from(&mut buf).await?;
-            buf.truncate(n);
-            let src = self.map_src(src);
-            Ok((buf, src))
+            self.recv_datagram(pool).await
         }
     }
 }
