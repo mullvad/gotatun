@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Retry temporary UDP receive errors, such as running out of buffer space, after a delay that
   doubles each time, instead of stopping the device's UDP receive task at the first one. Reception
   still ends, with the error, after ten retries in a row (about a second).
+- Log the cause of a fatal device error, such as the UDP receive error that stopped the device.
+  Only `errored: true` was logged before.
 #### Windows
 - Keep receiving after an ICMP port unreachable or time exceeded report. Windows reports these on a
   UDP socket's next receive, as `WSAECONNRESET` and `WSAENETRESET`, even when the next datagram is

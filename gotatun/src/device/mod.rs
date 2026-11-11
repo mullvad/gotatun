@@ -225,14 +225,15 @@ impl<T: DeviceTransports> Connection<T> {
         }
 
         let fatal_error = device.fatal_error.clone();
-        let register_fatal_error = move |e| {
+        let register_fatal_error = move |e: Error| {
+            tracing::error!("Fatal device error: {e}");
             fatal_error.send_if_modified(|option| {
                 let has_error = option.is_some();
                 if !has_error {
                     *option = Some(e);
                 }
                 !has_error
-            })
+            });
         };
 
         // Start device tasks
@@ -244,7 +245,7 @@ impl<T: DeviceTransports> Connection<T> {
                 buffered_udp_tx.clone(),
                 pool.clone(),
             )
-            .map_err(register_fatal_error.clone()),
+            .unwrap_or_else(register_fatal_error.clone()),
         );
         let timers = Task::spawn(
             "handle_timers",
@@ -259,7 +260,7 @@ impl<T: DeviceTransports> Connection<T> {
                 buffered_udp_rx,
                 pool.clone(),
             )
-            .map_err(register_fatal_error.clone()),
+            .unwrap_or_else(register_fatal_error.clone()),
         );
 
         debug_assert!(device.connection.is_none());
