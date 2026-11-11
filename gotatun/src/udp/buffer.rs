@@ -182,6 +182,197 @@ impl UdpRecv for BufferedUdpReceive {
     }
 }
 
+/// How [`BufferedUdpReceive`] handles errors from the [`UdpRecv`] it wraps.
+#[cfg(test)]
+mod recv_errors {
+    use std::collections::VecDeque;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use tokio::time::Instant;
+
+    use super::*;
+
+    const FROM: SocketAddr = SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), 51820);
+
+    /// A [`UdpRecv`] that returns scripted results, then `then` forever (or nothing, if `None`).
+    /// `attempts` counts the receives that returned.
+    struct Scripted {
+        script: VecDeque<io::Result<&'static [u8]>>,
+        then: Option<io::ErrorKind>,
+        attempts: Arc<AtomicUsize>,
+    }
+
+    impl UdpRecv for Scripted {
+        type RecvManyBuf = ();
+
+        async fn recv_from(
+            &mut self,
+            _pool: &mut PacketBufPool,
+        ) -> io::Result<(Packet, SocketAddr)> {
+            let result = match self.script.pop_front() {
+                Some(result) => result.map(|data| (Packet::copy_from(data), FROM)),
+                None => match self.then {
+                    Some(kind) => Err(kind.into()),
+                    None => std::future::pending().await,
+                },
+            };
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            result
+        }
+    }
+
+    /// Wrap a scripted source in a [`BufferedUdpReceive`]. Returns it and the attempt count.
+    fn receiver(
+        script: impl IntoIterator<Item = io::Result<&'static [u8]>>,
+        then: Option<io::ErrorKind>,
+    ) -> (BufferedUdpReceive, Arc<AtomicUsize>) {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let source = Scripted {
+            script: script.into_iter().collect(),
+            then,
+            attempts: attempts.clone(),
+        };
+        let receiver = BufferedUdpReceive::new(16, source, PacketBufPool::new(16));
+        (receiver, attempts)
+    }
+
+    fn err(kind: io::ErrorKind) -> io::Result<&'static [u8]> {
+        Err(kind.into())
+    }
+
+    async fn recv(receiver: &mut BufferedUdpReceive) -> io::Result<Vec<u8>> {
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            receiver.recv_from(&mut PacketBufPool::new(1)),
+        )
+        .await
+        .expect("the receive must not hang")
+        .map(|(packet, _)| packet.to_vec())
+    }
+
+    /// Every kind of temporary error is retried.
+    #[tokio::test(start_paused = true)]
+    async fn temporary_errors_are_retried() {
+        #[cfg(unix)]
+        let no_buffers = io::Error::from_raw_os_error(libc::ENOBUFS);
+        #[cfg(windows)]
+        let no_buffers =
+            io::Error::from_raw_os_error(windows_sys::Win32::Networking::WinSock::WSAENOBUFS);
+        let script = [
+            err(io::ErrorKind::Interrupted),
+            err(io::ErrorKind::NetworkDown),
+            err(io::ErrorKind::OutOfMemory),
+            Err(no_buffers),
+            Ok(&b"marker"[..]),
+        ];
+        let (mut receiver, attempts) = receiver(script, None);
+
+        assert_eq!(recv(&mut receiver).await.unwrap(), b"marker");
+        assert_eq!(attempts.load(Ordering::SeqCst), 5);
+    }
+
+    /// The wrapped transport may not be a socket, and may keep failing with an error that a
+    /// socket gets once per stray ICMP report. Receiving again at once would then spin, so
+    /// reception ends. `UdpSocket` skips such errors itself, where each is a single report.
+    #[tokio::test(start_paused = true)]
+    async fn errors_a_socket_skips_end_reception_here() {
+        let (mut receiver, attempts) = receiver([], Some(io::ErrorKind::ConnectionReset));
+
+        let start = Instant::now();
+        let error = recv(&mut receiver).await.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::ConnectionReset);
+        assert_eq!(start.elapsed(), Duration::ZERO);
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    }
+
+    /// A temporary shortage is retried after a delay that doubles each time.
+    #[tokio::test(start_paused = true)]
+    async fn transient_errors_are_retried_with_back_off() {
+        let script = [
+            err(io::ErrorKind::OutOfMemory),
+            err(io::ErrorKind::OutOfMemory),
+            err(io::ErrorKind::OutOfMemory),
+            Ok(&b"marker"[..]),
+        ];
+        let (mut receiver, attempts) = receiver(script, None);
+
+        let start = Instant::now();
+        assert_eq!(recv(&mut receiver).await.unwrap(), b"marker");
+        let elapsed = start.elapsed();
+        // 1 + 2 + 4 ms, plus timer rounding.
+        assert!(
+            (Duration::from_millis(7)..Duration::from_millis(20)).contains(&elapsed),
+            "{elapsed:?}"
+        );
+        assert_eq!(attempts.load(Ordering::SeqCst), 4);
+    }
+
+    /// An error that keeps coming back ends reception after a bounded number of retries,
+    /// spread over about a second, rather than spinning.
+    #[tokio::test(start_paused = true)]
+    async fn transient_errors_give_up_after_ten_retries() {
+        let (mut receiver, attempts) = receiver([], Some(io::ErrorKind::OutOfMemory));
+
+        let start = Instant::now();
+        let error = recv(&mut receiver).await.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::OutOfMemory);
+        let elapsed = start.elapsed();
+        // 1 + 2 + … + 512 ms = 1023 ms, plus timer rounding.
+        assert!(
+            (Duration::from_millis(1023)..Duration::from_millis(1100)).contains(&elapsed),
+            "{elapsed:?}"
+        );
+        assert_eq!(attempts.load(Ordering::SeqCst), 11);
+
+        let error = recv(&mut receiver).await.unwrap_err();
+        assert_eq!(
+            error.kind(),
+            io::ErrorKind::BrokenPipe,
+            "the task must have ended"
+        );
+        assert_eq!(attempts.load(Ordering::SeqCst), 11);
+    }
+
+    /// A datagram in between resets the count of consecutive failures.
+    #[tokio::test(start_paused = true)]
+    async fn a_datagram_resets_the_retry_count() {
+        let failures = || std::iter::repeat_with(|| err(io::ErrorKind::OutOfMemory)).take(10);
+        let script = failures()
+            .chain([Ok(&b"first"[..])])
+            .chain(failures())
+            .chain([Ok(&b"second"[..])]);
+        let (mut receiver, _) = receiver(script, None);
+
+        assert_eq!(recv(&mut receiver).await.unwrap(), b"first");
+        assert_eq!(recv(&mut receiver).await.unwrap(), b"second");
+    }
+
+    /// Any other error ends reception at once, and is reported.
+    #[tokio::test(start_paused = true)]
+    async fn fatal_errors_end_reception_at_once() {
+        let (mut receiver, attempts) = receiver(
+            [err(io::ErrorKind::PermissionDenied), Ok(&b"marker"[..])],
+            None,
+        );
+
+        let start = Instant::now();
+        let error = recv(&mut receiver).await.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(start.elapsed(), Duration::ZERO);
+
+        let error = recv(&mut receiver).await.unwrap_err();
+        assert_eq!(
+            error.kind(),
+            io::ErrorKind::BrokenPipe,
+            "the task must have ended"
+        );
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod test {
     use super::*;

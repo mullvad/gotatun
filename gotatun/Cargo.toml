@@ -71,6 +71,7 @@ etherparse = { workspace = true }
 gotatun = { workspace = true, features = ["socket"] }
 hex = { workspace = true }
 test-log = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 tokio-stream = { workspace = true, features = ["sync"] }
 x25519-dalek = { workspace = true, features = ["getrandom"] }
 
