@@ -25,6 +25,7 @@ use crate::noise::index_table::IndexTable;
 use crate::packet::{Ip, Packet};
 
 pub mod mock;
+mod port_unreachable;
 
 /// Assert that the expected number of packets is sent.
 /// We expect there to be [`packet_count`] data packets, one handshake init,
