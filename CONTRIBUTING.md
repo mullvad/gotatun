@@ -11,7 +11,7 @@ While we appreciate your interest in helping us to improve `gotatun`, please und
 choosing which submitted changes to merge is fully at our discretion, based upon our development
 plans for the project. Before implementing new features, refactoring or making major changes, consider
 existing [discussions](https://github.com/mullvad/gotatun/discussions) or creating a
-[new one](https://github.com/mullvad/gotatun/discussions/new?category=feature-requests-ideas).
+[new one](https://github.com/mullvad/gotatun/discussions/new?category=ideas).
 If you are fixing a bug, feel free to comment on the relevant existing issue or create a [bug report](https://github.com/mullvad/gotatun/issues/new/choose)
 before you start.
 
