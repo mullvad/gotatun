@@ -21,20 +21,21 @@ pub mod index_table;
 /// Rate limiting for handshake initiation packets.
 pub mod rate_limiter;
 
+/// Preshared key wrapper type.
+mod psk;
+/// Wrapper-type for keeping secret keys and zeroizing them on drop.
+mod secret;
 mod session;
 mod timers;
 
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use zerocopy::IntoBytes;
 
-use crate::PresharedKey;
 use crate::noise::errors::WireGuardError;
 use crate::noise::handshake::Handshake;
 use crate::noise::index_table::IndexTable;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
-
-pub use crate::noise::timers::TimerParams;
 use crate::packet::{Packet, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind};
 use crate::tun::MtuWatcher;
 use gotatun_crypto::x25519;
@@ -42,6 +43,9 @@ use gotatun_crypto::x25519;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
+
+pub use psk::PresharedKey;
+pub use timers::TimerParams;
 
 const MAX_QUEUE_DEPTH: usize = 256;
 /// number of sessions in the ring, better keep a PoT.
