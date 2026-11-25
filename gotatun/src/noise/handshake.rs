@@ -10,7 +10,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::PresharedKey;
+use crate::noise::PresharedKey;
 use crate::noise::errors::WireGuardError;
 use crate::noise::index_table::{Index, IndexTable};
 use crate::noise::session::Session;

@@ -14,9 +14,9 @@ use std::net::SocketAddr;
 use ipnetwork::IpNetwork;
 use x25519_dalek::PublicKey;
 
-use crate::PresharedKey;
 #[cfg(feature = "daita")]
 use crate::device::daita::DaitaSettings;
+use crate::noise::PresharedKey;
 use crate::noise::TimerParams;
 
 /// Peer data. Used to construct and update peers in a [`Device`](crate::device::Device).
