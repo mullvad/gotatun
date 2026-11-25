@@ -636,13 +636,7 @@ async fn on_api_set(
 
                 crate::device::Peer {
                     public_key,
-                    // Preserve the old PSK only when the request omitted this
-                    // field; avoid cloning a secret that will be replaced.
-                    preshared_key: if preshared_key.is_none() {
-                        peer.preshared_key().cloned()
-                    } else {
-                        None
-                    },
+                    preshared_key: peer.preshared_key().cloned(),
                     endpoint: peer.endpoint().addr,
                     keepalive: peer.persistent_keepalive(),
                     allowed_ips: if replace_allowed_ips {
