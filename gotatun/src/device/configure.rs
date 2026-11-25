@@ -103,11 +103,10 @@ pub struct PeerMut {
 }
 
 impl PeerMut {
-    /// Set or clear the preshared key used by this peer's handshakes.
+    /// Set or clear the preshared key for this peer.
     ///
-    /// This update does not invalidate established transport sessions. An
-    /// in-flight handshake can fail if the remote peer generated a message
-    /// using the previous key.
+    /// This update does not invalidate already-established transport sessions, but future
+    /// handshakes will fail unless the remote peer is updated with the same preshared key.
     pub fn set_preshared_key(&mut self, preshared_key: Option<PresharedKey>) {
         self.preshared_key = preshared_key.into();
     }
