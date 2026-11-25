@@ -35,7 +35,7 @@ pub(crate) const LABEL_MAC1: &[u8; 8] = b"mac1----";
 pub(crate) const LABEL_COOKIE: &[u8; 8] = b"cookie--";
 const KEY_LEN: usize = 32;
 const TIMESTAMP_LEN: usize = 12;
-// WireGuard represents an absent optional PSK by mixing 32 zero bytes.
+/// WireGuard represents an absent optional PSK by mixing 32 zero bytes.
 const ZERO_PRESHARED_KEY: [u8; KEY_LEN] = [0u8; KEY_LEN];
 
 // initiator.chaining_key = HASH(CONSTRUCTION)
@@ -267,10 +267,7 @@ impl std::fmt::Debug for NoiseParams {
             .field("peer_static_public", &self.peer_static_public)
             .field("static_shared", &"<redacted>")
             .field("sending_mac1_key", &self.sending_mac1_key)
-            .field(
-                "preshared_key",
-                &self.preshared_key.as_ref().map(|_| "<redacted>"),
-            )
+            .field("preshared_key", &self.preshared_key)
             .finish()
     }
 }
@@ -530,15 +527,15 @@ impl Handshake {
         self.previous = HandshakeState::None;
     }
 
-    /// Store the preshared key used when a handshake next reaches PSK mixing.
+    /// Set or clear the preshared key used by future handshakes.
     ///
-    /// Established transport sessions are left untouched. An in-flight
-    /// handshake can fail if its peer generated a message using the old key.
+    /// This update does not invalidate already-established transport sessions, but future
+    /// handshakes will fail unless the remote peer is updated with the same preshared key.
     pub(crate) fn set_preshared_key(&mut self, preshared_key: Option<PresharedKey>) {
         self.params.set_preshared_key(preshared_key);
     }
 
-    /// Borrow the configured preshared key.
+    /// Get the configured preshared key.
     pub(crate) fn preshared_key(&self) -> Option<&PresharedKey> {
         self.params.preshared_key()
     }
