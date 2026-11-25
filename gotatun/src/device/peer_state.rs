@@ -16,10 +16,10 @@ use std::net::SocketAddr;
 
 use tokio::sync::watch;
 
-use crate::PresharedKey;
 use crate::device::AllowedIps;
 #[cfg(feature = "daita")]
 use crate::device::daita::{DaitaHooks, DaitaSettings};
+use crate::noise::PresharedKey;
 use crate::noise::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult};
 #[cfg(feature = "daita")]

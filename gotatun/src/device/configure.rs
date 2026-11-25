@@ -15,9 +15,9 @@ use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 use ipnetwork::IpNetwork;
 use x25519_dalek::{PublicKey, StaticSecret};
 
-use crate::PresharedKey;
 use crate::device::Error;
 use crate::device::{Connection, Device, DeviceState, DeviceTransports, Peer, Reconfigure};
+use crate::noise::PresharedKey;
 use crate::noise::TimerParams;
 
 /// Read-only view of a WireGuard device for inspection.

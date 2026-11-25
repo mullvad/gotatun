@@ -22,13 +22,10 @@
 #[cfg(feature = "device")]
 pub mod device;
 pub mod noise;
-mod secret;
 pub mod tun;
 pub mod udp;
 
 mod task;
-
-pub use secret::PresharedKey;
 
 #[cfg(not(feature = "mock_instant"))]
 pub(crate) mod sleepyinstant;
