@@ -17,6 +17,7 @@ use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::device::Error;
 use crate::device::{Connection, Device, DeviceState, DeviceTransports, Peer, Reconfigure};
+use crate::noise::PresharedKey;
 use crate::noise::TimerParams;
 
 /// Read-only view of a WireGuard device for inspection.
@@ -92,7 +93,7 @@ impl<T> From<Option<T>> for Update<T> {
 #[derive(Default)]
 #[non_exhaustive]
 pub struct PeerMut {
-    preshared_key: Update<[u8; 32]>,
+    preshared_key: Update<PresharedKey>,
     endpoint: Update<SocketAddr>,
     keepalive: Update<u16>,
     timer_params: Update<TimerParams>,
@@ -103,7 +104,10 @@ pub struct PeerMut {
 
 impl PeerMut {
     /// Set or clear the preshared key for this peer.
-    pub fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
+    ///
+    /// This update does not invalidate already-established transport sessions, but future
+    /// handshakes will fail unless the remote peer is updated with the same preshared key.
+    pub fn set_preshared_key(&mut self, preshared_key: Option<PresharedKey>) {
         self.preshared_key = preshared_key.into();
     }
 
@@ -195,7 +199,7 @@ impl<T: DeviceTransports> DeviceRead<'_, T> {
             peers.push(PeerStats {
                 peer: Peer {
                     public_key: *pubkey,
-                    preshared_key: p.tunnel.preshared_key(),
+                    preshared_key: p.tunnel.preshared_key().cloned(),
                     allowed_ips: p.allowed_ips.iter().map(|(_, net)| net).collect(),
                     endpoint: p.endpoint.addr,
                     keepalive: p.tunnel.persistent_keepalive(),

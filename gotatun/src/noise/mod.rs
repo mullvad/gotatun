@@ -21,6 +21,10 @@ pub mod index_table;
 /// Rate limiting for handshake initiation packets.
 pub mod rate_limiter;
 
+/// Preshared key wrapper type.
+mod psk;
+/// Wrapper-type for keeping secret keys and zeroizing them on drop.
+mod secret;
 mod session;
 mod timers;
 
@@ -32,8 +36,6 @@ use crate::noise::handshake::Handshake;
 use crate::noise::index_table::IndexTable;
 use crate::noise::rate_limiter::RateLimiter;
 use crate::noise::timers::{TimerName, Timers};
-
-pub use crate::noise::timers::TimerParams;
 use crate::packet::{Packet, WgCookieReply, WgData, WgHandshakeInit, WgHandshakeResp, WgKind};
 use crate::tun::MtuWatcher;
 use gotatun_crypto::x25519;
@@ -41,6 +43,9 @@ use gotatun_crypto::x25519;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
+
+pub use psk::PresharedKey;
+pub use timers::TimerParams;
 
 const MAX_QUEUE_DEPTH: usize = 256;
 /// number of sessions in the ring, better keep a PoT.
@@ -93,7 +98,7 @@ impl Tunn<StdRng> {
     pub fn new(
         static_private: x25519::StaticSecret,
         peer_static_public: x25519::PublicKey,
-        preshared_key: Option<[u8; 32]>,
+        preshared_key: Option<PresharedKey>,
         persistent_keepalive: Option<u16>,
         index_table: IndexTable,
         rate_limiter: Arc<RateLimiter>,
@@ -115,7 +120,7 @@ impl<R: RngCore + Send> Tunn<R> {
     pub fn new_with_rng(
         static_private: x25519::StaticSecret,
         peer_static_public: x25519::PublicKey,
-        preshared_key: Option<[u8; 32]>,
+        preshared_key: Option<PresharedKey>,
         persistent_keepalive: Option<u16>,
         index_table: IndexTable,
         rate_limiter: Arc<RateLimiter>,
@@ -178,16 +183,16 @@ impl<R: RngCore + Send> Tunn<R> {
     /// Update the preshared key used for future handshakes.
     ///
     /// The new key is only mixed in by subsequent handshakes. The current
-    /// session therefore keeps working until it is rekeyed, so changing
+    /// session will therefore keep working until it is rekeyed, so changing
     /// the key does not interrupt traffic.
-    // Not invalidating current sessions matches the Linux kernel, which update
-    // the key in place and never tear down the session on a configuration change.
-    pub fn set_preshared_key(&mut self, preshared_key: Option<[u8; 32]>) {
+    // Not invalidating current sessions matches the Linux kernel, which updates
+    // the key in place and never tears down the session on a configuration change.
+    pub fn set_preshared_key(&mut self, preshared_key: Option<PresharedKey>) {
         self.handshake.set_preshared_key(preshared_key);
     }
 
     /// Get the current preshared key.
-    pub fn preshared_key(&self) -> Option<[u8; 32]> {
+    pub fn preshared_key(&self) -> Option<&PresharedKey> {
         self.handshake.preshared_key()
     }
 
@@ -888,7 +893,7 @@ mod tests {
         let (mut my_tun, mut their_tun) = create_two_tuns_and_handshake();
 
         // Only one side adopts a new key.
-        my_tun.set_preshared_key(Some([7; 32]));
+        my_tun.set_preshared_key(Some([7; 32].into()));
 
         // The established session is unaffected and keeps working.
         assert_packet_roundtrip(&mut my_tun, &mut their_tun);
@@ -903,6 +908,9 @@ mod tests {
             matches!(result, TunnResult::Err(WireGuardError::InvalidAeadTag)),
             "expected the rekey to fail on the diverged PSK, got {result:?}"
         );
+
+        // A failed rekey does not discard the established transport session.
+        assert_packet_roundtrip(&mut my_tun, &mut their_tun);
     }
 
     /// Send one IP packet over the established session and assert it round-trips.
@@ -921,8 +929,8 @@ mod tests {
     #[test]
     fn handshake_completes_with_matching_preshared_key() {
         let (mut my_tun, mut their_tun) = create_two_tuns();
-        my_tun.set_preshared_key(Some([7; 32]));
-        their_tun.set_preshared_key(Some([7; 32]));
+        my_tun.set_preshared_key(Some([7; 32].into()));
+        their_tun.set_preshared_key(Some([7; 32].into()));
         complete_handshake(&mut my_tun, &mut their_tun);
     }
 
@@ -930,7 +938,7 @@ mod tests {
     #[test]
     fn handshake_fails_with_one_sided_preshared_key() {
         let (mut my_tun, mut their_tun) = create_two_tuns();
-        my_tun.set_preshared_key(Some([7; 32]));
+        my_tun.set_preshared_key(Some([7; 32].into()));
         let result = try_handshake(&mut my_tun, &mut their_tun);
         assert!(
             matches!(result, TunnResult::Err(WireGuardError::InvalidAeadTag)),
@@ -942,8 +950,8 @@ mod tests {
     #[test]
     fn handshake_fails_with_different_preshared_key() {
         let (mut my_tun, mut their_tun) = create_two_tuns();
-        my_tun.set_preshared_key(Some([7; 32]));
-        their_tun.set_preshared_key(Some([4; 32]));
+        my_tun.set_preshared_key(Some([7; 32].into()));
+        their_tun.set_preshared_key(Some([4; 32].into()));
         let result = try_handshake(&mut my_tun, &mut their_tun);
         assert!(
             matches!(result, TunnResult::Err(WireGuardError::InvalidAeadTag)),

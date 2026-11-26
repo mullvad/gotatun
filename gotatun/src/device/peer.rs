@@ -16,6 +16,7 @@ use x25519_dalek::PublicKey;
 
 #[cfg(feature = "daita")]
 use crate::device::daita::DaitaSettings;
+use crate::noise::PresharedKey;
 use crate::noise::TimerParams;
 
 /// Peer data. Used to construct and update peers in a [`Device`](crate::device::Device).
@@ -32,9 +33,8 @@ pub struct Peer {
     pub endpoint: Option<SocketAddr>,
     /// List of IP networks that are allowed to be routed through this peer.
     pub allowed_ips: Vec<IpNetwork>,
-    // TODO: zeroize
     /// Optional preshared key for additional security.
-    pub preshared_key: Option<[u8; 32]>,
+    pub preshared_key: Option<PresharedKey>,
     /// Persistent keepalive interval in seconds. Disabled if `None`.
     pub keepalive: Option<u16>,
 
@@ -84,8 +84,8 @@ impl Peer {
     }
 
     /// Set the preshared key for this peer.
-    pub const fn with_preshared_key(mut self, preshared_key: [u8; 32]) -> Self {
-        self.preshared_key = Some(preshared_key);
+    pub fn with_preshared_key(mut self, preshared_key: impl Into<PresharedKey>) -> Self {
+        self.preshared_key = Some(preshared_key.into());
         self
     }
 

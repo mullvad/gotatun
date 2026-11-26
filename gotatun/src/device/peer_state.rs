@@ -19,6 +19,7 @@ use tokio::sync::watch;
 use crate::device::AllowedIps;
 #[cfg(feature = "daita")]
 use crate::device::daita::{DaitaHooks, DaitaSettings};
+use crate::noise::PresharedKey;
 use crate::noise::errors::WireGuardError;
 use crate::noise::{Tunn, TunnResult};
 #[cfg(feature = "daita")]
@@ -193,7 +194,7 @@ impl PeerState {
         self.tunnel.persistent_keepalive()
     }
 
-    pub fn preshared_key(&self) -> Option<[u8; 32]> {
+    pub fn preshared_key(&self) -> Option<&PresharedKey> {
         self.tunnel.preshared_key()
     }
 }
