@@ -9,7 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Add `gotatun-packet` module.
 - Add `gotatun-crypto` module.
+- Add `PresharedKey` wrapper type which does best-effort zeroization of the secret key on drop.
+  The type replaces the use of `[u8; 32]` for the PSK at the API boundary, and is a breaking change.
+  This is the first step in addressing note _[3.5 Sensitive data not protected in memory]_ from the
+  2026 audit of GotaTun by Assured.
 
+[3.5 Sensitive data not protected in memory]: audits/2026-02-17-Assured.md#35-sensitive-data-not-protected-in-memory-note
 
 ## [0.10.3] - 2026-11-09
 ### Fixed
