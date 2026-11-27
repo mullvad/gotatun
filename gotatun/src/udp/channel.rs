@@ -32,7 +32,7 @@ use crate::{
     },
     tun::{
         MtuWatcher,
-        channel::{Ipv4Fragments, TunChannelRx, TunChannelTx},
+        channel::{Ipv4Defrag, TunChannelRx, TunChannelTx},
     },
     udp::{UdpRecv, UdpSend, UdpTransportFactory},
 };
@@ -117,15 +117,15 @@ pub fn new_udp_tun_channel(
     source_ip_v4: Ipv4Addr,
     source_ip_v6: Ipv6Addr,
     tun_link_mtu: MtuWatcher,
-) -> (TunChannelTx, TunChannelRx, UdpChannelFactory) {
+) -> (Ipv4Defrag<TunChannelTx>, TunChannelRx, UdpChannelFactory) {
     let (udp_v4, tun_v4) = UdpChannelV4::new_pair(capacity);
     let (udp_v6, tun_v6) = UdpChannelV6::new_pair(capacity);
 
     let tun_tx = TunChannelTx {
         tun_tx_v4: tun_v4.tx,
         tun_tx_v6: tun_v6.tx,
-        fragments_v4: Ipv4Fragments::default(),
     };
+    let tun_tx = Ipv4Defrag::new(tun_tx);
     let tun_rx = TunChannelRx {
         tun_rx_v4: tun_v4.rx,
         tun_rx_v6: tun_v6.rx,

@@ -34,13 +34,18 @@ pub struct TunChannelRx {
 
 /// An implementation of [`IpSend`] using tokio channels. Create using
 /// [`new_udp_tun_channel`].
+#[derive(Clone)]
 pub struct TunChannelTx {
     pub(crate) tun_tx_v4: mpsc::Sender<Packet<Ipv4<Udp>>>,
     pub(crate) tun_tx_v6: mpsc::Sender<Packet<Ipv6<Udp>>>,
+}
 
+/// An implementation of [`IpSend`] which simply reassembles fragmented
+/// IPv4 packets and forwards them to an inner [`IpSend`].
+pub struct Ipv4Defrag<Send> {
+    inner: Send,
     /// Fragmented IPv4 packets waiting to be reassembled.
-    pub(crate) fragments_v4: Ipv4Fragments,
-    // TODO: Ipv6 fragments?
+    fragments_v4: Ipv4Fragments,
 }
 
 impl IpSend for TunChannelTx {
@@ -54,26 +59,15 @@ impl IpSend for TunChannelTx {
         };
 
         match ip_packet {
-            Either::Left(ipv4) => {
-                let ipv4 = if ipv4.header.fragment_offset() == 0 && !ipv4.header.more_fragments() {
-                    ipv4
-                } else if let Some(ipv4) = self.fragments_v4.assemble_ipv4_fragment(ipv4) {
-                    ipv4
-                } else {
-                    // No complete IPv4 packet was reassembled, nothing to do
-                    return Ok(());
-                };
-
-                match ipv4.try_into_udp() {
-                    Ok(udp_packet) => {
-                        self.tun_tx_v4
-                            .send(udp_packet)
-                            .await
-                            .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))?;
-                    }
-                    Err(e) => tracing::trace!("Invalid UDP packet: {e:?}"),
+            Either::Left(ipv4) => match ipv4.try_into_udp() {
+                Ok(udp_packet) => {
+                    self.tun_tx_v4
+                        .send(udp_packet)
+                        .await
+                        .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))?;
                 }
-            }
+                Err(e) => tracing::trace!("Invalid UDP packet: {e:?}"),
+            },
             Either::Right(ipv6) => match ipv6.try_into_udp() {
                 Ok(udp_packet) => {
                     self.tun_tx_v6
@@ -86,6 +80,48 @@ impl IpSend for TunChannelTx {
         }
 
         Ok(())
+    }
+}
+
+impl<Send> Ipv4Defrag<Send> {
+    pub fn new(inner: Send) -> Self {
+        Ipv4Defrag {
+            inner,
+            fragments_v4: Default::default(),
+        }
+    }
+
+    /// Take the inner [`IpSend`].
+    ///
+    /// Any packets which are in the process of being defragmented will be dropped.
+    pub fn into_inner(self) -> Send {
+        self.inner
+    }
+}
+
+impl<Send: IpSend> IpSend for Ipv4Defrag<Send> {
+    async fn send(&mut self, packet: Packet<Ip>) -> io::Result<()> {
+        let ip_packet = match packet.try_into_ipvx() {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::trace!("Invalid IP packet: {e:?}");
+                return Ok(());
+            }
+        };
+
+        match ip_packet {
+            Either::Left(ipv4) => {
+                if ipv4.header.fragment_offset() == 0 && !ipv4.header.more_fragments() {
+                    self.inner.send(ipv4.into()).await
+                } else if let Some(ipv4) = self.fragments_v4.assemble_ipv4_fragment(ipv4) {
+                    self.inner.send(ipv4.into()).await
+                } else {
+                    // No complete IPv4 packet was reassembled, nothing to do
+                    Ok(())
+                }
+            }
+            Either::Right(ipv6) => self.inner.send(ipv6.into()).await,
+        }
     }
 }
 
